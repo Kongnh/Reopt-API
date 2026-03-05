@@ -105,8 +105,8 @@ custom_table_example = [
     {
         "label": "Results URL",
         "key": "url",
-        "bau_value": lambda df: f"https://custom-table-download-reopt-stage.its.nrel.gov/tool/results/"+safe_get(df, "webtool_uuid"),
-        "scenario_value": lambda df: f"https://custom-table-download-reopt-stage.its.nrel.gov/tool/results/"+safe_get(df, "webtool_uuid")
+        "bau_value": lambda df: f"https://reopt.nrel.gov/tool/results/"+safe_get(df, "webtool_uuid"),
+        "scenario_value": lambda df: f"https://reopt.nrel.gov/tool/results/"+safe_get(df, "webtool_uuid")
     }
     ]
 
