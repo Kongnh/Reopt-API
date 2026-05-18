@@ -9,7 +9,8 @@ Last updated: 2026-05-18
 - Remote: `origin` -> `https://github.com/Kongnh/Reopt-API.git`
 - Local branch was 2 commits ahead of `origin/master` before adding this handoff work.
 - Local Python environment is not ready: `python manage.py check` failed because `django` is not installed.
-- Docker is the recommended path for this repository.
+- Docker stack is running for local development.
+- Local ignored `keys.py` was created from `keys.py.template` so Django/Celery can import settings.
 
 ## Active Product Direction
 
@@ -27,8 +28,8 @@ Next recommended product task:
 
 ## Todo
 
-- [ ] Start Docker stack with `docker-compose up -d`.
-- [ ] Verify app health with a Django check inside the container.
+- [x] Start Docker stack with `docker-compose up -d`.
+- [x] Verify app health with a Django check inside the container.
 - [ ] Implement Phase 1 EVN tariff builder.
 - [ ] Add focused tariff unit tests.
 - [ ] Add an example Vietnam job submission script after the tariff builder is stable.
@@ -48,6 +49,7 @@ Before ending a future working session:
 
 ## Latest Session Notes
 
-- Converted the Claude-oriented repo guidance into Codex-compatible `AGENTS.md`.
-- Added this persistent handoff file so future Codex sessions can resume from the same context.
-- No application code was changed in this session.
+- Started Docker Desktop-backed stack: `db`, `redis`, `julia`, `celery`, and `django` are running.
+- Built missing local `base-api-image:latest` via `docker-compose build celery`.
+- Created ignored local `keys.py` from `keys.py.template` to unblock settings import.
+- Verified Django health with `docker-compose exec -T django python manage.py check`; result: `System check identified no issues (0 silenced).`
