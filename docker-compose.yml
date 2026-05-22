@@ -39,7 +39,7 @@ services:
     image: base-api-image:latest
     command:  >
       "python manage.py migrate
-      && /opt/reopt/bin/wait-for-it.bash -t 0 julia:8081 -- python manage.py runserver 0.0.0.0:8000"
+      && python manage.py runserver 0.0.0.0:8000"
     environment:
       - APP_ENV=local
       - SQL_HOST=db

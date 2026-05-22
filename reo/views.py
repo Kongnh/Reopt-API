@@ -216,7 +216,7 @@ def emissions_profile(request):
         debug_msg = "exc_type: {}; exc_value: {}; exc_traceback: {}".format(exc_type, exc_value.args[0],
                                                                             tb.format_tb(exc_traceback))
         log.error(debug_msg)
-        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nrel.gov if problems persist."}, status=500)
+        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nlr.gov if problems persist."}, status=500)
 
 
 def easiur_costs(request):
@@ -262,7 +262,7 @@ def easiur_costs(request):
         debug_msg = "exc_type: {}; exc_value: {}; exc_traceback: {}".format(exc_type, exc_value.args[0],
                                                                             tb.format_tb(exc_traceback))
         log.error(debug_msg)
-        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nrel.gov if problems persist."}, status=500)
+        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nlr.gov if problems persist."}, status=500)
 
 
 def fuel_emissions_rates(request):
@@ -303,7 +303,7 @@ def fuel_emissions_rates(request):
         debug_msg = "exc_type: {}; exc_value: {}; exc_traceback: {}".format(exc_type, exc_value.args[0],
                                                                             tb.format_tb(exc_traceback))
         log.error(debug_msg)
-        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nrel.gov if problems persist."}, status=500)
+        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nlr.gov if problems persist."}, status=500)
 
 
 def simulated_load(request):
@@ -642,7 +642,7 @@ def simulated_load(request):
         debug_msg = "exc_type: {}; exc_value: {}; exc_traceback: {}".format(exc_type, exc_value.args[0],
                                                                             tb.format_tb(exc_traceback))
         log.error(debug_msg)
-        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nrel.gov if problems persist."}, status=500)
+        return JsonResponse({"Error": "Unexpected Error. Please check your input parameters and contact reopt@nlr.gov if problems persist."}, status=500)
 
 
 def generator_efficiency(request):

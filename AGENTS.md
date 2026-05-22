@@ -39,14 +39,17 @@ These rules apply to all work in this repository.
 ## Session Continuity
 
 - At the start of a new session, read `CODEX_SESSION.md`, `roadmap.md`, and this file before choosing next work.
+- Read `SESSION_NOTES.md` when detailed prior-session context is needed, especially after long work sessions or when resuming partially completed tasks.
 - Treat `CODEX_SESSION.md` as the durable handoff file for current status, active todo items, blockers, and verification notes.
-- At the end of a working session, update `CODEX_SESSION.md` with:
+- At the end of every working session, automatically update `CODEX_SESSION.md` with:
   - what changed,
   - current git status or commit hash,
   - tests or checks run,
   - remaining todo items,
   - any blockers or assumptions.
+- At the end of every working session, automatically update `SESSION_NOTES.md` with detailed session notes needed to preserve context beyond the concise handoff.
 - Keep `CODEX_SESSION.md` concise and current. Do not let stale completed work remain in the active todo list.
+- Keep detailed chronological notes in `SESSION_NOTES.md` instead of expanding `CODEX_SESSION.md`.
 
 ## Project Overview
 

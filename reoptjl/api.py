@@ -130,7 +130,7 @@ class Job(ModelResource):
             if bundle.request.META.get('HTTP_X_API_USER_ID', '') == '6f09c972-8414-469b-b3e8-a78398874103':
                 bundle.data['APIMeta']['job_type'] = 'REopt Web Tool'
             else:
-                bundle.data['APIMeta']['job_type'] = 'developer.nrel.gov'
+                bundle.data['APIMeta']['job_type'] = 'developer.nlr.gov'
         else:
             bundle.data['APIMeta']['job_type'] = 'Internal NREL'
 

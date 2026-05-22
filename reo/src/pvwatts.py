@@ -38,7 +38,7 @@ def raise_pvwatts_exception(message):
 class PVWatts:
 
     def __init__(self,
-                 url_base="https://developer.nrel.gov/api/pvwatts/v6.json",
+                 url_base="https://developer.nlr.gov/api/pvwatts/v6.json",
                  key=keys.developer_nrel_gov_key,
                  azimuth=180,
                  system_capacity=1,

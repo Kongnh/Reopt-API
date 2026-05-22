@@ -170,7 +170,7 @@ class APIMeta(BaseModel, models.Model):
                    "one REopt API Scenario is created).")
     )
     job_type = models.TextField(
-        default='developer.nrel.gov'
+        default='developer.nlr.gov'
     )
     status = models.TextField(blank=True)
     created = models.DateTimeField(auto_now_add=True)

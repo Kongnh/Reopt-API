@@ -21,10 +21,10 @@ References:
 Requires a configuration file at ~/.hscfg with contents like so:
 
 # HDFCloud configuration file
--hs_endpoint = https://developer.nrel.gov/api/hsds/ +v
+-hs_endpoint = https://developer.nlr.gov/api/hsds/ +v
 -hs_username = None 
 -hs_password = None 
--hs_api_key = <YOUR-API-KEY>  # from developer.nrel.gov
+-hs_api_key = <YOUR-API-KEY>  # from developer.nlr.gov
 
 
 The h5pyd Files is indexed on [t, y, x], where:
@@ -120,7 +120,7 @@ def get_data(url, filename):
 
 def get_wind_resource_developer_api(filename, year, latitude, longitude, hub_height_meters):
 
-    url = 'https://developer.nrel.gov/api/wind-toolkit/v2/wind/wtk-srw-download?year={year}&lat={lat}&lon={lon}&hubheight={hubheight}&api_key={api_key}'.format(
+    url = 'https://developer.nlr.gov/api/wind-toolkit/v2/wind/wtk-srw-download?year={year}&lat={lat}&lon={lon}&hubheight={hubheight}&api_key={api_key}'.format(
         year=year, lat=latitude, lon=longitude, hubheight=hub_height_meters, api_key=developer_nrel_gov_key)
 
     success = get_data(url, filename=filename)

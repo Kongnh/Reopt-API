@@ -23,6 +23,7 @@ def build_example_payload(tou_schedule="current"):
             "longitude": 106.6297,
         },
         "ElectricLoad": {
+            "year": 2025,
             "loads_kw": [500.0] * 8760,
         },
         "ElectricTariff": tariff,

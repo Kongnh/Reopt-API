@@ -7,7 +7,7 @@ DotEnv.load!()
 
 const test_nrel_developer_api_key = ENV["NREL_DEVELOPER_API_KEY"]
 
-ENV["NREL_DEVELOPER_EMAIL"] = "reopt@nrel.gov"
+ENV["NREL_DEVELOPER_EMAIL"] = get(ENV, "NREL_DEVELOPER_EMAIL", "conghn89@gmail.com")
 
 include("os_solvers.jl")
 

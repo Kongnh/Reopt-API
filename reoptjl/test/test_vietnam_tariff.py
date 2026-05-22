@@ -116,6 +116,7 @@ class VietnamEvnTariffTests(TestCase):
         self.assertEqual(len(payload["ElectricTariff"]["tou_energy_rates_per_kwh"]), 8760)
         self.assertEqual(payload["ElectricTariff"]["monthly_demand_rates"], [])
         self.assertEqual(payload["Settings"]["time_steps_per_hour"], 1)
+        self.assertEqual(payload["ElectricLoad"]["year"], 2025)
 
     def test_example_payload_accepts_decision_963_schedule_for_case_studies(self):
         payload = build_example_payload(tou_schedule="decision_963")

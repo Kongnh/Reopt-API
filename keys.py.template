@@ -1,7 +1,7 @@
 
 rollbar_access_token = 'test'
 
-#get your individual key from here: https://developer.nrel.gov/docs/api-key/ and replace the DEMO_KEY with that
+# get your individual key from here: https://developer.nlr.gov/docs/api-key/ and replace DEMO_KEY with that
 pvwatts_api_key = 'DEMO_KEY'
 developer_nrel_gov_key = 'DEMO_KEY'
 

@@ -469,7 +469,7 @@ class ValidateNestedInput:
         self.off_grid_flag = False
         if type(input_dict) is not dict:
             self.input_data_errors.append(("POST must contain a valid JSON formatted according to format described in "
-                                           "https://developer.nrel.gov/docs/energy-optimization/reopt-v1/"))
+                                           "https://developer.nlr.gov/docs/energy-optimization/reopt-v1/"))
         else:        
             self.input_dict['Scenario'] = input_dict.get('Scenario') or {}
             self.off_grid_flag = input_dict['Scenario'].get('off_grid_flag') or False
