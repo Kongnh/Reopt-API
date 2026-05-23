@@ -9,6 +9,23 @@ At the end of every working session, append or update the latest section here wi
 - Updated `AGENTS.md` so future agents read this file when context is needed and update it during session closeout.
 - Updated `CODEX_SESSION.md` session-close guidance to point detailed notes here.
 
+## 2026-05-22 - Phase 1 Acceptance Gate Closeout
+
+- Confirmed Docker Desktop was running and started the full Compose stack with `docker-compose up -d`.
+- Verified running services with `docker-compose ps`: `db`, `redis`, `julia`, `celery`, and `django` were up.
+- Verified Django health with `docker-compose exec -T django python manage.py check`; result: `System check identified no issues (0 silenced).`
+- The browser result page for `c9da7aa4-f544-425b-b0a0-ebb36e11132d` looked blank, but `Invoke-WebRequest` showed HTTP 200 with a large JSON body and the database later showed status `optimal`.
+- Checked Celery/Julia logs while debugging the apparent blank browser page. Julia solved the submitted jobs with `termination_status(m) = OPTIMAL`; Celery task results were `SUCCESS`.
+- Retrieved latest tariff output rows from Django:
+  - `current`: run UUID `0ee531dc-625f-416f-a1dc-44e1671572d4`, status `optimal`, `year_one_bill_before_tax_bau=345975.02`, `year_one_energy_cost_before_tax_bau=345975.02`, `year_one_demand_cost_before_tax_bau=0.0`.
+  - `decision_963`: run UUID `c9da7aa4-f544-425b-b0a0-ebb36e11132d`, status `optimal`, `year_one_bill_before_tax_bau=345975.02`, `year_one_energy_cost_before_tax_bau=345975.02`, `year_one_demand_cost_before_tax_bau=0.0`.
+- Ran the manual EVN baseline calculation inside the Django container using `build_example_payload(tou_schedule=...)`:
+  - Formula: `sum(hourly_load_kw * tou_energy_rate_per_kwh)`.
+  - `current`: manual total `345975.02`, REopt BAU bill `345975.02`, percent error `0.0%`, acceptance `True`.
+  - `decision_963`: manual total `345975.02`, REopt BAU bill `345975.02`, percent error `0.0%`, acceptance `True`.
+- Phase 1 acceptance gate is complete for the current example industrial load; next recommended work is Phase 2 Vietnam pro forma in a separate `proforma_vietnam/` module.
+- Current git status before this handoff update: clean working tree, branch `master` was 3 commits ahead of `origin/master`, latest commit `e47c94ec Split session notes into dedicated handoff file`.
+
 ## 2026-05-18 - Latest Session Notes
 
 - Started Docker Desktop-backed stack: `db`, `redis`, `julia`, `celery`, and `django` are running.
