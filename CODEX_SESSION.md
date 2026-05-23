@@ -1,14 +1,15 @@
 # Codex Session Handoff
 
-Last updated: 2026-05-22
+Last updated: 2026-05-23
 
 ## Current State
 
 - Repository: `C:\Users\kongn\Pictures\CodeProject\Reopt API\REopt_API`
 - Branch: `master`
 - Remote: `origin` -> `https://github.com/Kongnh/Reopt-API.git`
-- Local branch is 3 commits ahead of `origin/master`.
-- Latest commit: `e47c94ec Split session notes into dedicated handoff file`.
+- Local branch is 4 commits ahead of `origin/master`.
+- Latest commit: `4d2a2225 Update session handoff with phase 1 acceptance`.
+- Working tree has uncommitted Phase 2 additions under `proforma_vietnam/`.
 - Local Python environment is not ready: `python manage.py check` failed because `django` is not installed.
 - Docker stack is running for local development.
 - Local ignored `keys.py` was created from `keys.py.template` so Django/Celery can import settings.
@@ -16,6 +17,11 @@ Last updated: 2026-05-22
   - `current` run UUID `0ee531dc-625f-416f-a1dc-44e1671572d4`, status `optimal`, REopt BAU bill `345975.02`, manual bill `345975.02`, error `0.0%`.
   - `decision_963` run UUID `c9da7aa4-f544-425b-b0a0-ebb36e11132d`, status `optimal`, REopt BAU bill `345975.02`, manual bill `345975.02`, error `0.0%`.
 - Detailed chronological session notes now live in `SESSION_NOTES.md`.
+- Phase 2 first slice is started:
+  - Added standalone Vietnam tax model constants and helpers in `proforma_vietnam/tax_model.py`.
+  - PV straight-line depreciation uses 20 years per user correction.
+  - BESS straight-line depreciation uses 8 years.
+  - CIT schedule tests cover 4-year exemption, 9-year reduced 10% effective rate, and standard 20% rate thereafter.
 
 ## Active Product Direction
 
@@ -23,8 +29,8 @@ Use `roadmap.md` as the implementation source of truth.
 
 Next recommended product task:
 
-1. Begin Phase 2 Vietnam pro forma in a separate `proforma_vietnam/` module.
-2. Start with focused unit tests for Vietnam CIT holiday/reduced-rate logic and straight-line depreciation.
+1. Continue Phase 2 Vietnam pro forma in the separate `proforma_vietnam/` module.
+2. Add the next `cash_flow.py` slice using the tested tax/depreciation helpers.
 3. Add a reusable end-to-end tariff acceptance script only if repeated manual acceptance checks become necessary.
 
 ## Todo
@@ -36,7 +42,9 @@ Next recommended product task:
 - [x] Add an example Vietnam job submission script after the tariff builder is stable.
 - [x] Run end-to-end Vietnam job submissions using both `tou_schedule="current"` and `tou_schedule="decision_963"`.
 - [x] Compare REopt baseline annual electricity cost against manual EVN tariff calculations for both TOU structures.
-- [ ] Begin Phase 2 Vietnam pro forma in `proforma_vietnam/`.
+- [x] Begin Phase 2 Vietnam pro forma in `proforma_vietnam/`.
+- [x] Add focused unit tests for Vietnam CIT holiday/reduced-rate logic and straight-line depreciation.
+- [ ] Add Phase 2 cash flow DCF module using VND base currency, EVN escalation, debt service assumptions, and tested tax schedule.
 - [ ] Defer DPPA settlement, loss factors, and Julia changes until Phase 3 or an explicit roadmap change.
 
 ## Session Close Procedure

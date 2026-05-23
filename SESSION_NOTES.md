@@ -3,6 +3,29 @@
 Use this file for detailed working-session notes that would make `CODEX_SESSION.md` too long.
 At the end of every working session, append or update the latest section here with files changed, checks run, blockers, assumptions, and any context needed to resume.
 
+## 2026-05-23 - Phase 2 Vietnam Tax Model Start
+
+- Started Phase 2 Vietnam pro forma work in a new standalone `proforma_vietnam/` package.
+- Added `proforma_vietnam/tax_model.py` with:
+  - Standard Vietnam CIT rate constant: 20%.
+  - CIT holiday: 4 years exempt.
+  - CIT reduced period: 9 years at 50% of the standard rate, effective 10%.
+  - PV straight-line depreciation period: 20 years, per user correction on 2026-05-23.
+  - BESS straight-line depreciation period: 8 years.
+  - `calculate_cit(...)` and `straight_line_depreciation_schedule(...)` pure helpers.
+- Added `proforma_vietnam/tests/test_tax_model.py` covering:
+  - 25-year CIT sequence for constant taxable income.
+  - No CIT on negative or zero taxable income.
+  - PV 20-year straight-line depreciation with zero depreciation after year 20.
+  - BESS 8-year straight-line depreciation with zero depreciation after year 8.
+- TDD evidence:
+  - Red run: `python -m unittest proforma_vietnam.tests.test_tax_model` failed with `ModuleNotFoundError: No module named 'proforma_vietnam.tax_model'`.
+  - Green local run: `python -m unittest proforma_vietnam.tests.test_tax_model` passed, 4 tests.
+  - Green Docker unittest run: `docker-compose run --rm --entrypoint python django -m unittest proforma_vietnam.tests.test_tax_model` passed, 4 tests.
+  - Green Docker Django run: `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam.tests.test_tax_model -v 2` passed, 4 tests, `System check identified no issues (0 silenced).`
+- Current git state after this work: branch `master` is 4 commits ahead of `origin/master`; `proforma_vietnam/`, `CODEX_SESSION.md`, and `SESSION_NOTES.md` have uncommitted changes.
+- Next recommended work: add `proforma_vietnam/cash_flow.py` and tests for 25-year VND DCF, EVN escalation, debt service assumptions, and use of the tested CIT/depreciation helpers.
+
 ## 2026-05-22 - Session Notes Split
 
 - Moved the detailed latest session notes out of `CODEX_SESSION.md` into this dedicated file.
