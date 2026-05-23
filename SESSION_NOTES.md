@@ -26,6 +26,20 @@ At the end of every working session, append or update the latest section here wi
 - Current git state after this work: branch `master` is 4 commits ahead of `origin/master`; `proforma_vietnam/`, `CODEX_SESSION.md`, and `SESSION_NOTES.md` have uncommitted changes.
 - Next recommended work: add `proforma_vietnam/cash_flow.py` and tests for 25-year VND DCF, EVN escalation, debt service assumptions, and use of the tested CIT/depreciation helpers.
 
+## 2026-05-23 - Vietnam ESCO Contract Model Notes
+
+- User clarified that the Vietnam pro forma should be a third-party investment model where the offtaker signs an ESCO contract covering energy offtake and peak shaving service.
+- Paused `cash_flow.py` implementation until the commercial deal structure is discussed in more detail.
+- Added `proforma_vietnam/ESCO_CONTRACT_MODEL_NOTES.md` as a discussion anchor for a separate conversation.
+- Captured that existing REopt third-party ownership is a fixed annualized host payment / finance structure, not a detailed tariff-contract model.
+- Captured open design questions for:
+  - energy offtake pricing: EVN discount, fixed VND/kWh, or hybrid escalation,
+  - peak shaving benefit sharing,
+  - energy arbitrage sharing,
+  - treatment of grid charging versus solar charging,
+  - minimum offtaker savings and ESCO target equity IRR.
+- Next recommended work: discuss and finalize these assumptions before adding `proforma_vietnam/cash_flow.py`.
+
 ## 2026-05-22 - Session Notes Split
 
 - Moved the detailed latest session notes out of `CODEX_SESSION.md` into this dedicated file.
