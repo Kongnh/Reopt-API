@@ -73,7 +73,7 @@ class ERPMeta(BaseModel, models.Model):
         help_text="The unique ID of a REopt optimization run from which to load inputs."
     )
     job_type = models.TextField(
-        default='developer.nrel.gov'
+        default='developer.nlr.gov'
     )
     status = models.TextField(
         blank=True,

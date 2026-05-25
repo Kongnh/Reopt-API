@@ -61,7 +61,7 @@ def get_conic_coords(lat, lng):
     """
     Convert latitude, longitude into integer values for wind tool kit database.
     Modified from "indicesForCoord" in https://github.com/NREL/hsds-examples/blob/master/notebooks/01_introduction.ipynb
-    Questions? Perr-Sauer, Jordan <Jordan.Perr-Sauer@nrel.gov>
+    Questions? Perr-Sauer, Jordan <Jordan.Perr-Sauer@nlr.gov>
     :param db_conn: h5pyd.File, database connection
     :param latitude:
     :param longitude:

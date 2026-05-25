@@ -5,7 +5,7 @@ Below are guidelines for making contributions to REopt.
 
 
 ### I don't want to read this whole thing I just have a question!!!
-Please do not create an "issue" if you have a question. You might find answers to general questions on our [REopt-API-Analysis Discussion Board](https://github.com/NREL/REopt-API-Analysis/discussions/) or [our web site](https://reopt.nrel.gov/) and you can reach us at [reopt@nrel.gov](mailto:reopt@nrel.gov). 
+Please do not create an "issue" if you have a question. You might find answers to general questions on our [REopt-API-Analysis Discussion Board](https://github.com/NREL/REopt-API-Analysis/discussions/) or [our web site](https://reopt.nrel.gov/) and you can reach us at [reopt@nlr.gov](mailto:reopt@nlr.gov).
 
 ## How Can I Contribute?
 

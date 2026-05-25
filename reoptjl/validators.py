@@ -666,7 +666,7 @@ def lat_lon_in_windtoolkit(lat, lon):
     """
     Convert latitude, longitude into integer values for wind tool kit database.
     Modified from "indicesForCoord" in https://github.com/NREL/hsds-examples/blob/master/notebooks/01_introduction.ipynb
-    Questions? Perr-Sauer, Jordan <Jordan.Perr-Sauer@nrel.gov>
+    Questions? Perr-Sauer, Jordan <Jordan.Perr-Sauer@nlr.gov>
     """
     projstring = """+proj=lcc +lat_1=30 +lat_2=60 
                     +lat_0=38.47240422490422 +lon_0=-96.0 

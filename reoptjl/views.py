@@ -30,6 +30,8 @@ from datetime import datetime
 
 from reoptjl.custom_table_helpers import flatten_dict, clean_data_dict, sum_vectors, colnum_string
 from reoptjl.custom_table_config import *
+from proforma_vietnam.esco_pro_forma import calculate_esco_pro_forma_from_reopt_results
+from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
 import xlsxwriter
 from collections import defaultdict
@@ -382,7 +384,48 @@ def results(request, run_uuid):
     if meta.status == "error":
         return JsonResponse(r, status=400)
 
+    if _wants_vietnam_proforma(request):
+        return _vietnam_proforma_response(request, run_uuid, r)
+
     return JsonResponse(r)
+
+
+def _wants_vietnam_proforma(request):
+    return request.GET.get("vietnam_proforma", "").lower() in ["1", "true", "xlsx"]
+
+
+def _vietnam_proforma_response(request, run_uuid, reopt_results):
+    try:
+        esco_energy_discount_fraction = float(request.GET["esco_energy_discount_fraction"])
+    except KeyError:
+        return JsonResponse(
+            make_error_resp("esco_energy_discount_fraction is required for Vietnam pro forma XLSX downloads."),
+            status=400,
+        )
+    except ValueError:
+        return JsonResponse(
+            make_error_resp("esco_energy_discount_fraction must be a number."),
+            status=400,
+        )
+
+    assumptions = {
+        "esco_energy_discount_fraction": esco_energy_discount_fraction,
+    }
+    cash_flow_result = calculate_esco_pro_forma_from_reopt_results(
+        reopt_results,
+        esco_energy_discount_fraction=esco_energy_discount_fraction,
+    )
+    workbook = build_vietnam_esco_workbook(cash_flow_result, assumptions=assumptions)
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = f'attachment; filename="vietnam_proforma_{run_uuid}.xlsx"'
+    return response
 
 def peak_load_outage_times(request):
     try:

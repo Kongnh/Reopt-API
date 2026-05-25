@@ -16,6 +16,7 @@ ENV XPRESS_JL_SKIP_LIB_CHECK=True
 WORKDIR /opt/julia_src
 COPY . .
 RUN julia --project=/opt/julia_src -e 'import Pkg; Pkg.instantiate();'
+RUN find /root/.julia/packages/REopt -type f -name '*.jl' -exec sed -i 's/developer\.nrel\.gov/developer.nlr.gov/g' {} +
 RUN julia --project=/opt/julia_src precompile.jl
 EXPOSE 8081
 
