@@ -3,6 +3,113 @@
 Use this file for detailed working-session notes that would make `CODEX_SESSION.md` too long.
 At the end of every working session, append or update the latest section here with files changed, checks run, blockers, assumptions, and any context needed to resume.
 
+## 2026-05-25 - Phase 2 Vietnam XLSX Workbook Builder
+
+- Resumed from `CODEX_SESSION.md`, `roadmap.md`, `AGENTS.md`, and the latest Phase 2 notes.
+- Implemented `proforma_vietnam/xlsx_builder.py` as a standalone `openpyxl` workbook builder.
+- Added `proforma_vietnam/tests/test_xlsx_builder.py` covering:
+  - required sheet order: Summary, Cash Flow, Tax Schedule, Debt Service, Assumptions,
+  - key Summary values: total capex, debt principal, equity investment, NPV, and equity IRR,
+  - representative annual values in Cash Flow, Tax Schedule, and Debt Service,
+  - passed-through Assumptions values.
+- Workbook behavior:
+  - Accepts the dictionary returned by `calculate_vietnam_esco_cash_flow(...)`.
+  - Writes summary metrics from `result["summary"]`.
+  - Writes annual cash-flow rows from `result["annual_cash_flows"]`.
+  - Splits tax and debt views into dedicated sheets using the same annual row data.
+  - Keeps the builder independent from Django, V3 API routing, and response serialization.
+- TDD evidence:
+  - Red run: `python -m unittest proforma_vietnam.tests.test_xlsx_builder` failed with `ModuleNotFoundError: No module named 'proforma_vietnam.xlsx_builder'`.
+  - First green attempt caught one bad test assertion around the Cash Flow column order; corrected the assertion to match the declared workbook columns.
+  - Green focused run: `python -m unittest proforma_vietnam.tests.test_xlsx_builder` passed, 4 tests.
+  - Green local suite: `python -m unittest proforma_vietnam.tests.test_tax_model proforma_vietnam.tests.test_cash_flow proforma_vietnam.tests.test_esco_pro_forma proforma_vietnam.tests.test_xlsx_builder` passed, 15 tests.
+  - Green Docker/Django run: `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam -v 2` passed, 15 tests, `System check identified no issues (0 silenced).`
+- Current git state after this work: branch `master` remains at commit `268af7be`; `CODEX_SESSION.md`, `SESSION_NOTES.md`, `proforma_vietnam/cash_flow.py`, `proforma_vietnam/esco_pro_forma.py`, `proforma_vietnam/xlsx_builder.py`, and the three Phase 2 test files have uncommitted changes.
+- Next recommended work:
+  - Add a V3 Vietnam pro forma XLSX download endpoint or query-param flow.
+  - Add an API integration test for the XLSX response.
+  - Run one actual Vietnam tariff payload through the endpoint/workbook before starting the hand-built workbook comparison.
+
+## 2026-05-25 - Phase 2 Vietnam REopt Results Adapter
+
+- Resumed from `CODEX_SESSION.md`, `roadmap.md`, `AGENTS.md`, and the latest `SESSION_NOTES.md` entry.
+- Implemented `proforma_vietnam/esco_pro_forma.py` as the Phase 2 adapter from V3 `/results` dictionaries into `calculate_vietnam_esco_cash_flow(...)`.
+- Added `proforma_vietnam/tests/test_esco_pro_forma.py` with a small fake V3 result payload.
+- Adapter behavior:
+  - Reads 8760 EVN energy rates from `inputs.ElectricTariff.tou_energy_rates_per_kwh`.
+  - Reads BAU/optimized year-one bills and demand charges from `outputs.ElectricTariff`.
+  - Reads PV direct-to-load series from `outputs.PV.electric_to_load_series_kw`.
+  - Includes `outputs.ElectricStorage.storage_to_load_series_kw` in ESCO energy only when `inputs.ElectricStorage.can_grid_charge` is explicitly false.
+  - Keeps grid-charging arbitrage disabled because the available V3 payload does not expose grid-charged battery discharge attribution.
+  - Uses PV output size and installed cost for PV capex, storage output initial capital cost when available, and year-one O&M from `outputs.Financial.year_one_om_costs_before_tax`.
+- TDD evidence:
+  - Red run: `python -m unittest proforma_vietnam.tests.test_esco_pro_forma` failed with `ModuleNotFoundError: No module named 'proforma_vietnam.esco_pro_forma'`.
+  - Green focused run: `python -m unittest proforma_vietnam.tests.test_esco_pro_forma` passed, 2 tests.
+  - Green local suite: `python -m unittest proforma_vietnam.tests.test_tax_model proforma_vietnam.tests.test_cash_flow proforma_vietnam.tests.test_esco_pro_forma` passed, 11 tests.
+  - Green Docker/Django run: `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam -v 2` passed, 11 tests, `System check identified no issues (0 silenced).`
+- Representative V3 payload inspection:
+  - Started Django with `docker-compose up -d django`.
+  - `Invoke-WebRequest` closed unexpectedly on the large response, but `curl.exe` successfully saved the JSON response for run UUID `c9da7aa4-f544-425b-b0a0-ebb36e11132d`.
+  - Confirmed output keys: `Financial`, `ElectricTariff`, `ElectricUtility`, `ElectricLoad`, `Site`, `PV`, `ElectricStorage`.
+  - Confirmed relevant shapes: 8760 `inputs.ElectricTariff.tou_energy_rates_per_kwh`, 8760 `outputs.PV.electric_to_load_series_kw`, empty `outputs.ElectricStorage.storage_to_load_series_kw`, and `inputs.ElectricStorage.can_grid_charge=true`.
+  - Adapter smoke call against the saved payload completed without shape errors and returned zero `esco_grid_arbitrage_revenue_vnd`.
+- Current git state after this work: branch `master` is 7 commits ahead of `origin/master`; `CODEX_SESSION.md`, `SESSION_NOTES.md`, `proforma_vietnam/cash_flow.py`, `proforma_vietnam/esco_pro_forma.py`, `proforma_vietnam/tests/test_cash_flow.py`, and `proforma_vietnam/tests/test_esco_pro_forma.py` have uncommitted changes.
+- Next recommended work:
+  - Add `proforma_vietnam/xlsx_builder.py` with Summary, Cash Flow, Tax Schedule, Debt Service, and Assumptions sheets.
+  - Add workbook tests that verify required sheets and key summary values.
+  - Keep the workbook builder independent from Django until the workbook tests are green.
+
+## 2026-05-25 - Phase 2 Vietnam Cash Flow Slice
+
+- Implemented the first standalone Vietnam ESCO DCF module in `proforma_vietnam/cash_flow.py`.
+- Added `calculate_vietnam_esco_cash_flow(...)` as a pure function that returns:
+  - annual cash-flow rows,
+  - total capex, debt principal, and equity investment,
+  - project IRR, equity IRR, NPV, average DSCR, simple payback, and ROI.
+- Formula coverage:
+  - ESCO energy revenue uses project-served PV kWh times time-specific EVN energy rates times the ESCO discount fraction.
+  - Energy revenue escalates with `evn_energy_escalation_rate`, default 4%.
+  - Demand-charge savings are `max(BAU demand charge - optimized demand charge, 0)`.
+  - Demand-charge savings escalate with `evn_capacity_escalation_rate`, default 4%.
+  - ESCO demand-savings share defaults to 80%; offtaker retained share is the remaining 20%.
+  - Grid charging remains disabled by default.
+  - When grid charging is enabled, ESCO receives 100% of positive net grid-arbitrage value by default.
+  - PV depreciation uses the existing 20-year straight-line helper; BESS depreciation uses the existing 8-year helper.
+  - CIT uses the existing Vietnam holiday/reduced-rate helper.
+  - Debt service uses a fixed annual amortizing payment with default 70% debt, 8.5% interest, and 10-year term.
+- Added `proforma_vietnam/tests/test_cash_flow.py` covering:
+  - discounted time-specific ESCO energy revenue,
+  - default 80/20 demand-charge savings split,
+  - base-case grid charging disabled behavior,
+  - optional grid-charging arbitrage settlement,
+  - investor metric outputs and Vietnam depreciation/CIT integration.
+- TDD evidence:
+  - Red run: `python -m unittest proforma_vietnam.tests.test_cash_flow` failed with `ModuleNotFoundError: No module named 'proforma_vietnam.cash_flow'`.
+  - Green local run: `python -m unittest proforma_vietnam.tests.test_cash_flow` passed, 5 tests.
+  - Green local suite: `python -m unittest proforma_vietnam.tests.test_tax_model proforma_vietnam.tests.test_cash_flow` passed, 9 tests.
+  - First Docker unittest attempt failed before tests started with Docker Desktop API error reading `base-api-image:latest`.
+  - Docker investigation showed `docker info` succeeded and `base-api-image:latest` existed; rerun passed.
+  - Green Docker unittest run: `docker-compose run --rm --entrypoint python django -m unittest proforma_vietnam.tests.test_tax_model proforma_vietnam.tests.test_cash_flow` passed, 9 tests.
+  - Green Docker Django run: `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam -v 2` passed, 9 tests, `System check identified no issues (0 silenced).`
+- Current git state after this work: branch `master` is 7 commits ahead of `origin/master`; `CODEX_SESSION.md`, `SESSION_NOTES.md`, `proforma_vietnam/cash_flow.py`, and `proforma_vietnam/tests/test_cash_flow.py` have uncommitted changes.
+- Next recommended work: review the `cash_flow.py` interface against one representative REopt result payload, then add `esco_pro_forma.py` as the adapter before starting XLSX/API integration.
+- Resume point for next session:
+  - Start in `proforma_vietnam/esco_pro_forma.py`.
+  - First read `proforma_vietnam/cash_flow.py`, `proforma_vietnam/tests/test_cash_flow.py`, and `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`.
+  - Inspect one representative V3 result payload shape before writing adapter code.
+  - Write failing adapter tests with a small fake V3 results payload, then implement the adapter.
+  - Keep grid charging disabled unless the V3 result payload clearly separates grid-charged battery discharge from PV-charged discharge.
+- Phase 2 completion order before the final real-payload evaluation:
+  1. REopt-results adapter: `proforma_vietnam/esco_pro_forma.py`.
+  2. Adapter tests: `proforma_vietnam/tests/test_esco_pro_forma.py`.
+  3. Workbook builder: `proforma_vietnam/xlsx_builder.py` with Summary, Cash Flow, Tax Schedule, Debt Service, and Assumptions sheets.
+  4. Workbook tests: verify sheets, year rows, and key summary values.
+  5. V3 Vietnam pro forma download endpoint or query-param flow.
+  6. API integration test for the XLSX response.
+  7. One actual Vietnam tariff payload run through the endpoint/workbook.
+  8. Hand-built workbook comparison within +/-1%.
+  9. Docker verification for `proforma_vietnam` and existing `proforma` tests.
+
 ## 2026-05-25 - Vietnam ESCO Contract Design Finalized
 
 - Clarified that the calculation sequence is technical optimization first, then Vietnam ESCO pro forma. ROI, IRR, NPV, DSCR, and payback are outputs, not initial sizing inputs.

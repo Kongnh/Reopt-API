@@ -1,0 +1,313 @@
+from proforma_vietnam.tax_model import (
+    BESS_DEPRECIATION_YEARS,
+    PV_DEPRECIATION_YEARS,
+    calculate_cit,
+    straight_line_depreciation_schedule,
+)
+
+
+DEFAULT_PROJECT_YEARS = 25
+DEFAULT_EVN_ENERGY_ESCALATION_RATE = 0.04
+DEFAULT_EVN_CAPACITY_ESCALATION_RATE = 0.04
+DEFAULT_ESCO_DEMAND_SAVINGS_SHARE = 0.80
+DEFAULT_ESCO_GRID_ARBITRAGE_SHARE = 1.00
+DEFAULT_DEBT_FRACTION = 0.70
+DEFAULT_DEBT_INTEREST_RATE = 0.085
+DEFAULT_DEBT_TERM_YEARS = 10
+
+
+def calculate_vietnam_esco_cash_flow(
+    project_served_pv_kwh,
+    evn_energy_rates_vnd_per_kwh,
+    bau_evn_bill_vnd,
+    optimized_evn_bill_vnd,
+    bau_demand_charge_vnd,
+    optimized_demand_charge_vnd,
+    pv_capex_vnd,
+    bess_capex_vnd,
+    annual_om_vnd,
+    esco_energy_discount_fraction,
+    other_capex_vnd=0,
+    replacement_costs_by_year=None,
+    owner_discount_rate_fraction=0.10,
+    evn_energy_escalation_rate=DEFAULT_EVN_ENERGY_ESCALATION_RATE,
+    evn_capacity_escalation_rate=DEFAULT_EVN_CAPACITY_ESCALATION_RATE,
+    esco_demand_savings_share=DEFAULT_ESCO_DEMAND_SAVINGS_SHARE,
+    grid_charging_enabled=False,
+    net_grid_arbitrage_value_vnd=0,
+    esco_grid_arbitrage_share=DEFAULT_ESCO_GRID_ARBITRAGE_SHARE,
+    debt_fraction=DEFAULT_DEBT_FRACTION,
+    debt_interest_rate_fraction=DEFAULT_DEBT_INTEREST_RATE,
+    debt_term_years=DEFAULT_DEBT_TERM_YEARS,
+    project_years=DEFAULT_PROJECT_YEARS,
+):
+    if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
+        raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
+
+    replacement_costs_by_year = replacement_costs_by_year or []
+    total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
+    debt_principal_vnd = total_capex_vnd * debt_fraction
+    equity_investment_vnd = total_capex_vnd - debt_principal_vnd
+
+    annual_debt_payment_vnd = _annual_debt_payment(
+        debt_principal_vnd,
+        debt_interest_rate_fraction,
+        debt_term_years,
+    )
+    debt_schedule = _debt_schedule(
+        debt_principal_vnd,
+        debt_interest_rate_fraction,
+        annual_debt_payment_vnd,
+        debt_term_years,
+        project_years,
+    )
+    depreciation_by_year = _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years)
+
+    base_energy_revenue_vnd = sum(
+        kwh * rate * esco_energy_discount_fraction
+        for kwh, rate in zip(project_served_pv_kwh, evn_energy_rates_vnd_per_kwh)
+    )
+    base_demand_savings_vnd = max(bau_demand_charge_vnd - optimized_demand_charge_vnd, 0)
+    base_grid_arbitrage_revenue_vnd = (
+        max(net_grid_arbitrage_value_vnd, 0) * esco_grid_arbitrage_share
+        if grid_charging_enabled
+        else 0
+    )
+
+    preliminary_rows = []
+    taxable_income_by_year = []
+
+    for year_index in range(project_years):
+        energy_multiplier = (1 + evn_energy_escalation_rate) ** year_index
+        capacity_multiplier = (1 + evn_capacity_escalation_rate) ** year_index
+
+        esco_energy_revenue_vnd = base_energy_revenue_vnd * energy_multiplier
+        demand_charge_savings_vnd = base_demand_savings_vnd * capacity_multiplier
+        esco_demand_revenue_vnd = demand_charge_savings_vnd * esco_demand_savings_share
+        esco_grid_arbitrage_revenue_vnd = base_grid_arbitrage_revenue_vnd * energy_multiplier
+        replacement_cost_vnd = _value_for_year(replacement_costs_by_year, year_index)
+
+        esco_revenue_vnd = (
+            esco_energy_revenue_vnd
+            + esco_demand_revenue_vnd
+            + esco_grid_arbitrage_revenue_vnd
+        )
+        interest_vnd = debt_schedule[year_index]["interest_vnd"]
+        taxable_income_vnd = (
+            esco_revenue_vnd
+            - annual_om_vnd
+            - replacement_cost_vnd
+            - depreciation_by_year[year_index]
+            - interest_vnd
+        )
+
+        preliminary_rows.append({
+            "year": year_index + 1,
+            "esco_energy_revenue_vnd": esco_energy_revenue_vnd,
+            "demand_charge_savings_vnd": demand_charge_savings_vnd,
+            "esco_demand_revenue_vnd": esco_demand_revenue_vnd,
+            "offtaker_demand_savings_vnd": demand_charge_savings_vnd - esco_demand_revenue_vnd,
+            "esco_grid_arbitrage_revenue_vnd": esco_grid_arbitrage_revenue_vnd,
+            "esco_revenue_vnd": esco_revenue_vnd,
+            "annual_om_vnd": annual_om_vnd,
+            "replacement_cost_vnd": replacement_cost_vnd,
+            "depreciation_vnd": depreciation_by_year[year_index],
+            "interest_vnd": interest_vnd,
+        })
+        taxable_income_by_year.append(taxable_income_vnd)
+
+    cit_by_year = calculate_cit(taxable_income_by_year)
+    annual_cash_flows = []
+    project_cash_flows = [-total_capex_vnd]
+    equity_cash_flows = [-equity_investment_vnd]
+
+    for year_index, row in enumerate(preliminary_rows):
+        debt_service_vnd = debt_schedule[year_index]["debt_service_vnd"]
+        cash_available_for_debt_service_vnd = (
+            row["esco_revenue_vnd"]
+            - row["annual_om_vnd"]
+            - row["replacement_cost_vnd"]
+            - cit_by_year[year_index]
+        )
+        equity_cash_flow_vnd = cash_available_for_debt_service_vnd - debt_service_vnd
+        optimized_evn_bill_year_vnd = optimized_evn_bill_vnd * (
+            (1 + evn_energy_escalation_rate) ** year_index
+        )
+        bau_evn_bill_year_vnd = bau_evn_bill_vnd * (
+            (1 + evn_energy_escalation_rate) ** year_index
+        )
+        offtaker_post_project_cost_vnd = (
+            optimized_evn_bill_year_vnd
+            + row["esco_energy_revenue_vnd"]
+            + row["esco_demand_revenue_vnd"]
+            + row["esco_grid_arbitrage_revenue_vnd"]
+        )
+        offtaker_savings_vnd = bau_evn_bill_year_vnd - offtaker_post_project_cost_vnd
+
+        row.update({
+            "cit_vnd": cit_by_year[year_index],
+            "debt_service_vnd": debt_service_vnd,
+            "principal_vnd": debt_schedule[year_index]["principal_vnd"],
+            "ending_debt_balance_vnd": debt_schedule[year_index]["ending_balance_vnd"],
+            "cash_available_for_debt_service_vnd": cash_available_for_debt_service_vnd,
+            "equity_cash_flow_vnd": equity_cash_flow_vnd,
+            "offtaker_post_project_cost_vnd": offtaker_post_project_cost_vnd,
+            "offtaker_savings_vnd": offtaker_savings_vnd,
+            "offtaker_savings_fraction": (
+                offtaker_savings_vnd / bau_evn_bill_year_vnd
+                if bau_evn_bill_year_vnd
+                else None
+            ),
+            "dscr": (
+                cash_available_for_debt_service_vnd / debt_service_vnd
+                if debt_service_vnd
+                else None
+            ),
+        })
+        annual_cash_flows.append(row)
+        project_cash_flows.append(cash_available_for_debt_service_vnd)
+        equity_cash_flows.append(equity_cash_flow_vnd)
+
+    summary = {
+        "total_capex_vnd": total_capex_vnd,
+        "debt_principal_vnd": debt_principal_vnd,
+        "equity_investment_vnd": equity_investment_vnd,
+        "project_irr_fraction": _irr(project_cash_flows),
+        "equity_irr_fraction": _irr(equity_cash_flows),
+        "npv_vnd": _npv(owner_discount_rate_fraction, equity_cash_flows),
+        "average_dscr": _average([
+            row["dscr"] for row in annual_cash_flows
+            if row["dscr"] is not None
+        ]),
+        "simple_payback_years": _simple_payback(equity_cash_flows),
+        "roi_fraction": (
+            sum(equity_cash_flows[1:]) / equity_investment_vnd
+            if equity_investment_vnd
+            else None
+        ),
+    }
+
+    return {
+        "annual_cash_flows": annual_cash_flows,
+        "summary": summary,
+    }
+
+
+def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years):
+    pv_depreciation = straight_line_depreciation_schedule(
+        pv_capex_vnd,
+        PV_DEPRECIATION_YEARS,
+        project_years=project_years,
+    )
+    bess_depreciation = straight_line_depreciation_schedule(
+        bess_capex_vnd,
+        BESS_DEPRECIATION_YEARS,
+        project_years=project_years,
+    )
+
+    return [
+        pv_depreciation[year] + bess_depreciation[year]
+        for year in range(project_years)
+    ]
+
+
+def _annual_debt_payment(principal, interest_rate, term_years):
+    if principal <= 0 or term_years <= 0:
+        return 0
+    if interest_rate == 0:
+        return principal / term_years
+
+    return principal * (
+        interest_rate * (1 + interest_rate) ** term_years
+    ) / (
+        (1 + interest_rate) ** term_years - 1
+    )
+
+
+def _debt_schedule(principal, interest_rate, annual_payment, term_years, project_years):
+    rows = []
+    balance = principal
+
+    for year_index in range(project_years):
+        if year_index < term_years and balance > 0:
+            interest = balance * interest_rate
+            principal_payment = min(max(annual_payment - interest, 0), balance)
+            debt_service = interest + principal_payment
+            balance -= principal_payment
+        else:
+            interest = 0
+            principal_payment = 0
+            debt_service = 0
+
+        rows.append({
+            "interest_vnd": interest,
+            "principal_vnd": principal_payment,
+            "debt_service_vnd": debt_service,
+            "ending_balance_vnd": balance,
+        })
+
+    return rows
+
+
+def _npv(discount_rate, cash_flows):
+    return sum(
+        cash_flow / ((1 + discount_rate) ** year_index)
+        for year_index, cash_flow in enumerate(cash_flows)
+    )
+
+
+def _irr(cash_flows):
+    if not any(cash_flow < 0 for cash_flow in cash_flows):
+        return None
+    if not any(cash_flow > 0 for cash_flow in cash_flows):
+        return None
+
+    low = -0.9999
+    high = 10.0
+    low_npv = _npv(low, cash_flows)
+    high_npv = _npv(high, cash_flows)
+
+    if low_npv * high_npv > 0:
+        return None
+
+    for _ in range(100):
+        midpoint = (low + high) / 2
+        midpoint_npv = _npv(midpoint, cash_flows)
+
+        if abs(midpoint_npv) < 0.000001:
+            return midpoint
+        if low_npv * midpoint_npv <= 0:
+            high = midpoint
+            high_npv = midpoint_npv
+        else:
+            low = midpoint
+            low_npv = midpoint_npv
+
+    return (low + high) / 2
+
+
+def _simple_payback(cash_flows):
+    cumulative = cash_flows[0]
+
+    if cumulative >= 0:
+        return 0
+
+    for year_index in range(1, len(cash_flows)):
+        previous_cumulative = cumulative
+        cumulative += cash_flows[year_index]
+
+        if cumulative >= 0:
+            annual_cash_flow = cash_flows[year_index]
+            if annual_cash_flow == 0:
+                return year_index
+            return (year_index - 1) + (-previous_cumulative / annual_cash_flow)
+
+    return None
+
+
+def _average(values):
+    return sum(values) / len(values) if values else None
+
+
+def _value_for_year(values, year_index):
+    return values[year_index] if year_index < len(values) else 0
