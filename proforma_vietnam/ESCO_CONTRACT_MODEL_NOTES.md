@@ -4,9 +4,11 @@ Last updated: 2026-05-23
 
 ## Purpose
 
-These notes capture the commercial model questions for the Vietnam third-party investment pro forma. They are discussion notes, not a finalized implementation spec.
+These notes capture the commercial model questions for the Vietnam third-party investment pro forma.
 
-The current Phase 2 code should not move into cash-flow implementation until this contract model is clarified.
+The finalized Phase 2 contract design is now documented in `ESCO_CONTRACT_MODEL_DESIGN.md`.
+
+The current Phase 2 code should use `ESCO_CONTRACT_MODEL_DESIGN.md` as the implementation source for the first cash-flow module.
 
 ## Existing REopt Third-Party Model
 

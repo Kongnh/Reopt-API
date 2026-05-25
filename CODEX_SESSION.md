@@ -1,6 +1,6 @@
 # Codex Session Handoff
 
-Last updated: 2026-05-23
+Last updated: 2026-05-25
 
 ## Current State
 
@@ -22,7 +22,15 @@ Last updated: 2026-05-23
   - PV straight-line depreciation uses 20 years per user correction.
   - BESS straight-line depreciation uses 8 years.
   - CIT schedule tests cover 4-year exemption, 9-year reduced 10% effective rate, and standard 20% rate thereafter.
-- Added `proforma_vietnam/ESCO_CONTRACT_MODEL_NOTES.md` to capture open third-party investment model questions before cash-flow implementation.
+- Added `proforma_vietnam/ESCO_CONTRACT_MODEL_NOTES.md` to capture third-party investment model questions before cash-flow implementation.
+- Finalized the Phase 2 Vietnam ESCO contract model in `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`.
+- Key finalized ESCO assumptions:
+  - REopt optimization happens first; ROI/IRR/NPV/DSCR/payback are pro forma outputs.
+  - ESCO energy price is a discount to the time-specific current-year EVN energy tariff.
+  - ESCO energy price is pegged back-to-back to EVN energy escalation.
+  - Demand-charge savings are calculated from REopt results and split 80% ESCO / 20% offtaker by default.
+  - Grid charging is an optional scenario switch, disabled in the base case.
+  - If grid charging is enabled, 100% of net grid-charging arbitrage value belongs to ESCO.
 
 ## Active Product Direction
 
@@ -30,8 +38,8 @@ Use `roadmap.md` as the implementation source of truth.
 
 Next recommended product task:
 
-1. Discuss and finalize the Vietnam ESCO contract model assumptions in `proforma_vietnam/ESCO_CONTRACT_MODEL_NOTES.md`.
-2. After those assumptions are agreed, add the next `cash_flow.py` slice using the tested tax/depreciation helpers.
+1. Add the next `cash_flow.py` slice using the tested tax/depreciation helpers and the finalized contract assumptions in `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`.
+2. Add focused tests for ESCO energy revenue, demand savings split, base-case grid charging disabled behavior, and optional grid-charging arbitrage settlement.
 3. Add a reusable end-to-end tariff acceptance script only if repeated manual acceptance checks become necessary.
 
 ## Todo
@@ -46,7 +54,7 @@ Next recommended product task:
 - [x] Begin Phase 2 Vietnam pro forma in `proforma_vietnam/`.
 - [x] Add focused unit tests for Vietnam CIT holiday/reduced-rate logic and straight-line depreciation.
 - [x] Document open Vietnam ESCO contract model questions before cash-flow implementation.
-- [ ] Finalize ESCO contract assumptions for energy offtake, peak shaving service, and energy arbitrage treatment.
+- [x] Finalize ESCO contract assumptions for energy offtake, peak shaving service, and energy arbitrage treatment.
 - [ ] Add Phase 2 cash flow DCF module using VND base currency, EVN escalation, debt service assumptions, tested tax schedule, and agreed ESCO contract structure.
 - [ ] Defer DPPA settlement, loss factors, and Julia changes until Phase 3 or an explicit roadmap change.
 

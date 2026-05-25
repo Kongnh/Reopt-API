@@ -3,6 +3,24 @@
 Use this file for detailed working-session notes that would make `CODEX_SESSION.md` too long.
 At the end of every working session, append or update the latest section here with files changed, checks run, blockers, assumptions, and any context needed to resume.
 
+## 2026-05-25 - Vietnam ESCO Contract Design Finalized
+
+- Clarified that the calculation sequence is technical optimization first, then Vietnam ESCO pro forma. ROI, IRR, NPV, DSCR, and payback are outputs, not initial sizing inputs.
+- User selected discount-to-EVN-tariff energy pricing:
+  - Discount applies to time-specific current-year EVN energy tariff.
+  - Discount applies to energy charge only, not demand/capacity value.
+  - ESCO tariff escalation is pegged back-to-back to EVN escalation.
+- User selected demand-charge savings handling:
+  - Demand-charge savings are calculated from REopt results.
+  - Default split is 80% ESCO / 20% offtaker.
+- User selected grid-charging handling:
+  - Grid charging is an optional scenario switch and disabled in the base case.
+  - If enabled, net grid-charging arbitrage value belongs 100% to ESCO.
+  - Grid charging cost must remain in the optimized EVN bill; ESCO receives net arbitrage value, not gross battery discharge revenue.
+- Added `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md` as the finalized design source for the next `cash_flow.py` implementation.
+- Updated `proforma_vietnam/ESCO_CONTRACT_MODEL_NOTES.md` to point to the finalized design.
+- Next recommended work: write focused cash-flow tests for ESCO energy revenue, demand savings split, grid-charging disabled base case, and optional grid-arbitrage settlement before implementing `proforma_vietnam/cash_flow.py`.
+
 ## 2026-05-23 - Phase 2 Vietnam Tax Model Start
 
 - Started Phase 2 Vietnam pro forma work in a new standalone `proforma_vietnam/` package.
