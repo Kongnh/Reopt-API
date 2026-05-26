@@ -31,6 +31,7 @@ from datetime import datetime
 from reoptjl.custom_table_helpers import flatten_dict, clean_data_dict, sum_vectors, colnum_string
 from reoptjl.custom_table_config import *
 from proforma_vietnam.esco_pro_forma import calculate_esco_pro_forma_from_reopt_results
+from proforma_vietnam.report_data import build_vietnam_report_data
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
 import xlsxwriter
@@ -415,7 +416,12 @@ def _vietnam_proforma_response(request, run_uuid, reopt_results):
         reopt_results,
         esco_energy_discount_fraction=esco_energy_discount_fraction,
     )
-    workbook = build_vietnam_esco_workbook(cash_flow_result, assumptions=assumptions)
+    report_data = build_vietnam_report_data(reopt_results, cash_flow_result)
+    workbook = build_vietnam_esco_workbook(
+        cash_flow_result,
+        assumptions=assumptions,
+        report_data=report_data,
+    )
     output = io.BytesIO()
     workbook.save(output)
     output.seek(0)

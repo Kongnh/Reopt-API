@@ -50,9 +50,15 @@ class TestVietnamProformaEndpoint(ResourceTestCaseMixin, TransactionTestCase):
             workbook.sheetnames,
             [
                 "Summary",
+                "System Sizing",
+                "Results Comparison",
+                "Annual Production",
+                "Dispatch Profile",
+                "Load Duration",
                 "Cash Flow",
                 "Tax Schedule",
                 "Debt Service",
+                "Developer Financials",
                 "Assumptions",
             ],
         )

@@ -15,9 +15,15 @@ class VietnamXlsxBuilderTests(TestCase):
             workbook.sheetnames,
             [
                 "Summary",
+                "System Sizing",
+                "Results Comparison",
+                "Annual Production",
+                "Dispatch Profile",
+                "Load Duration",
                 "Cash Flow",
                 "Tax Schedule",
                 "Debt Service",
+                "Developer Financials",
                 "Assumptions",
             ],
         )
@@ -75,6 +81,23 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertEqual(values_by_label["esco_energy_discount_fraction"], 0.9)
         self.assertEqual(values_by_label["evn_energy_escalation_rate"], 0.04)
 
+    def test_writes_report_sheets_and_charts(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(),
+            report_data=_report_data(),
+        )
+
+        self.assertEqual(workbook["System Sizing"]["A1"].value, "Metric")
+        self.assertEqual(workbook["System Sizing"]["B2"].value, 100)
+        self.assertEqual(workbook["Annual Production"]["A2"].value, "PV to Load (kWh)")
+        self.assertEqual(workbook["Dispatch Profile"]["A2"].value, 1)
+        self.assertEqual(workbook["Load Duration"]["B2"].value, 20)
+        self.assertEqual(workbook["Developer Financials"]["A2"].value, "Project IRR")
+        self.assertGreater(len(workbook["Annual Production"]._charts), 0)
+        self.assertGreater(len(workbook["Dispatch Profile"]._charts), 0)
+        self.assertGreater(len(workbook["Load Duration"]._charts), 0)
+        self.assertGreater(len(workbook["Developer Financials"]._charts), 0)
+
 
 def _cash_flow_result():
     return {
@@ -111,4 +134,58 @@ def _cash_flow_result():
                 "dscr": 2.27,
             }
         ],
+    }
+
+
+def _report_data():
+    return {
+        "system_sizing": {
+            "pv_kw": 100,
+            "battery_kw": 50,
+            "battery_kwh": 200,
+        },
+        "results_comparison": {
+            "bau_utility_bill_vnd": 100000,
+            "optimized_utility_bill_vnd": 70000,
+            "utility_bill_savings_vnd": 30000,
+            "demand_charge_savings_vnd": 8000,
+        },
+        "annual_production": {
+            "grid_to_load_kwh": 100,
+            "pv_to_load_kwh": 80,
+            "pv_to_storage_kwh": 20,
+            "storage_to_load_kwh": 15,
+            "pv_curtailed_kwh": 5,
+            "grid_to_storage_kwh": 0,
+        },
+        "dispatch_profile": [
+            {
+                "hour": 1,
+                "load_kw": 10,
+                "grid_to_load_kw": 7,
+                "pv_to_load_kw": 3,
+                "storage_to_load_kw": 0,
+                "storage_charge_kw": 1,
+            },
+            {
+                "hour": 2,
+                "load_kw": 20,
+                "grid_to_load_kw": 8,
+                "pv_to_load_kw": 4,
+                "storage_to_load_kw": 1,
+                "storage_charge_kw": 2,
+            },
+        ],
+        "load_duration": [
+            {"rank": 1, "load_kw": 20, "net_load_kw": 8},
+            {"rank": 2, "load_kw": 10, "net_load_kw": 7},
+        ],
+        "developer_financial_performance": {
+            "project_irr_fraction": 0.12,
+            "equity_irr_fraction": 0.14,
+            "npv_vnd": 123456,
+            "average_dscr": 1.3,
+            "simple_payback_years": 7.5,
+            "roi_fraction": 1.8,
+        },
     }

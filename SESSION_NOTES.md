@@ -3,6 +3,105 @@
 Use this file for detailed working-session notes that would make `CODEX_SESSION.md` too long.
 At the end of every working session, append or update the latest section here with files changed, checks run, blockers, assumptions, and any context needed to resume.
 
+## 2026-05-26 - Diff Review, Verification, and Commit
+
+- User asked to review the current uncommitted backend-first Vietnam case-builder/report-generator diff, rerun focused verification, and commit the slice if clean.
+- Reviewed changed areas:
+  - `proforma_vietnam/case_builder.py`
+  - `proforma_vietnam/report_data.py`
+  - `proforma_vietnam/run_case.py`
+  - `proforma_vietnam/xlsx_builder.py`
+  - `reoptjl/views.py`
+  - related tests and handoff notes.
+- Review finding:
+  - The V3 Vietnam pro forma XLSX endpoint requires `esco_energy_discount_fraction`, but the case builder could previously produce assumptions with that value missing.
+  - Added a narrow validation in `proforma_vietnam/case_builder.py` to require `esco_contract.esco_energy_discount_fraction`.
+  - Added `test_requires_esco_energy_discount_for_report_download` in `proforma_vietnam/tests/test_case_builder.py`.
+- Verification run:
+  - `python -m unittest discover -s proforma_vietnam\tests -p "test_*.py"` passed, 22 tests.
+  - First `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam -v 2` attempt failed before tests because Docker Desktop's Linux engine pipe was unavailable.
+  - `docker info` confirmed the Docker client existed but the server was offline.
+  - Started Docker Desktop and reran `docker info`; server became available.
+  - `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam -v 2` passed, 22 tests, with `System check identified no issues (0 silenced).`
+  - `docker-compose run --rm --entrypoint python django manage.py test reoptjl.test.test_vietnam_proforma_endpoint -v 2` passed, 1 test.
+  - `docker-compose run --rm --entrypoint python django manage.py test proforma -v 2` was first run in parallel with the API test and failed creating duplicate `test_reopt`; serial rerun passed, 1 test, with `System check identified no issues (0 silenced).`
+- Commit action:
+  - Stage and commit the backend-first Vietnam case builder/report generator slice after verification.
+- Remaining next tasks:
+  - Push local commits to `origin/master` if desired.
+  - Extend case JSON financial passthrough beyond `analysis_years` before relying on custom owner discount rate, debt fraction/rate, O&M, capex, or ESCO cash-flow overrides.
+  - Run one representative custom 8760 load case end-to-end and inspect the generated `vietnam_report_<run_uuid>.xlsx`.
+
+## 2026-05-26 - Custom Input Run Guidance Handoff
+
+- User asked how to run the new backend-first Vietnam case builder with custom input load and financial assumptions and how to get the actual report.
+- Verified current implementation shape before answering:
+  - `proforma_vietnam/case_builder.py` reads an 8760 hourly load CSV from the first column, builds `ElectricLoad.loads_kw`, builds Vietnam EVN tariff arrays, maps `financial.analysis_years`, defaults `ElectricStorage.can_grid_charge` to false, and stores ESCO/report assumptions.
+  - `proforma_vietnam/run_case.py` supports `--dry-run` to write `payload.json` and `assumptions.json`, and a full run path that submits to `/v3/job/`, polls results, writes `results.json`, and downloads `vietnam_report_<run_uuid>.xlsx`.
+- Guidance given to user:
+  - Create an 8760-row kW CSV with optional header, no negative values.
+  - Create a case JSON containing `case`, `site`, `load_profile`, `tariff`, `technologies`, `financial`, and `esco_contract` sections.
+  - Start Docker with `docker-compose up -d`.
+  - Run dry-run:
+    `python -m proforma_vietnam.run_case --case input_files\vietnam_case_factory_a.json --out outputs\vietnam_case\factory_a --dry-run`
+  - Run actual optimization/report:
+    `python -m proforma_vietnam.run_case --case input_files\vietnam_case_factory_a.json --out outputs\vietnam_case\factory_a --poll-seconds 5 --max-polls 120`
+  - Expected outputs: `payload.json`, `assumptions.json`, `results.json`, and `vietnam_report_<run_uuid>.xlsx`.
+- Important limitation documented for next session:
+  - The current case JSON financial passthrough is minimal: `financial.analysis_years` maps into the REopt payload, and `esco_contract.esco_energy_discount_fraction` drives the Vietnam report download.
+  - Custom owner discount rate, debt fraction/rate, O&M, capex, and ESCO cash-flow overrides are not yet fully mapped from case JSON.
+- Recommended next task:
+  - Add tests and implementation for explicit financial/technology/ESCO passthrough in `proforma_vietnam/case_builder.py` and downstream report assumptions before running a real customer-style custom financial case.
+  - Then run one representative custom 8760 load case end-to-end and inspect the generated XLSX report.
+
+## 2026-05-25 - Backend Vietnam Case Builder and Report Generator
+
+- Implemented the backend-first Vietnam case builder + report generator slice requested after reviewing the existing REopt webtool/report assets.
+- Added `proforma_vietnam/case_builder.py`:
+  - Reads a case config dictionary.
+  - Loads an 8760 hourly CSV load profile from `load_profile.path`.
+  - Builds a normal REopt V3 payload using existing Vietnam EVN tariff builder output.
+  - Defaults to Vietnam, 25-year analysis, `tou_schedule="current"`, grid charging disabled, and 80% ESCO demand-savings share.
+  - Returns both `payload` and report `assumptions`.
+- Added `proforma_vietnam/report_data.py`:
+  - Normalizes raw V3 results into report sections for system sizing, dispatch profile, annual electricity production, results comparison, load duration, and developer financial performance.
+  - Keeps report data separate from workbook formatting so the same normalized object can later feed HTML/PDF/UI outputs.
+- Added `proforma_vietnam/run_case.py`:
+  - CLI entry point: `python -m proforma_vietnam.run_case --case path\to\case.json --out outputs\vietnam_case\factory_a --dry-run`.
+  - Dry-run writes `payload.json` and `assumptions.json` without API calls.
+  - Non-dry-run submits to `/v3/job/`, polls `/v3/job/<run_uuid>/results`, writes `results.json`, and downloads `vietnam_report_<run_uuid>.xlsx` when status is `optimal`.
+- Expanded `proforma_vietnam/xlsx_builder.py`:
+  - Existing sheets remain: Summary, Cash Flow, Tax Schedule, Debt Service, Assumptions.
+  - New sheets: System Sizing, Results Comparison, Annual Production, Dispatch Profile, Load Duration, Developer Financials.
+  - Added basic Excel charts for annual production, dispatch, load duration, and developer financials using `openpyxl` charts.
+- Updated `reoptjl/views.py`:
+  - V3 Vietnam pro forma XLSX response now builds normalized report data from REopt results and passes it into the workbook builder.
+- Updated tests:
+  - `proforma_vietnam/tests/test_case_builder.py`
+  - `proforma_vietnam/tests/test_report_data.py`
+  - `proforma_vietnam/tests/test_run_case.py`
+  - `proforma_vietnam/tests/test_xlsx_builder.py`
+  - `reoptjl/test/test_vietnam_proforma_endpoint.py`
+- TDD evidence:
+  - Red run: `python -m unittest proforma_vietnam.tests.test_case_builder proforma_vietnam.tests.test_report_data proforma_vietnam.tests.test_xlsx_builder` failed with missing `proforma_vietnam.case_builder`, missing `proforma_vietnam.report_data`, missing `report_data` workbook parameter, and missing workbook sheets.
+  - Red run: `python -m unittest proforma_vietnam.tests.test_run_case` failed with `ModuleNotFoundError: No module named 'proforma_vietnam.run_case'`.
+  - Green focused run: `python -m unittest proforma_vietnam.tests.test_case_builder proforma_vietnam.tests.test_report_data proforma_vietnam.tests.test_xlsx_builder` passed, 8 tests.
+  - Green focused run: `python -m unittest proforma_vietnam.tests.test_run_case` passed, 1 test.
+  - Green local discovered suite: `python -m unittest discover -s proforma_vietnam\tests -p "test_*.py"` passed, 21 tests.
+  - Green Docker/Django Vietnam suite: `docker-compose run --rm --entrypoint python django manage.py test proforma_vietnam -v 2` passed, 21 tests, `System check identified no issues (0 silenced).`
+  - Green Docker/Django API integration: `docker-compose run --rm --entrypoint python django manage.py test reoptjl.test.test_vietnam_proforma_endpoint -v 2` passed, 1 test.
+  - Green Docker/Django US pro forma regression: `docker-compose run --rm --entrypoint python django manage.py test proforma -v 2` passed, 1 test.
+  - Green Django health: `docker-compose run --rm --entrypoint python django manage.py check` passed with `System check identified no issues (0 silenced).`
+  - `docker-compose exec -T django python manage.py check` failed only because the long-running `django` service was not running; the disposable Django container check passed.
+- Current git state:
+  - Branch `master` is 9 commits ahead of `origin/master`.
+  - Latest commit remains `5e219339 Add reference ESCO workbook comparison gate`.
+  - Working tree has uncommitted case-builder/report-generator changes.
+- Next recommended work:
+  - Review/stage the current uncommitted diff.
+  - Optionally run one real case through `proforma_vietnam.run_case` without `--dry-run` after preparing a representative 8760 load CSV case config.
+  - Commit and push the backend-first case-builder/report-generator slice if accepted.
+
 ## 2026-05-25 - Reference ESCO Workbook Comparison Gate
 
 - Started from the `CODEX_SESSION.md` resume point: compare one reference ESCO project against a hand-built workbook within +/-1%.
