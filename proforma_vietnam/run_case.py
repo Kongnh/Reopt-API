@@ -1,14 +1,18 @@
 import argparse
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from urllib import parse, request
+from urllib.error import HTTPError
 
 from proforma_vietnam.case_builder import build_vietnam_case
 
 
-DEFAULT_API_URL = "http://localhost:8000/v3/job/"
+DEFAULT_API_URL = "http://localhost:8000/v3"
+TERMINAL_STATUSES_NON_OPTIMAL_BODY_CODES = (400, 404, 500)
+POLLING_STATUSES = ("Optimizing...", "optimizing...", "queued")
 VIETNAM_REPORT_QUERY_KEYS = [
     "esco_energy_discount_fraction",
     "owner_discount_rate_fraction",
@@ -39,6 +43,7 @@ def main(argv=None):
     parser.add_argument("--max-polls", type=int, default=120)
     args = parser.parse_args(argv)
 
+    api_base = _api_base(args.api_url)
     case_config = json.loads(Path(args.case).read_text(encoding="utf-8"))
     vietnam_case = build_vietnam_case(case_config)
 
@@ -50,24 +55,43 @@ def main(argv=None):
     if args.dry_run:
         return 0
 
-    run_uuid = _submit_payload(args.api_url, vietnam_case["payload"])
-    results = _poll_results(args.api_url, run_uuid, args.poll_seconds, args.max_polls)
+    run_uuid = _submit_payload(api_base, vietnam_case["payload"])
+    results = _poll_results(api_base, run_uuid, args.poll_seconds, args.max_polls)
     _write_json(out_dir / "results.json", results)
 
-    if results.get("status") == "optimal":
-        workbook = _download_vietnam_report(
-            args.api_url,
-            run_uuid,
-            vietnam_case["assumptions"],
-        )
-        (out_dir / f"vietnam_report_{run_uuid}.xlsx").write_bytes(workbook)
+    status = results.get("status")
+    if status != "optimal":
+        _print_run_failure(run_uuid, results)
+        return 1
 
+    workbook = _download_vietnam_report(
+        api_base,
+        run_uuid,
+        vietnam_case["assumptions"],
+    )
+    (out_dir / f"vietnam_report_{run_uuid}.xlsx").write_bytes(workbook)
     return 0
 
 
-def _submit_payload(api_url, payload):
+def _api_base(api_url):
+    """Strip any trailing ``/job`` segment so callers may pass either shape."""
+    stripped = api_url.rstrip("/")
+    if stripped.endswith("/job"):
+        stripped = stripped[: -len("/job")]
+    return stripped
+
+
+def _submit_url(api_base):
+    return f"{api_base}/job/"
+
+
+def _results_url(api_base, run_uuid):
+    return f"{api_base}/job/{run_uuid}/results"
+
+
+def _submit_payload(api_base, payload):
     post_request = request.Request(
-        api_url,
+        _submit_url(api_base),
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
@@ -77,20 +101,46 @@ def _submit_payload(api_url, payload):
     return body["run_uuid"]
 
 
-def _poll_results(api_url, run_uuid, poll_seconds, max_polls):
-    results_url = _results_url(api_url, run_uuid)
+def _poll_results(api_base, run_uuid, poll_seconds, max_polls):
+    results_url = _results_url(api_base, run_uuid)
     for _ in range(max_polls):
-        with request.urlopen(results_url) as response:
-            body = json.loads(response.read().decode("utf-8"))
-        if body.get("status") not in ["Optimizing...", "optimizing...", "queued"]:
+        body = _get_results_body(results_url)
+        if body.get("status") not in POLLING_STATUSES:
             return body
         time.sleep(poll_seconds)
     raise TimeoutError(f"Timed out waiting for REopt results for {run_uuid}.")
 
 
-def _download_vietnam_report(api_url, run_uuid, assumptions):
+def _get_results_body(url):
+    """Read the results endpoint, returning the JSON body even on 4xx/5xx.
+
+    REopt returns 400 with a populated ``messages.errors`` body when a run
+    errors out. Without catching ``HTTPError`` here the caller crashes with a
+    bare traceback instead of surfacing the optimizer's error message.
+    """
+    try:
+        with request.urlopen(url) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        if error.code in TERMINAL_STATUSES_NON_OPTIMAL_BODY_CODES:
+            try:
+                return json.loads(error.read().decode("utf-8"))
+            except (ValueError, OSError):
+                raise error from None
+        raise
+
+
+def _print_run_failure(run_uuid, results):
+    status = results.get("status")
+    print(f"REopt run {run_uuid} ended with status {status!r}.", file=sys.stderr)
+    errors = results.get("messages", {}).get("errors") or {}
+    for key, value in errors.items():
+        print(f"  {key}: {value}", file=sys.stderr)
+
+
+def _download_vietnam_report(api_base, run_uuid, assumptions):
     query = parse.urlencode(_vietnam_report_query_params(assumptions))
-    with request.urlopen(f"{_results_url(api_url, run_uuid)}?{query}") as response:
+    with request.urlopen(f"{_results_url(api_base, run_uuid)}?{query}") as response:
         return response.read()
 
 
@@ -101,10 +151,6 @@ def _vietnam_report_query_params(assumptions):
         if value is not None:
             query[key] = value
     return query
-
-
-def _results_url(api_url, run_uuid):
-    return api_url.rstrip("/").rsplit("/", 1)[0] + f"/{run_uuid}/results"
 
 
 def _write_json(path, data):

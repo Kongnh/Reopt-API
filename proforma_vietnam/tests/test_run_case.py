@@ -1,14 +1,34 @@
 import csv
+import io
 import json
 import tempfile
 from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
+from urllib.error import HTTPError
 
-from proforma_vietnam.run_case import _download_vietnam_report, main
+from proforma_vietnam.run_case import (
+    _api_base,
+    _download_vietnam_report,
+    _poll_results,
+    _results_url,
+    _submit_url,
+    main,
+)
+
+
+STUB_PV_SERIES = [0.25] * 8760
 
 
 class VietnamRunCaseTests(TestCase):
+
+    def setUp(self):
+        patcher = patch(
+            "proforma_vietnam.case_builder.pvwatts_client.fetch_production_factor_series",
+            return_value=list(STUB_PV_SERIES),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_dry_run_writes_payload_and_assumptions_without_api_call(self):
         temp_dir = Path(tempfile.mkdtemp())
@@ -90,13 +110,19 @@ class VietnamRunCaseTests(TestCase):
             urlopen.return_value.__enter__.return_value.read.return_value = b"workbook"
 
             workbook = _download_vietnam_report(
-                "http://localhost:8000/v3/job/",
-                "run-uuid",
+                "http://localhost:8000/v3",
+                "11111111-2222-3333-4444-555555555555",
                 assumptions,
             )
 
         self.assertEqual(workbook, b"workbook")
         requested_url = urlopen.call_args.args[0]
+        self.assertTrue(
+            requested_url.startswith(
+                "http://localhost:8000/v3/job/11111111-2222-3333-4444-555555555555/results?"
+            ),
+            requested_url,
+        )
         self.assertIn("vietnam_proforma=true", requested_url)
         self.assertIn("esco_energy_discount_fraction=0.9", requested_url)
         self.assertIn("owner_discount_rate_fraction=0.12", requested_url)
@@ -112,6 +138,61 @@ class VietnamRunCaseTests(TestCase):
         self.assertIn("demand_savings_esco_share=0.75", requested_url)
         self.assertIn("grid_charging_enabled=True", requested_url)
         self.assertNotIn("unsupported", requested_url)
+
+
+class VietnamRunCaseUrlTests(TestCase):
+
+    def test_api_base_accepts_base_or_job_suffixed_url(self):
+        self.assertEqual(_api_base("http://localhost:8000/v3"), "http://localhost:8000/v3")
+        self.assertEqual(_api_base("http://localhost:8000/v3/"), "http://localhost:8000/v3")
+        self.assertEqual(_api_base("http://localhost:8000/v3/job/"), "http://localhost:8000/v3")
+        self.assertEqual(_api_base("http://localhost:8000/v3/job"), "http://localhost:8000/v3")
+
+    def test_submit_url_targets_job_endpoint(self):
+        self.assertEqual(
+            _submit_url("http://localhost:8000/v3"),
+            "http://localhost:8000/v3/job/",
+        )
+
+    def test_results_url_keeps_job_segment(self):
+        self.assertEqual(
+            _results_url("http://localhost:8000/v3", "abc"),
+            "http://localhost:8000/v3/job/abc/results",
+        )
+
+
+class VietnamRunCasePollTests(TestCase):
+
+    def test_poll_returns_error_body_when_results_endpoint_returns_400(self):
+        error_body = {
+            "status": "error",
+            "messages": {"errors": {"core_utils.jl_450": ["solar timeout"]}},
+        }
+        error = HTTPError(
+            url="http://localhost:8000/v3/job/run-uuid/results",
+            code=400,
+            msg="Bad Request",
+            hdrs=None,
+            fp=io.BytesIO(json.dumps(error_body).encode("utf-8")),
+        )
+
+        with patch("proforma_vietnam.run_case.request.urlopen", side_effect=error):
+            body = _poll_results("http://localhost:8000/v3", "run-uuid", 0, 1)
+
+        self.assertEqual(body, error_body)
+
+    def test_poll_raises_for_unexpected_http_error_codes(self):
+        error = HTTPError(
+            url="http://localhost:8000/v3/job/run-uuid/results",
+            code=502,
+            msg="Bad Gateway",
+            hdrs=None,
+            fp=io.BytesIO(b""),
+        )
+
+        with patch("proforma_vietnam.run_case.request.urlopen", side_effect=error):
+            with self.assertRaises(HTTPError):
+                _poll_results("http://localhost:8000/v3", "run-uuid", 0, 1)
 
 
 def _write_load_csv(path):

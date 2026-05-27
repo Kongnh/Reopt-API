@@ -1,5 +1,6 @@
 import csv
 
+from proforma_vietnam import pvwatts_client
 from reoptjl.src.vietnam import build_evn_tariff
 
 
@@ -58,6 +59,8 @@ def build_vietnam_case(case_config):
     year = load_config.get("year") or tariff_config.get("year")
     loads_kw = _read_8760_load_csv(load_config["path"])
     tariff = _build_tariff(tariff_config)
+    site = case_config.get("site", {})
+    pv_inputs = _pv_inputs(technologies.get("pv", {}), site)
 
     payload = {
         "Meta": {
@@ -67,8 +70,8 @@ def build_vietnam_case(case_config):
             "time_steps_per_hour": 1,
         },
         "Site": {
-            "latitude": case_config.get("site", {})["latitude"],
-            "longitude": case_config.get("site", {})["longitude"],
+            "latitude": site["latitude"],
+            "longitude": site["longitude"],
         },
         "ElectricLoad": {
             "year": year,
@@ -76,7 +79,7 @@ def build_vietnam_case(case_config):
         },
         "ElectricTariff": tariff,
         "Financial": _financial_inputs(financial),
-        "PV": _allowlisted(technologies.get("pv", {}), PV_PAYLOAD_KEYS),
+        "PV": pv_inputs,
         "ElectricStorage": _storage_inputs(
             technologies.get("storage", {}),
             esco_contract,
@@ -134,6 +137,17 @@ def _financial_inputs(financial):
         if key in financial:
             inputs[key] = financial[key]
     return inputs
+
+
+def _pv_inputs(pv_config, site):
+    pv = _allowlisted(pv_config, PV_PAYLOAD_KEYS)
+    if "production_factor_series" not in pv:
+        pv["production_factor_series"] = pvwatts_client.fetch_production_factor_series(
+            latitude=site["latitude"],
+            longitude=site["longitude"],
+            overrides=pv_config.get("pvwatts"),
+        )
+    return pv
 
 
 def _storage_inputs(storage_config, esco_contract):

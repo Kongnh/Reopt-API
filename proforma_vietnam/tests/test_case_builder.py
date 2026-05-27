@@ -2,11 +2,23 @@ import csv
 import tempfile
 from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
 from proforma_vietnam.case_builder import build_vietnam_case
 
 
+STUB_PV_SERIES = [0.25] * 8760
+
+
 class VietnamCaseBuilderTests(TestCase):
+
+    def setUp(self):
+        patcher = patch(
+            "proforma_vietnam.case_builder.pvwatts_client.fetch_production_factor_series",
+            return_value=list(STUB_PV_SERIES),
+        )
+        self.fetch_pv = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_builds_reopt_payload_from_8760_load_csv_and_defaults(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
@@ -110,6 +122,7 @@ class VietnamCaseBuilderTests(TestCase):
             "installed_cost_per_kw": 12000000,
             "om_cost_per_kw": 150000,
             "degradation_fraction": 0.005,
+            "production_factor_series": list(STUB_PV_SERIES),
         })
         self.assertEqual(payload["ElectricStorage"], {
             "max_kw": 500.0,
@@ -214,6 +227,79 @@ class VietnamCaseBuilderTests(TestCase):
             )
 
         self.assertIn("8760 hourly load values", str(context.exception))
+
+    def test_auto_fetches_pv_production_series_when_missing(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "technologies": {"pv": {"max_kw": 1000.0}},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.fetch_pv.assert_called_once_with(
+            latitude=10.8231,
+            longitude=106.6297,
+            overrides=None,
+        )
+        self.assertEqual(
+            case["payload"]["PV"]["production_factor_series"],
+            list(STUB_PV_SERIES),
+        )
+
+    def test_passes_pvwatts_overrides_and_drops_pvwatts_key_from_payload(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "technologies": {
+                    "pv": {
+                        "max_kw": 1000.0,
+                        "pvwatts": {"tilt": 15, "azimuth": 170, "losses": 12},
+                    },
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.fetch_pv.assert_called_once_with(
+            latitude=10.8231,
+            longitude=106.6297,
+            overrides={"tilt": 15, "azimuth": 170, "losses": 12},
+        )
+        self.assertNotIn("pvwatts", case["payload"]["PV"])
+
+    def test_skips_pv_fetch_when_production_factor_series_provided(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+        user_series = [0.5] * 8760
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "technologies": {
+                    "pv": {
+                        "max_kw": 1000.0,
+                        "production_factor_series": user_series,
+                    },
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.fetch_pv.assert_not_called()
+        self.assertEqual(
+            case["payload"]["PV"]["production_factor_series"],
+            user_series,
+        )
 
     def test_requires_esco_energy_discount_for_report_download(self):
         load_csv_path = _write_load_csv([500.0] * 8760)

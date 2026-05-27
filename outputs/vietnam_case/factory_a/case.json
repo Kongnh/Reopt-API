@@ -29,6 +29,14 @@
       "financial.annual_om_usd": "Optional override only. It is omitted in this sample so the workbook uses REopt year-one O&M output.",
       "technologies.pv": "PV size is optimized by core REopt. min_kw and max_kw are lower and upper bounds. Set min_kw and max_kw equal only when you want to force a fixed PV size.",
       "technologies.pv.degradation_fraction": "Annual PV production degradation fraction. Example: 0.005 means 0.5% per year.",
+      "technologies.pv.production_factor_series": "Optional 8760-length AC kWh per kW DC installed. Set this to bypass the PVWatts fetch entirely; useful when you have a measured or site-specific solar production profile. If omitted, the case builder fetches the series from NREL PVWatts v8 using technologies.pv.pvwatts and caches it under outputs/pvwatts_cache/.",
+      "technologies.pv.pvwatts": "PVWatts v8 lookup parameters. Used only when technologies.pv.production_factor_series is omitted. Defaults shown below match the values in this sample.",
+      "technologies.pv.pvwatts.tilt": "Module tilt from horizontal in degrees (0-90). Default 10. For Vietnam (low latitude) 10-15 degrees is typical.",
+      "technologies.pv.pvwatts.azimuth": "Module azimuth in degrees (0=north, 90=east, 180=south, 270=west). Default 180 (due south, optimal for northern hemisphere).",
+      "technologies.pv.pvwatts.array_type": "Module mounting type. 0=fixed open rack, 1=fixed roof-mounted, 2=1-axis tracking, 3=1-axis backtracked, 4=2-axis tracking. Default 1.",
+      "technologies.pv.pvwatts.module_type": "PV module performance class. 0=standard, 1=premium, 2=thin film. Default 0.",
+      "technologies.pv.pvwatts.losses": "System loss percent (0-99) covering soiling, wiring, mismatch, availability, etc. Default 14.",
+      "technologies.pv.pvwatts.dc_ac_ratio": "DC-to-AC nameplate ratio. Default 1.2.",
       "technologies.storage": "Battery size is optimized by core REopt. min_kw/max_kw bound battery power; min_kwh/max_kwh bound battery energy. Set min and max equal only when you want to force a fixed battery size.",
       "technologies.storage.installed_cost_constant": "Fixed one-time battery installed cost in USD that does not scale with kW or kWh, such as controls, integration, mobilization, or interconnection. Use 0 when those costs are already included in installed_cost_per_kw or installed_cost_per_kwh.",
       "technologies.storage.om_cost_fraction_of_installed_cost": "Core REopt field: annual storage O&M as a fraction of total installed storage cost. Total installed storage cost includes installed_cost_per_kw times optimized kW, installed_cost_per_kwh times optimized kWh, and installed_cost_constant. Example: 0.02 means 2% of total installed storage cost per year.",
@@ -57,7 +65,7 @@
   },
   "load_profile": {
     "year": 2025,
-    "path": "outputs/vietnam_case/factory_a/load.csv"
+    "path": "Sample Load Profile/Emivest.csv"
   },
   "tariff": {
     "year": 2025,
@@ -79,26 +87,34 @@
   "technologies": {
     "pv": {
       "min_kw": 0,
-      "max_kw": 1000,
+      "max_kw": 10000,
       "installed_cost_per_kw": 480,
       "om_cost_per_kw": 6,
-      "degradation_fraction": 0.005
+      "degradation_fraction": 0.005,
+      "pvwatts": {
+        "tilt": 10,
+        "azimuth": 180,
+        "array_type": 1,
+        "module_type": 0,
+        "losses": 14,
+        "dc_ac_ratio": 1.2
+      }
     },
     "storage": {
       "min_kw": 0,
-      "max_kw": 500,
+      "max_kw": 5000,
       "min_kwh": 0,
-      "max_kwh": 2000,
-      "installed_cost_per_kw": 120,
-      "installed_cost_per_kwh": 180,
+      "max_kwh": 20000,
+      "installed_cost_per_kw": 80,
+      "installed_cost_per_kwh": 120,
       "installed_cost_constant": 0,
-      "replace_cost_per_kw": 0,
-      "replace_cost_per_kwh": 0,
+      "replace_cost_per_kw": 80,
+      "replace_cost_per_kwh": 100,
       "replace_cost_constant": 0,
       "inverter_replacement_year": 10,
       "battery_replacement_year": 10,
       "cost_constant_replacement_year": 10,
-      "om_cost_fraction_of_installed_cost": 0.02
+      "om_cost_fraction_of_installed_cost": 0.01
     }
   },
   "esco_contract": {

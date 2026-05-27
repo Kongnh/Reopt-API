@@ -83,6 +83,19 @@ PV size is optimized by core REopt. The case JSON does not directly choose the f
 | `technologies.pv.installed_cost_per_kw` | `480` | PV installed cost in USD per kW. Used by REopt optimization economics. |
 | `technologies.pv.om_cost_per_kw` | `6` | Annual PV O&M cost in USD per kW-year. Used by REopt optimization economics. |
 | `technologies.pv.degradation_fraction` | `0.005` | Annual PV production degradation. `0.005` means 0.5% lower PV production each year. |
+| `technologies.pv.production_factor_series` | `[0.0, …]` (length 8760) | Optional. AC kWh per kW DC installed for each hour of the year. If omitted, the case builder calls NREL PVWatts v8 with the site lat/lon and the defaults below (NREL NSRDB does not cover Vietnam, so the optimizer would otherwise time out). |
+| `technologies.pv.pvwatts` | `{ "tilt": 10, "azimuth": 180, "array_type": 1, "module_type": 0, "losses": 14, "dc_ac_ratio": 1.2 }` | Optional overrides for the PVWatts v8 lookup. Any subset of the six keys above is allowed. Defaults shown are the values used when this object is omitted. The fetched series is cached in `outputs/pvwatts_cache/` keyed by lat/lon + these params, so re-runs skip the API. |
+
+PVWatts override knobs:
+
+| Key | Default | Allowed | Meaning |
+| --- | ---: | --- | --- |
+| `tilt` | `10` | 0–90 (degrees) | Module tilt from horizontal. For Vietnam (low latitude) 10°–15° is typical. |
+| `azimuth` | `180` | 0–360 (degrees, 180 = due south, 0 = due north) | Module azimuth. |
+| `array_type` | `1` | `0` fixed open rack, `1` fixed roof-mounted, `2` 1-axis, `3` 1-axis backtracked, `4` 2-axis | Module mounting configuration. |
+| `module_type` | `0` | `0` standard, `1` premium, `2` thin film | PV module performance class. |
+| `losses` | `14` | 0–99 (percent) | System loss percent (soiling, wiring, etc.). |
+| `dc_ac_ratio` | `1.2` | Positive number | DC-to-AC nameplate ratio. |
 
 Sizing examples:
 
