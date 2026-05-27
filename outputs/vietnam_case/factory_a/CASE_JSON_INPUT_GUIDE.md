@@ -4,12 +4,39 @@ This guide explains the inputs in `case.json` for running a Vietnam REopt optimi
 
 Monetary inputs in this sample are USD unless the field name explicitly says `vnd` or `exchange_rate_vnd_per_usd`.
 
+## Folder Convention
+
+The site folder (`outputs/vietnam_case/factory_a/`) holds a template `case.json` plus one sub-folder per concrete scenario (`case_1/`, `case_2/`, …). Each scenario sub-folder owns its `case.json` and every artifact produced by the run (payload, assumptions, results, workbook). The runner writes outputs into the directory containing the supplied `--case` file, so each scenario stays self-contained:
+
+```
+outputs/vietnam_case/factory_a/
+├── CASE_JSON_INPUT_GUIDE.md      # this file
+├── case.json                     # template - copy into case_<n>/ to start a new scenario
+├── case_1/                       # one scenario
+│   ├── case.json                 # frozen scenario inputs
+│   ├── payload.json              # REopt V3 payload sent to optimizer
+│   ├── assumptions.json          # report/pro forma assumptions
+│   ├── results.json              # REopt optimization results
+│   └── vietnam_report_<run_uuid>.xlsx
+├── case_2/                       # next scenario, created by user
+│   └── case.json
+└── …
+```
+
 ## Run Commands
 
-Dry-run first to inspect the generated REopt payload and report assumptions:
+To create a new scenario, copy the template `case.json` into a fresh `case_<n>/` folder and edit it:
 
 ```powershell
-python -m proforma_vietnam.run_case --case outputs\vietnam_case\factory_a\case.json --out outputs\vietnam_case\factory_a --dry-run
+mkdir outputs\vietnam_case\factory_a\case_2
+copy outputs\vietnam_case\factory_a\case.json outputs\vietnam_case\factory_a\case_2\case.json
+# edit case_2\case.json
+```
+
+Dry-run first to inspect the generated REopt payload and report assumptions (outputs land next to the `--case` file):
+
+```powershell
+python -m proforma_vietnam.run_case --case outputs\vietnam_case\factory_a\case_2\case.json --dry-run
 ```
 
 Run the full end-to-end case after Docker services are available:
@@ -17,10 +44,12 @@ Run the full end-to-end case after Docker services are available:
 ```powershell
 docker-compose up -d
 
-python -m proforma_vietnam.run_case --case outputs\vietnam_case\factory_a\case.json --out outputs\vietnam_case\factory_a --poll-seconds 5 --max-polls 120
+python -m proforma_vietnam.run_case --case outputs\vietnam_case\factory_a\case_2\case.json --poll-seconds 5 --max-polls 120
 ```
 
-Expected outputs:
+`--out` is still accepted for backward compatibility but defaults to the directory containing `--case`. A shared PVWatts cache lives at `outputs/pvwatts_cache/` and is reused across scenarios with the same lat/lon and PVWatts params.
+
+Expected outputs (written into the same folder as `--case`):
 
 - `payload.json`: REopt V3 optimizer payload.
 - `assumptions.json`: Vietnam report/pro forma assumptions.

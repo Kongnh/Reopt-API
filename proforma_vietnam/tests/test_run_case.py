@@ -55,6 +55,26 @@ class VietnamRunCaseTests(TestCase):
         self.assertEqual(len(payload["ElectricLoad"]["loads_kw"]), 8760)
         self.assertEqual(assumptions["country"], "Vietnam")
 
+    def test_dry_run_defaults_out_dir_to_case_json_parent(self):
+        temp_dir = Path(tempfile.mkdtemp())
+        case_dir = temp_dir / "case_1"
+        case_dir.mkdir()
+        load_path = temp_dir / "load.csv"
+        case_path = case_dir / "case.json"
+
+        _write_load_csv(load_path)
+        case_path.write_text(json.dumps(_case_config(load_path)), encoding="utf-8")
+
+        exit_code = main([
+            "--case",
+            str(case_path),
+            "--dry-run",
+        ])
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue((case_dir / "payload.json").exists())
+        self.assertTrue((case_dir / "assumptions.json").exists())
+
     def test_dry_run_writes_financial_report_assumptions(self):
         temp_dir = Path(tempfile.mkdtemp())
         load_path = temp_dir / "load.csv"

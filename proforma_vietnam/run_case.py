@@ -36,7 +36,11 @@ VIETNAM_REPORT_QUERY_KEYS = [
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Build and run a Vietnam REopt case.")
     parser.add_argument("--case", required=True, help="Path to Vietnam case JSON.")
-    parser.add_argument("--out", required=True, help="Output directory.")
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Output directory. Defaults to the directory containing --case.",
+    )
     parser.add_argument("--api-url", default=os.environ.get("REOPT_API_URL", DEFAULT_API_URL))
     parser.add_argument("--dry-run", action="store_true", help="Write payload only; do not submit.")
     parser.add_argument("--poll-seconds", type=float, default=5)
@@ -44,10 +48,11 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     api_base = _api_base(args.api_url)
-    case_config = json.loads(Path(args.case).read_text(encoding="utf-8"))
+    case_path = Path(args.case)
+    case_config = json.loads(case_path.read_text(encoding="utf-8"))
     vietnam_case = build_vietnam_case(case_config)
 
-    out_dir = Path(args.out)
+    out_dir = Path(args.out) if args.out else case_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
     _write_json(out_dir / "payload.json", vietnam_case["payload"])
     _write_json(out_dir / "assumptions.json", vietnam_case["assumptions"])
