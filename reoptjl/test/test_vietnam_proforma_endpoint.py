@@ -62,13 +62,51 @@ class TestVietnamProformaEndpoint(ResourceTestCaseMixin, TransactionTestCase):
                 "Assumptions",
             ],
         )
-        self.assertEqual(workbook["Summary"]["A1"].value, "Total Capex (VND)")
+        self.assertEqual(workbook["Summary"]["A1"].value, "Total Capex (USD)")
         self.assertEqual(workbook["Summary"]["B1"].value, 100000)
         self.assertEqual(
             workbook["Assumptions"]["A2"].value,
             "esco_energy_discount_fraction",
         )
         self.assertEqual(workbook["Assumptions"]["B2"].value, 0.9)
+
+    def test_results_endpoint_applies_vietnam_proforma_query_overrides(self):
+        run_uuid = _create_completed_vietnam_result()
+
+        resp = self.api_client.get(
+            f"/v3/job/{run_uuid}/results",
+            data={
+                "vietnam_proforma": "true",
+                "esco_energy_discount_fraction": "0.9",
+                "owner_discount_rate_fraction": "0.12",
+                "debt_fraction": "0.5",
+                "debt_interest_rate_fraction": "0.09",
+                "debt_term_years": "12",
+                "annual_om_usd": "2000",
+                "pv_capex_usd": "200000",
+                "bess_capex_usd": "50000",
+                "demand_savings_esco_share": "0.75",
+                "grid_charging_enabled": "true",
+            },
+        )
+
+        self.assertHttpOK(resp)
+        workbook = load_workbook(BytesIO(resp.content), data_only=True)
+
+        self.assertEqual(workbook["Summary"]["B1"].value, 250000)
+        self.assertEqual(workbook["Summary"]["B2"].value, 125000)
+        self.assertEqual(workbook["Summary"]["B3"].value, 125000)
+        self.assertEqual(workbook["Cash Flow"]["F2"].value, 2000)
+        self.assertEqual(workbook["Cash Flow"]["C2"].value, 3750)
+        assumptions = {
+            workbook["Assumptions"].cell(row=row, column=1).value:
+            workbook["Assumptions"].cell(row=row, column=2).value
+            for row in range(1, workbook["Assumptions"].max_row + 1)
+        }
+        self.assertEqual(assumptions["owner_discount_rate_fraction"], 0.12)
+        self.assertEqual(assumptions["debt_fraction"], 0.5)
+        self.assertEqual(assumptions["annual_om_usd"], 2000.0)
+        self.assertEqual(assumptions["grid_charging_enabled"], True)
 
 
 def _create_completed_vietnam_result():

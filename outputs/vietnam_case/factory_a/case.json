@@ -1,0 +1,109 @@
+{
+  "_guide": {
+    "description": "Customizable Vietnam ESCO end-to-end case file for proforma_vietnam.run_case. Edit the values below, then run dry-run first to inspect payload.json and assumptions.json before submitting to the optimizer. Monetary inputs and report outputs in this sample are USD unless the field name explicitly says VND or exchange_rate_vnd_per_usd.",
+    "required_before_run": [
+      "Create the 8760-row hourly load CSV referenced by load_profile.path.",
+      "Confirm latitude and longitude are the project site coordinates.",
+      "Confirm tariff voltage_level and tou_schedule match the customer tariff.",
+      "Keep esco_contract.esco_energy_discount_fraction present; the report download requires it."
+    ],
+    "input_options": {
+      "tariff.voltage_level": [
+        ">=110kV",
+        "22-110kV",
+        "6-22kV",
+        "<6kV"
+      ],
+      "tariff.currency": [
+        "usd"
+      ],
+      "tariff.exchange_rate_vnd_per_usd": "Required when tariff.currency is usd. It converts EVN VND tariff inputs, or any field explicitly named VND, into USD. The optimizer and Vietnam pro forma report use USD values.",
+      "tariff.tou_schedule": [
+        "current",
+        "decision_963"
+      ],
+      "tariff.two_component_pilot_enabled": "false uses standard EVN energy-only TOU tariff. true uses the configured EVN two-component pilot tariff with hourly energy rates plus monthly demand_rates.",
+      "tariff.evn_energy_escalation_rate": "Annual EVN energy tariff escalation used in the Vietnam ESCO cash flow. Use decimal fractions, e.g. 0.04 for 4% per year.",
+      "tariff.evn_capacity_escalation_rate": "Annual EVN demand or capacity charge escalation used in the Vietnam ESCO cash flow. Use decimal fractions, e.g. 0.04 for 4% per year.",
+      "financial.rate_fields": "Use decimal fractions, e.g. 0.10 for 10%.",
+      "financial.annual_om_usd": "Optional override only. It is omitted in this sample so the workbook uses REopt year-one O&M output.",
+      "technologies.pv": "PV size is optimized by core REopt. min_kw and max_kw are lower and upper bounds. Set min_kw and max_kw equal only when you want to force a fixed PV size.",
+      "technologies.pv.degradation_fraction": "Annual PV production degradation fraction. Example: 0.005 means 0.5% per year.",
+      "technologies.storage": "Battery size is optimized by core REopt. min_kw/max_kw bound battery power; min_kwh/max_kwh bound battery energy. Set min and max equal only when you want to force a fixed battery size.",
+      "technologies.storage.installed_cost_constant": "Fixed one-time battery installed cost in USD that does not scale with kW or kWh, such as controls, integration, mobilization, or interconnection. Use 0 when those costs are already included in installed_cost_per_kw or installed_cost_per_kwh.",
+      "technologies.storage.om_cost_fraction_of_installed_cost": "Core REopt field: annual storage O&M as a fraction of total installed storage cost. Total installed storage cost includes installed_cost_per_kw times optimized kW, installed_cost_per_kwh times optimized kWh, and installed_cost_constant. Example: 0.02 means 2% of total installed storage cost per year.",
+      "technologies.storage.replacement_costs": "Replacement fields are optimizer inputs. Use replace_cost_per_kw, replace_cost_per_kwh, and replace_cost_constant with their corresponding replacement year fields.",
+      "esco_contract.esco_energy_discount_fraction": "Multiplier applied to EVN time-specific energy tariff for ESCO energy revenue, e.g. 0.90 means ESCO charges 90% of EVN energy tariff.",
+      "esco_contract.demand_savings_esco_share": "Share of demand-charge savings allocated to ESCO, e.g. 0.80 means ESCO keeps 80% and offtaker keeps 20%.",
+      "esco_contract.grid_charging_enabled": "false for base PV-charged battery case; true only for grid-charging scenario analysis."
+    },
+    "commands": {
+      "dry_run": "python -m proforma_vietnam.run_case --case outputs\\vietnam_case\\factory_a\\case.json --out outputs\\vietnam_case\\factory_a --dry-run",
+      "full_e2e": "python -m proforma_vietnam.run_case --case outputs\\vietnam_case\\factory_a\\case.json --out outputs\\vietnam_case\\factory_a --poll-seconds 5 --max-polls 120"
+    },
+    "expected_outputs": [
+      "outputs/vietnam_case/factory_a/payload.json",
+      "outputs/vietnam_case/factory_a/assumptions.json",
+      "outputs/vietnam_case/factory_a/results.json",
+      "outputs/vietnam_case/factory_a/vietnam_report_<run_uuid>.xlsx"
+    ]
+  },
+  "case": {
+    "name": "Factory A Vietnam ESCO E2E"
+  },
+  "site": {
+    "latitude": 10.8231,
+    "longitude": 106.6297
+  },
+  "load_profile": {
+    "year": 2025,
+    "path": "outputs/vietnam_case/factory_a/load.csv"
+  },
+  "tariff": {
+    "year": 2025,
+    "voltage_level": "22-110kV",
+    "currency": "usd",
+    "exchange_rate_vnd_per_usd": 25000,
+    "tou_schedule": "current",
+    "two_component_pilot_enabled": false,
+    "evn_energy_escalation_rate": 0.04,
+    "evn_capacity_escalation_rate": 0.04
+  },
+  "financial": {
+    "analysis_years": 25,
+    "owner_discount_rate_fraction": 0.1,
+    "debt_fraction": 0.7,
+    "debt_interest_rate_fraction": 0.085,
+    "debt_term_years": 10
+  },
+  "technologies": {
+    "pv": {
+      "min_kw": 0,
+      "max_kw": 1000,
+      "installed_cost_per_kw": 480,
+      "om_cost_per_kw": 6,
+      "degradation_fraction": 0.005
+    },
+    "storage": {
+      "min_kw": 0,
+      "max_kw": 500,
+      "min_kwh": 0,
+      "max_kwh": 2000,
+      "installed_cost_per_kw": 120,
+      "installed_cost_per_kwh": 180,
+      "installed_cost_constant": 0,
+      "replace_cost_per_kw": 0,
+      "replace_cost_per_kwh": 0,
+      "replace_cost_constant": 0,
+      "inverter_replacement_year": 10,
+      "battery_replacement_year": 10,
+      "cost_constant_replacement_year": 10,
+      "om_cost_fraction_of_installed_cost": 0.02
+    }
+  },
+  "esco_contract": {
+    "esco_energy_discount_fraction": 0.9,
+    "demand_savings_esco_share": 0.8,
+    "grid_charging_enabled": false
+  }
+}

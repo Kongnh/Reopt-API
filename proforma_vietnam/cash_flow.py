@@ -164,6 +164,7 @@ def calculate_vietnam_esco_cash_flow(
                 else None
             ),
         })
+        _add_usd_aliases(row)
         annual_cash_flows.append(row)
         project_cash_flows.append(cash_available_for_debt_service_vnd)
         equity_cash_flows.append(equity_cash_flow_vnd)
@@ -186,11 +187,18 @@ def calculate_vietnam_esco_cash_flow(
             else None
         ),
     }
+    _add_usd_aliases(summary)
 
     return {
         "annual_cash_flows": annual_cash_flows,
         "summary": summary,
     }
+
+
+def _add_usd_aliases(values):
+    for key, value in list(values.items()):
+        if key.endswith("_vnd"):
+            values[f"{key[:-4]}_usd"] = value
 
 
 def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years):

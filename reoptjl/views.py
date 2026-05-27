@@ -409,12 +409,18 @@ def _vietnam_proforma_response(request, run_uuid, reopt_results):
             status=400,
         )
 
-    assumptions = {
-        "esco_energy_discount_fraction": esco_energy_discount_fraction,
-    }
+    try:
+        assumptions, cash_flow_overrides = _vietnam_proforma_overrides(
+            request,
+            esco_energy_discount_fraction,
+        )
+    except ValueError as error:
+        return JsonResponse(make_error_resp(str(error)), status=400)
+
     cash_flow_result = calculate_esco_pro_forma_from_reopt_results(
         reopt_results,
         esco_energy_discount_fraction=esco_energy_discount_fraction,
+        **cash_flow_overrides,
     )
     report_data = build_vietnam_report_data(reopt_results, cash_flow_result)
     workbook = build_vietnam_esco_workbook(
@@ -432,6 +438,77 @@ def _vietnam_proforma_response(request, run_uuid, reopt_results):
     )
     response["Content-Disposition"] = f'attachment; filename="vietnam_proforma_{run_uuid}.xlsx"'
     return response
+
+
+def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
+    assumptions = {
+        "esco_energy_discount_fraction": esco_energy_discount_fraction,
+    }
+    cash_flow_overrides = {}
+    numeric_query_params = {
+        "owner_discount_rate_fraction": "owner_discount_rate_fraction",
+        "debt_fraction": "debt_fraction",
+        "debt_interest_rate_fraction": "debt_interest_rate_fraction",
+        "debt_term_years": "debt_term_years",
+        "annual_om_usd": "annual_om_vnd",
+        "pv_capex_usd": "pv_capex_vnd",
+        "bess_capex_usd": "bess_capex_vnd",
+        "annual_om_vnd": "annual_om_vnd",
+        "pv_capex_vnd": "pv_capex_vnd",
+        "bess_capex_vnd": "bess_capex_vnd",
+        "exchange_rate_vnd_per_usd": "exchange_rate_vnd_per_usd",
+        "evn_energy_escalation_rate": "evn_energy_escalation_rate",
+        "evn_capacity_escalation_rate": "evn_capacity_escalation_rate",
+        "demand_savings_esco_share": "esco_demand_savings_share",
+    }
+
+    for query_key, override_key in numeric_query_params.items():
+        if query_key not in request.GET:
+            continue
+        try:
+            value = float(request.GET[query_key])
+        except ValueError:
+            raise ValueError(f"{query_key} must be a number.")
+        if query_key == "debt_term_years":
+            value = int(value)
+        assumptions[query_key] = value
+        if query_key.endswith("_vnd"):
+            exchange_rate = _exchange_rate_for_vnd_query(request)
+            cash_flow_overrides[override_key] = value / exchange_rate
+            assumptions[query_key.replace("_vnd", "_usd")] = value / exchange_rate
+        else:
+            cash_flow_overrides[override_key] = value
+
+    if "grid_charging_enabled" in request.GET:
+        value = _parse_boolean_query_param(
+            "grid_charging_enabled",
+            request.GET["grid_charging_enabled"],
+        )
+        assumptions["grid_charging_enabled"] = value
+        cash_flow_overrides["grid_charging_enabled"] = value
+
+    return assumptions, cash_flow_overrides
+
+
+def _exchange_rate_for_vnd_query(request):
+    try:
+        exchange_rate = float(request.GET["exchange_rate_vnd_per_usd"])
+    except KeyError:
+        raise ValueError("exchange_rate_vnd_per_usd is required when passing VND cash-flow override query params.")
+    except ValueError:
+        raise ValueError("exchange_rate_vnd_per_usd must be a number.")
+    if exchange_rate <= 0:
+        raise ValueError("exchange_rate_vnd_per_usd must be greater than zero.")
+    return exchange_rate
+
+
+def _parse_boolean_query_param(name, value):
+    lowered = value.lower()
+    if lowered in ["1", "true", "yes"]:
+        return True
+    if lowered in ["0", "false", "no"]:
+        return False
+    raise ValueError(f"{name} must be a boolean.")
 
 def peak_load_outage_times(request):
     try:

@@ -4,12 +4,12 @@ from openpyxl.styles import Font, PatternFill
 
 
 SUMMARY_ROWS = [
-    ("Total Capex (VND)", "total_capex_vnd"),
-    ("Debt Principal (VND)", "debt_principal_vnd"),
-    ("Equity Investment (VND)", "equity_investment_vnd"),
+    ("Total Capex (USD)", "total_capex_usd"),
+    ("Debt Principal (USD)", "debt_principal_usd"),
+    ("Equity Investment (USD)", "equity_investment_usd"),
     ("Project IRR", "project_irr_fraction"),
     ("Equity IRR", "equity_irr_fraction"),
-    ("NPV (VND)", "npv_vnd"),
+    ("NPV (USD)", "npv_usd"),
     ("Average DSCR", "average_dscr"),
     ("Simple Payback (Years)", "simple_payback_years"),
     ("ROI", "roi_fraction"),
@@ -17,34 +17,34 @@ SUMMARY_ROWS = [
 
 CASH_FLOW_COLUMNS = [
     ("Year", "year"),
-    ("ESCO Energy Revenue (VND)", "esco_energy_revenue_vnd"),
-    ("ESCO Demand Revenue (VND)", "esco_demand_revenue_vnd"),
-    ("ESCO Grid Arbitrage Revenue (VND)", "esco_grid_arbitrage_revenue_vnd"),
-    ("ESCO Revenue (VND)", "esco_revenue_vnd"),
-    ("O&M (VND)", "annual_om_vnd"),
-    ("Replacement Cost (VND)", "replacement_cost_vnd"),
-    ("Depreciation (VND)", "depreciation_vnd"),
-    ("CIT (VND)", "cit_vnd"),
-    ("Cash Available For Debt Service (VND)", "cash_available_for_debt_service_vnd"),
-    ("Debt Service (VND)", "debt_service_vnd"),
-    ("Equity Cash Flow (VND)", "equity_cash_flow_vnd"),
-    ("Offtaker Savings (VND)", "offtaker_savings_vnd"),
+    ("ESCO Energy Revenue (USD)", "esco_energy_revenue_usd"),
+    ("ESCO Demand Revenue (USD)", "esco_demand_revenue_usd"),
+    ("ESCO Grid Arbitrage Revenue (USD)", "esco_grid_arbitrage_revenue_usd"),
+    ("ESCO Revenue (USD)", "esco_revenue_usd"),
+    ("O&M (USD)", "annual_om_usd"),
+    ("Replacement Cost (USD)", "replacement_cost_usd"),
+    ("Depreciation (USD)", "depreciation_usd"),
+    ("CIT (USD)", "cit_usd"),
+    ("Cash Available For Debt Service (USD)", "cash_available_for_debt_service_usd"),
+    ("Debt Service (USD)", "debt_service_usd"),
+    ("Equity Cash Flow (USD)", "equity_cash_flow_usd"),
+    ("Offtaker Savings (USD)", "offtaker_savings_usd"),
     ("Offtaker Savings Fraction", "offtaker_savings_fraction"),
     ("DSCR", "dscr"),
 ]
 
 TAX_SCHEDULE_COLUMNS = [
     ("Year", "year"),
-    ("Depreciation (VND)", "depreciation_vnd"),
-    ("CIT (VND)", "cit_vnd"),
+    ("Depreciation (USD)", "depreciation_usd"),
+    ("CIT (USD)", "cit_usd"),
 ]
 
 DEBT_SERVICE_COLUMNS = [
     ("Year", "year"),
-    ("Interest (VND)", "interest_vnd"),
-    ("Principal (VND)", "principal_vnd"),
-    ("Debt Service (VND)", "debt_service_vnd"),
-    ("Ending Debt Balance (VND)", "ending_debt_balance_vnd"),
+    ("Interest (USD)", "interest_usd"),
+    ("Principal (USD)", "principal_usd"),
+    ("Debt Service (USD)", "debt_service_usd"),
+    ("Ending Debt Balance (USD)", "ending_debt_balance_usd"),
 ]
 
 SYSTEM_SIZING_ROWS = [
@@ -54,12 +54,12 @@ SYSTEM_SIZING_ROWS = [
 ]
 
 RESULTS_COMPARISON_ROWS = [
-    ("BAU Utility Bill (VND)", "bau_utility_bill_vnd"),
-    ("Optimized Utility Bill (VND)", "optimized_utility_bill_vnd"),
-    ("Utility Bill Savings (VND)", "utility_bill_savings_vnd"),
-    ("BAU Demand Charge (VND)", "bau_demand_charge_vnd"),
-    ("Optimized Demand Charge (VND)", "optimized_demand_charge_vnd"),
-    ("Demand Charge Savings (VND)", "demand_charge_savings_vnd"),
+    ("BAU Utility Bill (USD)", "bau_utility_bill_usd"),
+    ("Optimized Utility Bill (USD)", "optimized_utility_bill_usd"),
+    ("Utility Bill Savings (USD)", "utility_bill_savings_usd"),
+    ("BAU Demand Charge (USD)", "bau_demand_charge_usd"),
+    ("Optimized Demand Charge (USD)", "optimized_demand_charge_usd"),
+    ("Demand Charge Savings (USD)", "demand_charge_savings_usd"),
 ]
 
 ANNUAL_PRODUCTION_ROWS = [
@@ -89,7 +89,7 @@ LOAD_DURATION_COLUMNS = [
 DEVELOPER_FINANCIAL_ROWS = [
     ("Project IRR", "project_irr_fraction"),
     ("Equity IRR", "equity_irr_fraction"),
-    ("NPV (VND)", "npv_vnd"),
+    ("NPV (USD)", "npv_usd"),
     ("Average DSCR", "average_dscr"),
     ("Simple Payback (Years)", "simple_payback_years"),
     ("ROI", "roi_fraction"),
@@ -166,7 +166,7 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
 def _write_summary_sheet(worksheet, summary):
     for row_index, (label, key) in enumerate(SUMMARY_ROWS, start=1):
         worksheet.cell(row=row_index, column=1, value=label)
-        worksheet.cell(row=row_index, column=2, value=summary.get(key))
+        worksheet.cell(row=row_index, column=2, value=_lookup(summary, key))
 
     worksheet.column_dimensions["A"].width = 28
     worksheet.column_dimensions["B"].width = 18
@@ -180,7 +180,7 @@ def _write_key_value_sheet(worksheet, rows, values, chart_title=None):
 
     for row_index, (label, key) in enumerate(rows, start=2):
         worksheet.cell(row=row_index, column=1, value=label)
-        worksheet.cell(row=row_index, column=2, value=values.get(key))
+        worksheet.cell(row=row_index, column=2, value=_lookup(values, key))
 
     worksheet.freeze_panes = "A2"
     worksheet.column_dimensions["A"].width = 34
@@ -198,7 +198,7 @@ def _write_table_sheet(worksheet, columns, rows, chart_title=None):
 
     for row_index, row in enumerate(rows, start=2):
         for column_index, (_header, key) in enumerate(columns, start=1):
-            worksheet.cell(row=row_index, column=column_index, value=row.get(key))
+            worksheet.cell(row=row_index, column=column_index, value=_lookup(row, key))
 
     worksheet.freeze_panes = "A2"
     if chart_title and rows:
@@ -226,6 +226,14 @@ def _autosize_columns(worksheet):
             if cell.value is not None
         )
         worksheet.column_dimensions[column_cells[0].column_letter].width = min(width + 2, 40)
+
+
+def _lookup(values, key):
+    if key in values:
+        return values.get(key)
+    if key.endswith("_usd"):
+        return values.get(f"{key[:-4]}_vnd")
+    return values.get(key)
 
 
 def _add_bar_chart(worksheet, title, first_row, last_row):

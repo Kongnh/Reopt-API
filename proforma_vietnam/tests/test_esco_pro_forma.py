@@ -1,4 +1,5 @@
 from unittest import TestCase
+from copy import deepcopy
 
 from proforma_vietnam.esco_pro_forma import calculate_esco_pro_forma_from_reopt_results
 
@@ -32,6 +33,33 @@ class VietnamEscoProFormaAdapterTests(TestCase):
 
         self.assertEqual(annual["esco_energy_revenue_vnd"], 4500)
         self.assertEqual(annual["esco_grid_arbitrage_revenue_vnd"], 0)
+
+    def test_converts_vnd_tariff_inputs_to_usd_report_values_when_exchange_rate_is_provided(self):
+        reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        reopt_results["inputs"]["ElectricTariff"]["tou_energy_rates_per_kwh"] = [1000, 2000]
+        reopt_results["outputs"]["ElectricTariff"] = {
+            "year_one_bill_before_tax_bau": 50000,
+            "year_one_bill_before_tax": 30000,
+            "year_one_demand_cost_before_tax_bau": 8000,
+            "year_one_demand_cost_before_tax": 3000,
+        }
+        reopt_results["outputs"]["Financial"]["year_one_om_costs_before_tax"] = 1000
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            exchange_rate_vnd_per_usd=25000,
+            reopt_money_values_currency="vnd",
+            project_years=1,
+        )
+
+        annual = result["annual_cash_flows"][0]
+        summary = result["summary"]
+
+        self.assertAlmostEqual(annual["esco_energy_revenue_usd"], 0.576)
+        self.assertEqual(annual["demand_charge_savings_usd"], 0.2)
+        self.assertEqual(annual["annual_om_usd"], 1000)
+        self.assertEqual(summary["total_capex_usd"], 110000)
 
 
 def _fake_reopt_results(can_grid_charge):

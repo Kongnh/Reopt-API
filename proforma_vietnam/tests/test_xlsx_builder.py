@@ -37,10 +37,10 @@ class VietnamXlsxBuilderTests(TestCase):
             for row in range(1, summary.max_row + 1)
         }
 
-        self.assertEqual(values_by_label["Total Capex (VND)"], 1000000)
-        self.assertEqual(values_by_label["Debt Principal (VND)"], 700000)
-        self.assertEqual(values_by_label["Equity Investment (VND)"], 300000)
-        self.assertEqual(values_by_label["NPV (VND)"], 123456)
+        self.assertEqual(values_by_label["Total Capex (USD)"], 1000000)
+        self.assertEqual(values_by_label["Debt Principal (USD)"], 700000)
+        self.assertEqual(values_by_label["Equity Investment (USD)"], 300000)
+        self.assertEqual(values_by_label["NPV (USD)"], 123456)
         self.assertEqual(values_by_label["Equity IRR"], 0.14)
 
     def test_writes_annual_cash_flow_tax_and_debt_rows(self):

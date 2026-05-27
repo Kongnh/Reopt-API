@@ -9,6 +9,24 @@ from proforma_vietnam.case_builder import build_vietnam_case
 
 
 DEFAULT_API_URL = "http://localhost:8000/v3/job/"
+VIETNAM_REPORT_QUERY_KEYS = [
+    "esco_energy_discount_fraction",
+    "owner_discount_rate_fraction",
+    "debt_fraction",
+    "debt_interest_rate_fraction",
+    "debt_term_years",
+    "annual_om_usd",
+    "pv_capex_usd",
+    "bess_capex_usd",
+    "annual_om_vnd",
+    "pv_capex_vnd",
+    "bess_capex_vnd",
+    "exchange_rate_vnd_per_usd",
+    "evn_energy_escalation_rate",
+    "evn_capacity_escalation_rate",
+    "demand_savings_esco_share",
+    "grid_charging_enabled",
+]
 
 
 def main(argv=None):
@@ -40,7 +58,7 @@ def main(argv=None):
         workbook = _download_vietnam_report(
             args.api_url,
             run_uuid,
-            vietnam_case["assumptions"].get("esco_energy_discount_fraction"),
+            vietnam_case["assumptions"],
         )
         (out_dir / f"vietnam_report_{run_uuid}.xlsx").write_bytes(workbook)
 
@@ -70,13 +88,19 @@ def _poll_results(api_url, run_uuid, poll_seconds, max_polls):
     raise TimeoutError(f"Timed out waiting for REopt results for {run_uuid}.")
 
 
-def _download_vietnam_report(api_url, run_uuid, esco_energy_discount_fraction):
-    query = parse.urlencode({
-        "vietnam_proforma": "true",
-        "esco_energy_discount_fraction": esco_energy_discount_fraction,
-    })
+def _download_vietnam_report(api_url, run_uuid, assumptions):
+    query = parse.urlencode(_vietnam_report_query_params(assumptions))
     with request.urlopen(f"{_results_url(api_url, run_uuid)}?{query}") as response:
         return response.read()
+
+
+def _vietnam_report_query_params(assumptions):
+    query = {"vietnam_proforma": "true"}
+    for key in VIETNAM_REPORT_QUERY_KEYS:
+        value = assumptions.get(key)
+        if value is not None:
+            query[key] = value
+    return query
 
 
 def _results_url(api_url, run_uuid):

@@ -6,6 +6,12 @@ def calculate_esco_pro_forma_from_reopt_results(
     esco_energy_discount_fraction,
     **cash_flow_overrides
 ):
+    exchange_rate_vnd_per_usd = cash_flow_overrides.pop("exchange_rate_vnd_per_usd", None)
+    tariff_money_values_currency = cash_flow_overrides.pop("tariff_money_values_currency", "usd")
+    tariff_money_values_currency = cash_flow_overrides.pop(
+        "reopt_money_values_currency",
+        tariff_money_values_currency,
+    )
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
 
@@ -30,11 +36,31 @@ def calculate_esco_pro_forma_from_reopt_results(
 
     cash_flow_inputs = {
         "project_served_pv_kwh": project_served_pv_kwh,
-        "evn_energy_rates_vnd_per_kwh": tariff_inputs.get("tou_energy_rates_per_kwh", []),
-        "bau_evn_bill_vnd": _value(tariff_outputs, "year_one_bill_before_tax_bau"),
-        "optimized_evn_bill_vnd": _value(tariff_outputs, "year_one_bill_before_tax"),
-        "bau_demand_charge_vnd": _value(tariff_outputs, "year_one_demand_cost_before_tax_bau"),
-        "optimized_demand_charge_vnd": _value(tariff_outputs, "year_one_demand_cost_before_tax"),
+        "evn_energy_rates_vnd_per_kwh": _money_series(
+            tariff_inputs.get("tou_energy_rates_per_kwh", []),
+            exchange_rate_vnd_per_usd,
+            tariff_money_values_currency,
+        ),
+        "bau_evn_bill_vnd": _money(
+            _value(tariff_outputs, "year_one_bill_before_tax_bau"),
+            exchange_rate_vnd_per_usd,
+            tariff_money_values_currency,
+        ),
+        "optimized_evn_bill_vnd": _money(
+            _value(tariff_outputs, "year_one_bill_before_tax"),
+            exchange_rate_vnd_per_usd,
+            tariff_money_values_currency,
+        ),
+        "bau_demand_charge_vnd": _money(
+            _value(tariff_outputs, "year_one_demand_cost_before_tax_bau"),
+            exchange_rate_vnd_per_usd,
+            tariff_money_values_currency,
+        ),
+        "optimized_demand_charge_vnd": _money(
+            _value(tariff_outputs, "year_one_demand_cost_before_tax"),
+            exchange_rate_vnd_per_usd,
+            tariff_money_values_currency,
+        ),
         "pv_capex_vnd": _pv_capex(pv_outputs),
         "bess_capex_vnd": _storage_capex(storage_inputs, storage_outputs),
         "annual_om_vnd": _value(financial_outputs, "year_one_om_costs_before_tax"),
@@ -88,3 +114,20 @@ def _storage_capex(storage_inputs, storage_outputs):
 def _value(data, key):
     value = data.get(key)
     return value if value is not None else 0
+
+
+def _money(value, exchange_rate_vnd_per_usd, reopt_money_values_currency):
+    if reopt_money_values_currency == "usd":
+        return value
+    if reopt_money_values_currency == "vnd":
+        if not exchange_rate_vnd_per_usd:
+            raise ValueError("exchange_rate_vnd_per_usd is required when REopt money values are VND.")
+        return value / exchange_rate_vnd_per_usd
+    raise ValueError("tariff_money_values_currency must be 'usd' or 'vnd'.")
+
+
+def _money_series(values, exchange_rate_vnd_per_usd, reopt_money_values_currency):
+    return [
+        _money(value, exchange_rate_vnd_per_usd, reopt_money_values_currency)
+        for value in values
+    ]
