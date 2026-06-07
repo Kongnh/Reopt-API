@@ -13,6 +13,5 @@
   "owner_discount_rate_fraction": 0.1,
   "debt_fraction": 0.7,
   "debt_interest_rate_fraction": 0.085,
-  "debt_term_years": 10,
-  "bess_capex_usd": 0
+  "debt_term_years": 10
 }
