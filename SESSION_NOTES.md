@@ -1,3 +1,130 @@
+# 2026-06-07 - Case_5 End-to-End Validation, Model Corrections, bess_capex Fix, Commits
+
+- User asked to continue from the prior session and build the deferred Factory A `case_5` end-to-end. The validation surfaced four substantive model corrections + one capex accounting bug, all fixed and committed in this session.
+- Commits made:
+  - `290b8dc2` Ship Phase 3 DPPA settlement with Factory A case_5
+  - `8e0c2d1c` Refresh case_1/3/4 outputs after bess_capex fix
+
+## Plan + Discovery (plan mode)
+
+- Read `CODEX_SESSION.md`, `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`, the existing `dppa_settlement.py`, `case_builder.py`, `run_case.py`, and `xlsx_builder.py` to understand the staged Phase 3 implementation.
+- User chose: 8760 CfD volume series matched to case_2 PV+BESS dispatch, strike `2000 VND/kWh` (revised up from initial 1700 during plan review).
+- Plan file: `C:\Users\kongn\.claude\plans\dazzling-seeking-phoenix.md` (approved).
+
+## case_5 Built
+
+- `outputs/vietnam_case/factory_a/case_5/case.json` cloned from `case_2/case.json` with the `dppa` block:
+  - `type = "grid_dppa_cfd"`, `cfd_strike_per_kwh_vnd = 2000.0`
+  - `cfd_contract_volume_kwh_per_hour` = 8760-array derived from case_2 results: `pv_to_load + pv_to_grid + storage_to_load + storage_to_grid + pv_curtailed`. Annual total 7.71 GWh.
+- Docker stack brought up via `docker-compose up -d`; Julia + celery + django + db + redis confirmed running.
+- REopt optimization completed successfully (run_uuid `bf7a908a-1d47-4772-a81e-062766e848e2`, status `optimal`). PV sized 5945.62 kW, BESS sized 1796.81 kW / 10766.7 kWh — identical to case_2 since the payload is identical (DPPA settlement is post-processing only).
+
+## Five bugs fixed in this session
+
+### 1. HTTP 414 on workbook download
+
+- Symptom: First workbook download attempt failed with `HTTP Error 414: Request-URI Too Long`. The `dppa_config` JSON-encoded into a GET query string was ~260 KB because of the embedded 8760 FMP series + 8760 contract volume.
+- Fix: `proforma_vietnam/run_case.py` `_download_vietnam_report` now POSTs the request with `dppa_config` form-encoded in the body when present, keeping the scalar params (esco_energy_discount_fraction etc.) in the GET query. `reoptjl/views.py` `_vietnam_proforma_overrides` reads `dppa_config` from either `request.GET` or `request.POST`.
+- `dev_settings.py` does not enable CSRF middleware, so POST works without a token.
+
+### 2. `fee_escalation_rate = None` → TypeError in cash_flow
+
+- Symptom: Optimization succeeded but report generation crashed with `TypeError: unsupported operand type(s) for +: 'int' and 'NoneType'` at `cash_flow.py:365` (`fee_multiplier = (1 + escalation.get("fee_escalation_rate", 0.0)) ** year_index`). `.get(...)` was returning the stored `None` because the key existed.
+- Fix: `case_builder.py` `_dppa_inputs(...)` now defaults `fee_escalation_rate` to `tariff_config.evn_energy_escalation_rate` (matches the design doc's documented intent). Function signature gained a `tariff_config` parameter.
+
+### 3. DPPA VND values mixed with USD cash flow
+
+- Symptom: After the first successful render, headline KPIs were absurd (NPV $101B, DSCR 37,917, ROI 311,274) because `settle_dppa_year_one` returns VND-magnitude values from FMP × kWh, but the surrounding cash flow runs in USD (REopt money values are USD; `_money()` passes them through unchanged).
+- Fix: `esco_pro_forma.py` `_convert_dppa_year_one_to_cash_flow_currency(...)` divides every `*_vnd` key in `dppa_settlement["year_one"]` by `exchange_rate_vnd_per_usd` before threading into `calculate_vietnam_esco_cash_flow`. Hourly and monthly breakouts stay VND because the Hourly Settlement / Monthly Settlement sheets are explicitly VND-labelled.
+- New tests in `test_esco_pro_forma.py` lock in the conversion and the breakout-stays-VND invariant.
+
+### 4. Customer-side spot price formula: FMP → CFMP × K_pp
+
+- Per user clarification of the ND57 formula: `C_DN = Σᵢ Q_KHhc(i) × CFMP(i) × K_pp`, where the buyer's spot energy charge uses CFMP (not FMP) marked up by the distribution loss factor.
+- Discovery: `DPPA DOC/fmp_cfmp_vn.json` already carried both `fmp_vnd_per_kwh` and `cfmp_vnd_per_kwh` series. CFMP/FMP ratio averages 1.0274, almost exactly `K_pp = 1.027263` at 22-110kV — CFMP is FMP marked up by distribution losses.
+- Fix:
+  - `dppa_settlement.py`: new `load_cfmp_series(path)` helper. `settle_dppa_year_one` reads `dppa_inputs["cfmp_series_vnd_per_kwh"]` (falls back to FMP if absent) and computes `C_DN = q_adj × cfmp × kpp`.
+  - `case_builder.py`: loads both FMP and CFMP series from the JSON file, stuffs both into the `dppa` assumptions block.
+  - New test `test_cfmp_series_drives_c_dn_when_provided`.
+
+### 5. Curtailed PV credited as DPPA grid export
+
+- Discovery: case_2's REopt run curtailed 19.64% of PV production (1.57 GWh/yr) because the payload had no grid-export incentive. Under DPPA the generator owns the meter and dumps surplus at FMP rather than curtailing.
+- User decision: optimizer payload stays self-consumption ("side reward, not main objective"); the settlement layer credits the curtailed energy as DPPA grid export.
+- Fix:
+  - `dppa_settlement.py` accepts `pv_curtailed_kw` in the dispatch dict and adds it to `pv_to_grid_effective`, which flows into `Q_re_meter` and `generator_fmp_revenue`.
+  - `esco_pro_forma.py` passes `electric_curtailed_series_kw` from REopt outputs into the dispatch.
+  - `report_data.py` exposes `pv_to_grid_effective_kwh = pv_to_grid + pv_curtailed` for the workbook.
+  - New test `test_curtailed_pv_is_credited_as_grid_export_in_q_re_meter`.
+
+### Plus: bess_capex_usd=0 silent override bug
+
+- User noticed `"bess_capex_usd": 0` in `case_5/assumptions.json`. Diagnosed:
+  - `case_builder.py` `_capex_assumptions` had `if storage.get("installed_cost_constant") is not None: ... has_storage_capex = True`. With `installed_cost_constant=0` present, this flipped `has_storage_capex=True` and wrote 0.
+  - `run_case.py` ships `bess_capex_usd=0` in the URL query.
+  - `views.py` stuffs it into `cash_flow_overrides`.
+  - `esco_pro_forma.py` correctly derives BESS capex from REopt outputs (`storage_outputs["initial_capital_cost"]`), but `cash_flow_inputs.update(cash_flow_overrides)` silently overrides the truth with 0.
+- Real BESS capex for case_5: $1,435,748.80 (REopt-reported). The 0 deflated total project capex from $4.29M to $2.85M, inflating IRR/NPV/ROI/payback for all five Factory A cases.
+- Fix: `case_builder._capex_assumptions` now only writes `bess_capex_usd` when (a) `size_kw` or `size_kwh` is preset in case.json AND (b) computed storage_capex > 0. When sizes are optimizer-chosen, the field is omitted and `esco_pro_forma` derives capex from REopt outputs as already intended.
+- Same logic applies to PV capex — already correctly gated on `size_kw is not None`.
+- New regression test `test_bess_capex_omitted_when_storage_size_is_optimizer_chosen`.
+
+## New feature: Year 1 BAU vs DPPA workbook sheet
+
+- New sheet appears when `dppa.type != none`, alongside the existing DPPA Configuration / Hourly Settlement / Monthly Settlement / DPPA Annual Summary sheets.
+- Three sections:
+  - **Buyer (Factory) — Year 1 Outflow (USD)**: BAU EVN bill vs DPPA line items (C_DN / C_DPPA / C_CL / C_BL / CfD payment / optimized demand charge / ESCO demand savings share / total outflow / savings vs BAU absolute + fraction).
+  - **Seller (ESCO/Generator) — Year 1 Revenue (USD)**: Phase 2 discount-to-EVN energy revenue (zeroed under DPPA) / FMP market revenue / CfD net / demand savings share / grid arbitrage revenue / total ESCO revenue.
+  - **System Energy Flows (kWh/yr)**: PV→load, PV→storage, PV→grid (export at FMP, including would-be-curtailed under DPPA), storage→load, total Q_re_meter, Q_adj loss-adjusted, EVN retail shortfall.
+- Data plumbing: `cash_flow.py` now writes `bau_evn_bill_vnd`, `optimized_evn_bill_vnd`, `bau_demand_charge_vnd`, `optimized_demand_charge_vnd` into each annual row. `report_data.py` exposes `pv_to_grid_effective_kwh`. `xlsx_builder._write_bau_vs_dppa_sheet` reads from both.
+
+## Verification evidence
+
+- 74 unit tests pass: `python -m unittest discover -s proforma_vietnam/tests -t .`
+- Hand-checked DPPA settlement math against the full 8760 FMP series (Python script alongside `outputs/vietnam_case/factory_a/case_5/`):
+  - CfD net total: hand-computed 3.474 B VND, workbook 3.474 B VND, delta 0.000%
+  - C_DN total: hand-computed 8.356 B VND, workbook 8.356 B VND, delta 0.000%
+  - Generator FMP revenue: hand 8.807 B VND, workbook matches
+  - Generator total revenue (FMP + CfD net): hand 12.281 B VND, workbook matches
+- Honest Factory A KPIs after `bess_capex` fix:
+  - case_1: capex $2.57M → $3.71M (+$1.13M), equity IRR 30.6% → 18.1%, NPV $2.70M → $1.65M
+  - case_2: capex $2.85M → $4.29M (+$1.44M), equity IRR 28.7% → 16.0%, NPV $2.76M → $1.44M
+  - case_3: capex $2.95M → $4.88M (+$1.93M), equity IRR 25.0% → 12.3%, NPV $2.43M → $0.65M
+  - case_4: unchanged (REopt did not size BESS — true BESS capex $0)
+  - case_5: capex $2.85M → $4.29M (+$1.44M), equity IRR 31.3% → 14.5%, NPV $2.09M → $0.77M
+- Phase 2 reference workbook gate (`test_reference_esco_workbook.py`) and the new DPPA reference gate (`test_reference_dppa_workbook.py`) both stay green.
+
+## Files changed
+
+- Source:
+  - `proforma_vietnam/dppa_settlement.py` (CFMP loader, C_DN formula change, curtailed→export accounting, new sums)
+  - `proforma_vietnam/case_builder.py` (bess_capex gating fix, fee_escalation_rate default, CFMP series loading)
+  - `proforma_vietnam/esco_pro_forma.py` (DPPA VND→USD conversion, pv_curtailed dispatch wiring)
+  - `proforma_vietnam/cash_flow.py` (bau/optimized bill+demand surfaces in annual rows)
+  - `proforma_vietnam/report_data.py` (`pv_to_grid_effective_kwh` aggregation)
+  - `proforma_vietnam/xlsx_builder.py` (Year 1 BAU vs DPPA sheet)
+  - `proforma_vietnam/run_case.py` (POST routing for `dppa_config`)
+  - `reoptjl/views.py` (accept `dppa_config` from POST body)
+  - `.gitignore` (added `outputs/pvwatts_cache/`, `~$*.xlsx`)
+- Tests (74 passing total):
+  - `proforma_vietnam/tests/test_dppa_settlement.py` (updated C_DN expectation, +3 new tests for CFMP, curtailed, load_cfmp)
+  - `proforma_vietnam/tests/test_esco_pro_forma.py` (+2 new tests for VND→USD conversion + hourly-stays-VND invariant)
+  - `proforma_vietnam/tests/test_case_builder.py` (+1 new regression test for bess_capex)
+  - `proforma_vietnam/tests/test_run_case.py` (updated POST-body assertions)
+- Data assets committed:
+  - `DPPA DOC/` (FMP/CFMP JSON series + ND57 PDF set + EVN reports)
+- Generated case outputs committed:
+  - `outputs/vietnam_case/factory_a/case_1/` through `case_5/` (case.json, payload.json, assumptions.json, results.json, vietnam_report_<uuid>.xlsx)
+
+## Blockers / assumptions / open follow-ups
+
+- Workbook copy `outputs/vietnam_case/factory_a/case_5/vietnam_report_*_v5.xlsx` and Excel lock file `~$...xlsx` could not be removed during the session because Excel was holding them open. Excluded from commit; user needs to close Excel then delete manually.
+- Stale pre-layout-migration workbook `outputs/vietnam_case/factory_a/vietnam_report_b729db40-*.xlsx` left in place (untracked). User to decide whether to delete.
+- Variable naming smell: `cash_flow.py` uses `_vnd` suffixes throughout for variables that actually carry USD values (because `_money()` normalizes to USD when `reopt_money_values_currency="usd"`). This near-miss naming was the root cause of the unit-mixing bug; a future refactor to rename would reduce risk but touches many files.
+- DPPA Annual Summary sheet column labels say "(USD)" and now correctly show USD values after the conversion fix. The Hourly Settlement and Monthly Settlement sheets stay (VND) and that's intentional.
+- Under the chosen deal terms (strike 2000 VND/kWh, shaped volume), case_5 is worse than case_2 on every KPI. The CfD at this strike is a one-way buyer→seller transfer because strike > max(FMP) = 1944. To find a bankable strike for both sides, the next session should run a strike sweep (see `CODEX_SESSION.md` resume notes).
+- REopt optimizer still sizes against EVN retail tariff under DPPA — aligning the optimizer with FMP is item 4 in Active Product Direction but deferred.
+
 # 2026-06-06 - Phase 3 DPPA Settlement Layer Implementation
 
 - User requested research into Vietnam DPPA settlement under ND57/2025 to design an ESCO contract model, with reference documents staged under `DPPA DOC/`.
