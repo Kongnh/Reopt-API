@@ -1,3 +1,110 @@
+# 2026-06-06 - Phase 3 DPPA Settlement Layer Implementation
+
+- User requested research into Vietnam DPPA settlement under ND57/2025 to design an ESCO contract model, with reference documents staged under `DPPA DOC/`.
+- Discovery and design pass (in plan mode):
+  - Read `CODEX_SESSION.md`, `SESSION_NOTES.md`, `vietnam_market_context.md`, the Phase 2 design doc, and the seven PDFs + `fmp_cfmp_vn.json` under `DPPA DOC/`.
+  - Mapped existing scaffolding: `proforma_vietnam/case_builder.py`, `cash_flow.py`, `esco_pro_forma.py`, `xlsx_builder.py`, `reference_workbook_comparison.py`, `run_case.py`; `reoptjl/views.py` `_vietnam_proforma_overrides`; and `reoptjl/src/vietnam/evn_tariff.py`.
+  - Synthesized the ND57 four-layer cost stack (C_DN spot + C_DPPA system fee + C_CL delta + C_BL retail fallback) plus the bilateral CfD overlay from Điều 17–18.
+  - User confirmed via AskUserQuestion: (1) ESCO discount-to-EVN is **replaced** (not layered) under grid DPPA; (2) v1 ships `grid_dppa_cfd` (spot path reachable via `Q_c = 0`); (3) FMP series sourced from `DPPA DOC/fmp_cfmp_vn.json`; (4) ESCO is the generator (single-entity model).
+  - User refinements: (1) BESS modeled co-located with RE only (factory-side BESS deferred), and (2) signed `cfd_strike_escalation_rate` to support either escalating or step-down strikes per PPA negotiation. Plan file updated and approved at `C:\Users\kongn\.claude\plans\read-the-codex-session-curried-dijkstra.md`.
+- Design docs:
+  - `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`: appended a Phase 3 DPPA Settlement Layer section with contract type enum, BESS configuration assumption, energy buckets, settlement math, annual escalation rules, cash-flow attribution table, new input fields, and acceptance criteria.
+  - `roadmap.md`: added a Phase 3 section with goal, deliverables, acceptance criteria, and "not in Phase 3" list; demoted leftover items to "Deferred (Phase 4+)".
+- New module: `proforma_vietnam/dppa_settlement.py`
+  - `load_fmp_series(path)` reads `fmp_vnd_per_kwh` from the JSON file at `DPPA DOC/fmp_cfmp_vn.json` (8760 entries; the file also carries `cfmp_vnd_per_kwh` and `_metadata`).
+  - `settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)` computes per-hour `C_DN/C_DPPA/C_CL/C_BL/CfD` and aggregates them into year-one totals; `Q_re_meter = pv_to_load + pv_to_grid + storage_to_load + storage_to_grid` accounts for the upstream-of-meter BESS placement.
+  - Defaults pinned: `k = 1.026`, `K_pp ∈ {1.008525, 1.027263}`, `delta = 1.0`, `f_dppa = 360 VND/kWh`, `f_cl = 163 VND/kWh`.
+  - Returns `year_one` primitives + `hourly_breakout` + `monthly_breakout` + `escalation` rates so the cash flow can apply year-N multipliers.
+- `proforma_vietnam/cash_flow.py`:
+  - Added optional `dppa_settlement=None` kwarg. When `None`, the Phase 2 code path is byte-identical; when provided, `base_energy_revenue_vnd` and `base_grid_arbitrage_revenue_vnd` are zeroed out, the offtaker post-project cost is rebuilt from `c_dn + c_dppa + c_cl + c_bl + cfd_net + optimized_demand_charge + esco_demand_revenue`, and per-year `c_dn`, `c_dppa`, `c_cl`, `c_bl`, `cfd_net`, `generator_revenue` keys land in each annual row.
+  - Year-N escalation: `fee_escalation_rate` for C_DN, C_DPPA, C_CL, FMP-side of CfD, and generator FMP revenue; signed `cfd_strike_escalation_rate` for the strike-side of CfD; `evn_energy_escalation_rate` for C_BL.
+  - When DPPA active, top-level `dppa_hourly_breakout` and `dppa_monthly_breakout` are attached to the cash-flow result so downstream consumers can render the new sheets.
+- `proforma_vietnam/case_builder.py`:
+  - New `_dppa_inputs(dppa_config, voltage_key)` validates the `dppa.type` enum, enforces ND57 Art. 16 voltage eligibility (`110kv_and_above` or `22_to_110kv`), requires `cfd_strike_per_kwh_vnd` + `cfd_contract_volume_kwh_per_hour`, derives `K_pp` from voltage if not supplied, and loads the FMP series via `dppa_settlement.load_fmp_series`.
+  - When DPPA is active, `ElectricStorage.can_grid_charge` is forced `False` in the REopt payload (co-located BESS only).
+  - When DPPA is active, `assumptions["dppa"]` is populated as a nested dict containing the 8760 FMP series.
+- `proforma_vietnam/esco_pro_forma.py`:
+  - Accepts `dppa_inputs` via `cash_flow_overrides`. When `type == "grid_dppa_cfd"`, builds the dispatch dict from REopt outputs (load, pv_to_load, pv_to_grid, storage_to_load, storage_to_grid), calls `settle_dppa_year_one`, and threads the result as `dppa_settlement` into `calculate_vietnam_esco_cash_flow`.
+- `proforma_vietnam/xlsx_builder.py`:
+  - Phase 2 has 11 sheets unchanged when `dppa.type = "none"` or missing.
+  - When DPPA is active, adds 4 conditional sheets — DPPA Configuration (key/value), Hourly Settlement (8760 rows), Monthly Settlement (12 rows), DPPA Annual Summary — plus 3 right-edge Cash Flow columns (`generator_revenue_usd`, `cfd_net_usd`, `dppa_offtaker_cost_usd`).
+  - `_write_assumptions_sheet` now skips nested dict/list values so the `dppa` block doesn't crash openpyxl.
+- `proforma_vietnam/report_data.py`: forwards `dppa_hourly_breakout` and `dppa_monthly_breakout` from the cash-flow result so the workbook builder receives them.
+- `proforma_vietnam/run_case.py`: when `assumptions["dppa"]` is present, the entire block is serialized as a single JSON-encoded `dppa_config` GET parameter (one param instead of ten, accommodates the 8760 FMP series).
+- `reoptjl/views.py`: `_vietnam_proforma_overrides` decodes `dppa_config` from the request, validates it's a JSON object, records it in `assumptions["dppa"]` for the Assumptions sheet, and passes it as `dppa_inputs` into `calculate_esco_pro_forma_from_reopt_results`.
+- `proforma_vietnam/reference_workbook_comparison.py`: existing `compare_reference_workbook(...)` untouched. Added sibling `compare_dppa_reference_workbook(...)` that reads a `DPPA Year One` key/value sheet alongside the Phase 2 `Inputs`/`Reference Summary`/`Reference Annual Cash Flow` sheets and validates the implementation at 1% tolerance.
+- Tests added or extended:
+  - `proforma_vietnam/tests/test_dppa_settlement.py` (10 tests): hand-computed 24-hour fixture matches `C_DN`, `C_DPPA`, `C_CL`, `C_BL`, CfD, generator revenue, `Q_re_meter`; offtaker cost identity; zero CfD volume reduces to pure spot; scalar volume broadcasts; storage discharge counts toward generator meter; monthly breakout returns 12 entries; `load_fmp_series` reads 8760 values; FMP vs CFMP returned correctly.
+  - `proforma_vietnam/tests/test_cash_flow.py` (2 new tests): DPPA replaces ESCO energy revenue with generator revenue; DPPA replaces offtaker post-project cost with `(C_DN+C_DPPA+C_CL+C_BL+CfD) + optimized_demand_charge + esco_demand_revenue`.
+  - `proforma_vietnam/tests/test_case_builder.py` (6 new tests): `dppa` block omitted when type is none; populates with defaults and FMP series; forces `can_grid_charge=False`; rejects ineligible voltage; rejects missing `cfd_strike_per_kwh_vnd`/`cfd_contract_volume_kwh_per_hour`; rejects unknown enum value.
+  - `proforma_vietnam/tests/test_esco_pro_forma.py` (1 new test): `dppa_inputs` drive the `grid_dppa_cfd` branch and the cash-flow result exposes `c_dn_vnd`/`c_bl_vnd`/`cfd_net_vnd`/`generator_revenue_vnd`.
+  - `proforma_vietnam/tests/test_xlsx_builder.py` (3 new tests): DPPA sheets omitted on the `none` path; 4 new sheets present on `grid_dppa_cfd`; Cash Flow gains the 3 DPPA columns.
+  - `proforma_vietnam/tests/test_run_case.py` (1 new test): `dppa` block serialized as `dppa_config` JSON query param, not as flat params.
+  - `proforma_vietnam/tests/test_reference_dppa_workbook.py` (new file, 1 test): hand-built DPPA reference workbook matches the implementation at 1% tolerance.
+- Verification:
+  - Green: `python -m unittest discover -s proforma_vietnam.tests` — 68 tests passing, including the Phase 2 reference workbook gate (`test_reference_esco_workbook.py`) which proves the `dppa_settlement=None` default keeps the existing path byte-identical.
+  - Green: targeted runs as each module landed (`test_dppa_settlement`, `test_cash_flow`, `test_case_builder`, `test_esco_pro_forma`, `test_xlsx_builder`, `test_run_case`, `test_reference_dppa_workbook`).
+  - `reoptjl/views.py` syntax-checked via `python -m py_compile`; Django tests are blocked in this environment (`ModuleNotFoundError: No module named 'django'`) — needs the docker stack.
+  - End-to-end docker run on a `case_5` clone is the next manual verification step and is not yet executed.
+- Files changed:
+  - Modified: `CODEX_SESSION.md`, `SESSION_NOTES.md` (this entry), `roadmap.md`, `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`, `proforma_vietnam/case_builder.py`, `proforma_vietnam/cash_flow.py`, `proforma_vietnam/esco_pro_forma.py`, `proforma_vietnam/reference_workbook_comparison.py`, `proforma_vietnam/report_data.py`, `proforma_vietnam/run_case.py`, `proforma_vietnam/xlsx_builder.py`, `reoptjl/views.py`, plus the five `proforma_vietnam/tests/test_*.py` files for the test additions.
+  - New: `proforma_vietnam/dppa_settlement.py`, `proforma_vietnam/tests/test_dppa_settlement.py`, `proforma_vietnam/tests/test_reference_dppa_workbook.py`.
+  - Plan file: `C:\Users\kongn\.claude\plans\read-the-codex-session-curried-dijkstra.md` (approved by user; archived plan reference only).
+- Git state at close: branch `master`, dirty working tree across the files above plus the still-untracked generated outputs under `outputs/vietnam_case/factory_a/` and `outputs/pvwatts_cache/`. No commit made — Phase 3 is staged for review and waiting on the manual docker validation step.
+- Blockers / assumptions:
+  - Real-world DPPA case validation against `case_5` was deferred to a docker session because this host lacks Django/Docker reachability.
+  - Phase 3 covers only `grid_dppa_cfd` with co-located BESS. `private_wire` (Điều 25) and factory-side BESS are intentionally deferred per the approved plan.
+  - REopt optimizer still sizes against EVN-retail tariff under DPPA; aligning the optimizer with FMP is an explicit out-of-scope item.
+
+# 2026-06-06 - CODEX_SESSION Cleanup Before DPPA Settlement Design
+
+- Cleaned `CODEX_SESSION.md` from a long accumulated handoff into a concise resume file.
+- Archived the previous active-state context by preserving the important history in this notes file and replacing the live handoff with a short current-state pointer.
+- Current git status before cleanup:
+  - Branch: `master`
+  - Tracking: `master...origin/master [ahead 2]`
+  - Pre-existing dirty files/artifacts: `CODEX_SESSION.md`, `SESSION_NOTES.md`, `Sample Load Profile/Emivest.csv`, `outputs/pvwatts_cache/`, and generated Factory A report outputs under `outputs/vietnam_case/factory_a/`.
+- No source-code implementation was changed in this cleanup.
+- New active direction:
+  - Design DPPA settlement as the next product phase.
+  - Update `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md` so ESCO cash flow can handle DPPA contract settings.
+  - Preserve the existing discount-to-EVN ESCO base case as default behavior.
+- Recommended next session flow:
+  1. Review `roadmap.md`, `vietnam_market_context.md`, and `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`.
+  2. Add a DPPA settlement section to the ESCO contract design with contract settings, hourly equations, required inputs, outputs, and out-of-scope items.
+  3. Update `roadmap.md` Phase 3 from deferred bullets into a concrete implementation plan.
+  4. Add tests first for the smallest DPPA settlement slice before implementation.
+
+# 2026-05-28 - CEBA Factory A BESS/Solar Case Study Deck
+
+- Built a standalone 10-slide corporate white-background presentation for the CEBA clean-energy procurement workshop:
+  - Final PPTX: `C:\Users\kongn\Pictures\CodeProject\CEBA Slide\output\Factory_A_BESS_Solar_Case_Study_CEBA.pptx`.
+  - Data source: `outputs\vietnam_case\factory_a\case_1` through `case_4`, especially each case's `vietnam_report_<run_uuid>.xlsx`, `case.json`, and `assumptions.json`.
+  - Context sources: `C:\Users\kongn\Pictures\CodeProject\CEBA Slide\Chiến Lược Tích Hợp BESS.pptx` and `C:\Users\kongn\Pictures\CodeProject\CEBA Slide\Soạn thảo tài liệu training BESS Việt Nam.pdf`.
+- Narrative:
+  - Case 1: current TOU + Solar+BESS.
+  - Case 2: QĐ963 TOU + Solar+BESS.
+  - Case 3: QĐ963 + two-component/capacity-charge pilot + Solar+BESS.
+  - Case 4: QĐ963 TOU + solar-only benchmark.
+  - Core conclusion: BESS turns rooftop solar from a simple tariff hedge into a dispatchable procurement asset; under QĐ963, Case 2 adds about `$325k` annual savings and `$1.96M` NPV vs solar-only while cutting payback by about 4.6 years.
+- Verification:
+  - Exported/rendered with artifact-tool presentation workflow.
+  - Contact sheet was visually inspected after export; slide 10 callout was moved after the first QA pass to avoid headline overlap.
+  - PPTX package check confirmed 10 slide XML files, zero media files, and no empty media files.
+- Added Vietnamese version:
+  - Final PPTX: `C:\Users\kongn\Pictures\CodeProject\CEBA Slide\output\Factory_A_BESS_Solar_Case_Study_CEBA_Vietnamese.pptx`.
+  - Rebuilt the same 10-slide story in Vietnamese with the same Factory A metrics and corporate white-background style.
+  - Vietnamese deck verification: artifact-tool export/render, contact-sheet visual inspection, and PPTX package check confirmed 10 slide XML files, zero media files, and no empty media files.
+- Added revised condensed English version:
+  - Final PPTX: `C:\Users\kongn\Pictures\CodeProject\CEBA Slide\output\Factory_A_BESS_Solar_Case_Study_CEBA_English_Condensed.pptx`.
+  - Reduced the English deck from 10 slides to 7.
+  - Condensed the previous slide 4-8 sequence into two table-first slides: a detailed case comparison table and a procurement readout table.
+  - Removed bar-chart-style comparison visuals from the condensed section because the user noted they could imply inaccurate precision.
+  - Condensed English deck verification: artifact-tool export/render, contact-sheet visual inspection, and PPTX package check confirmed 7 slide XML files, zero media files, and no empty media files.
+- Git/worktree note:
+  - No repo source code was intentionally changed for this deck.
+  - Existing generated Factory A case outputs and `Sample Load Profile/Emivest.csv` remain uncommitted in the working tree.
+
 # Session Notes
 
 Use this file for detailed working-session notes that would make `CODEX_SESSION.md` too long.

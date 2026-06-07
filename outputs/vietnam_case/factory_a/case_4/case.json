@@ -1,0 +1,126 @@
+{
+  "_guide": {
+    "description": "Customizable Vietnam ESCO end-to-end case file for proforma_vietnam.run_case. This file is a template. To run a scenario: create a sub-folder (e.g. case_1, case_2, ...) next to this template, copy this case.json into it, edit values, and run proforma_vietnam.run_case --case <sub-folder>/case.json. Outputs are written into the same folder as --case. Monetary inputs and report outputs in this sample are USD unless the field name explicitly says VND or exchange_rate_vnd_per_usd.",
+    "required_before_run": [
+      "Create the 8760-row hourly load CSV referenced by load_profile.path.",
+      "Confirm latitude and longitude are the project site coordinates.",
+      "Confirm tariff voltage_level and tou_schedule match the customer tariff.",
+      "Keep esco_contract.esco_energy_discount_fraction present; the report download requires it."
+    ],
+    "input_options": {
+      "tariff.voltage_level": [
+        ">=110kV",
+        "22-110kV",
+        "6-22kV",
+        "<6kV"
+      ],
+      "tariff.currency": [
+        "usd"
+      ],
+      "tariff.exchange_rate_vnd_per_usd": "Required when tariff.currency is usd. It converts EVN VND tariff inputs, or any field explicitly named VND, into USD. The optimizer and Vietnam pro forma report use USD values.",
+      "tariff.tou_schedule": [
+        "current",
+        "decision_963"
+      ],
+      "tariff.two_component_pilot_enabled": "false uses standard EVN energy-only TOU tariff. true uses the configured EVN two-component pilot tariff with hourly energy rates plus monthly demand_rates.",
+      "tariff.evn_energy_escalation_rate": "Annual EVN energy tariff escalation used in the Vietnam ESCO cash flow. Use decimal fractions, e.g. 0.04 for 4% per year.",
+      "tariff.evn_capacity_escalation_rate": "Annual EVN demand or capacity charge escalation used in the Vietnam ESCO cash flow. Use decimal fractions, e.g. 0.04 for 4% per year.",
+      "financial.rate_fields": "Use decimal fractions, e.g. 0.10 for 10%.",
+      "financial.annual_om_usd": "Optional override only. It is omitted in this sample so the workbook uses REopt year-one O&M output.",
+      "technologies.pv": "PV size is optimized by core REopt. min_kw and max_kw are lower and upper bounds. Set min_kw and max_kw equal only when you want to force a fixed PV size.",
+      "technologies.pv.degradation_fraction": "Annual PV production degradation fraction. Example: 0.005 means 0.5% per year.",
+      "technologies.pv.production_factor_series": "Optional 8760-length AC kWh per kW DC installed. Set this to bypass the PVWatts fetch entirely; useful when you have a measured or site-specific solar production profile. If omitted, the case builder fetches the series from NREL PVWatts v8 using technologies.pv.pvwatts and caches it under outputs/pvwatts_cache/.",
+      "technologies.pv.pvwatts": "PVWatts v8 lookup parameters. Used only when technologies.pv.production_factor_series is omitted. Defaults shown below match the values in this sample.",
+      "technologies.pv.pvwatts.tilt": "Module tilt from horizontal in degrees (0-90). Default 10. For Vietnam (low latitude) 10-15 degrees is typical.",
+      "technologies.pv.pvwatts.azimuth": "Module azimuth in degrees (0=north, 90=east, 180=south, 270=west). Default 180 (due south, optimal for northern hemisphere).",
+      "technologies.pv.pvwatts.array_type": "Module mounting type. 0=fixed open rack, 1=fixed roof-mounted, 2=1-axis tracking, 3=1-axis backtracked, 4=2-axis tracking. Default 1.",
+      "technologies.pv.pvwatts.module_type": "PV module performance class. 0=standard, 1=premium, 2=thin film. Default 0.",
+      "technologies.pv.pvwatts.losses": "System loss percent (0-99) covering soiling, wiring, mismatch, availability, etc. Default 14.",
+      "technologies.pv.pvwatts.dc_ac_ratio": "DC-to-AC nameplate ratio. Default 1.2.",
+      "technologies.storage": "Battery size is optimized by core REopt. min_kw/max_kw bound battery power; min_kwh/max_kwh bound battery energy. Set min and max equal only when you want to force a fixed battery size. This case is solar-only: max_kw and max_kwh are both 0 to disable BESS.",
+      "technologies.storage.installed_cost_constant": "Fixed one-time battery installed cost in USD that does not scale with kW or kWh, such as controls, integration, mobilization, or interconnection. Use 0 when those costs are already included in installed_cost_per_kw or installed_cost_per_kwh.",
+      "technologies.storage.om_cost_fraction_of_installed_cost": "Core REopt field: annual storage O&M as a fraction of total installed storage cost. Total installed storage cost includes installed_cost_per_kw times optimized kW, installed_cost_per_kwh times optimized kWh, and installed_cost_constant. Example: 0.02 means 2% of total installed storage cost per year.",
+      "technologies.storage.replacement_costs": "Replacement fields are optimizer inputs. Use replace_cost_per_kw, replace_cost_per_kwh, and replace_cost_constant with their corresponding replacement year fields.",
+      "esco_contract.esco_energy_discount_fraction": "Multiplier applied to EVN time-specific energy tariff for ESCO energy revenue, e.g. 0.90 means ESCO charges 90% of EVN energy tariff.",
+      "esco_contract.demand_savings_esco_share": "Share of demand-charge savings allocated to ESCO, e.g. 0.80 means ESCO keeps 80% and offtaker keeps 20%.",
+      "esco_contract.grid_charging_enabled": "false for base PV-charged battery case; true only for grid-charging scenario analysis."
+    },
+    "commands": {
+      "create_scenario": "mkdir outputs/vietnam_case/factory_a/case_1 then copy case.json into it",
+      "dry_run": "python -m proforma_vietnam.run_case --case outputs/vietnam_case/factory_a/case_1/case.json --dry-run",
+      "full_e2e": "python -m proforma_vietnam.run_case --case outputs/vietnam_case/factory_a/case_1/case.json --poll-seconds 5 --max-polls 120"
+    },
+    "expected_outputs": [
+      "<case_folder>/payload.json",
+      "<case_folder>/assumptions.json",
+      "<case_folder>/results.json",
+      "<case_folder>/vietnam_report_<run_uuid>.xlsx"
+    ]
+  },
+  "case": {
+    "name": "Factory A Vietnam ESCO E2E - Solar Only (no BESS)"
+  },
+  "site": {
+    "latitude": 10.8231,
+    "longitude": 106.6297
+  },
+  "load_profile": {
+    "year": 2025,
+    "path": "Sample Load Profile/Emivest.csv"
+  },
+  "tariff": {
+    "year": 2025,
+    "voltage_level": "22-110kV",
+    "currency": "usd",
+    "exchange_rate_vnd_per_usd": 25000,
+    "tou_schedule": "decision_963",
+    "two_component_pilot_enabled": false,
+    "evn_energy_escalation_rate": 0.04,
+    "evn_capacity_escalation_rate": 0.04
+  },
+  "financial": {
+    "analysis_years": 25,
+    "owner_discount_rate_fraction": 0.1,
+    "debt_fraction": 0.7,
+    "debt_interest_rate_fraction": 0.085,
+    "debt_term_years": 10
+  },
+  "technologies": {
+    "pv": {
+      "min_kw": 0,
+      "max_kw": 10000,
+      "installed_cost_per_kw": 480,
+      "om_cost_per_kw": 6,
+      "degradation_fraction": 0.005,
+      "pvwatts": {
+        "tilt": 10,
+        "azimuth": 180,
+        "array_type": 1,
+        "module_type": 0,
+        "losses": 14,
+        "dc_ac_ratio": 1.2
+      }
+    },
+    "storage": {
+      "min_kw": 0,
+      "max_kw": 0,
+      "min_kwh": 0,
+      "max_kwh": 0,
+      "installed_cost_per_kw": 80,
+      "installed_cost_per_kwh": 120,
+      "installed_cost_constant": 0,
+      "replace_cost_per_kw": 80,
+      "replace_cost_per_kwh": 100,
+      "replace_cost_constant": 0,
+      "inverter_replacement_year": 10,
+      "battery_replacement_year": 10,
+      "cost_constant_replacement_year": 10,
+      "om_cost_fraction_of_installed_cost": 0.01
+    }
+  },
+  "esco_contract": {
+    "esco_energy_discount_fraction": 0.9,
+    "demand_savings_esco_share": 0.8,
+    "grid_charging_enabled": false
+  }
+}

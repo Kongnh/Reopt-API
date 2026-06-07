@@ -136,7 +136,8 @@ class VietnamRunCaseTests(TestCase):
             )
 
         self.assertEqual(workbook, b"workbook")
-        requested_url = urlopen.call_args.args[0]
+        sent_request = urlopen.call_args.args[0]
+        requested_url = sent_request.full_url
         self.assertTrue(
             requested_url.startswith(
                 "http://localhost:8000/v3/job/11111111-2222-3333-4444-555555555555/results?"
@@ -158,6 +159,38 @@ class VietnamRunCaseTests(TestCase):
         self.assertIn("demand_savings_esco_share=0.75", requested_url)
         self.assertIn("grid_charging_enabled=True", requested_url)
         self.assertNotIn("unsupported", requested_url)
+
+
+    def test_download_report_posts_dppa_block_in_request_body(self):
+        assumptions = {
+            "esco_energy_discount_fraction": 0.9,
+            "exchange_rate_vnd_per_usd": 25000,
+            "dppa": {
+                "type": "grid_dppa_cfd",
+                "cfd_strike_per_kwh_vnd": 1700.0,
+                "cfd_contract_volume_kwh_per_hour": 80.0,
+                "fmp_series_vnd_per_kwh": [1500.0, 1500.0, 1500.0],
+            },
+        }
+
+        with patch("proforma_vietnam.run_case.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = b"workbook"
+
+            _download_vietnam_report(
+                "http://localhost:8000/v3",
+                "abc",
+                assumptions,
+            )
+
+        sent_request = urlopen.call_args.args[0]
+        # dppa_config must move to the POST body to avoid 414 on 8760-list inputs.
+        self.assertEqual(sent_request.get_method(), "POST")
+        self.assertNotIn("dppa_config=", sent_request.full_url)
+        body = sent_request.data.decode("utf-8")
+        self.assertIn("dppa_config=", body)
+        self.assertIn("grid_dppa_cfd", body)
+        # The dppa block should not be reflected as flat query params either.
+        self.assertNotIn("cfd_strike_per_kwh_vnd=1700", sent_request.full_url)
 
 
 class VietnamRunCaseUrlTests(TestCase):

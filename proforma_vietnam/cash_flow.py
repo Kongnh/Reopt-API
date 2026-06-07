@@ -40,6 +40,7 @@ def calculate_vietnam_esco_cash_flow(
     debt_interest_rate_fraction=DEFAULT_DEBT_INTEREST_RATE,
     debt_term_years=DEFAULT_DEBT_TERM_YEARS,
     project_years=DEFAULT_PROJECT_YEARS,
+    dppa_settlement=None,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
@@ -74,6 +75,14 @@ def calculate_vietnam_esco_cash_flow(
         else 0
     )
 
+    if dppa_settlement is not None:
+        # Under DPPA the customer pays the regulated chain (C_DN/C_DPPA/C_CL/C_BL)
+        # plus the bilateral CfD. The discount-to-EVN ESCO energy line is replaced
+        # by the generator's FMP + CfD revenue. Co-located BESS forces grid
+        # arbitrage off.
+        base_energy_revenue_vnd = 0
+        base_grid_arbitrage_revenue_vnd = 0
+
     preliminary_rows = []
     taxable_income_by_year = []
 
@@ -86,6 +95,10 @@ def calculate_vietnam_esco_cash_flow(
         esco_demand_revenue_vnd = demand_charge_savings_vnd * esco_demand_savings_share
         esco_grid_arbitrage_revenue_vnd = base_grid_arbitrage_revenue_vnd * energy_multiplier
         replacement_cost_vnd = _value_for_year(replacement_costs_by_year, year_index)
+
+        dppa_year = _dppa_year_terms(dppa_settlement, year_index, energy_multiplier)
+        if dppa_year is not None:
+            esco_energy_revenue_vnd = dppa_year["generator_revenue_vnd"]
 
         esco_revenue_vnd = (
             esco_energy_revenue_vnd
@@ -101,7 +114,7 @@ def calculate_vietnam_esco_cash_flow(
             - interest_vnd
         )
 
-        preliminary_rows.append({
+        row = {
             "year": year_index + 1,
             "esco_energy_revenue_vnd": esco_energy_revenue_vnd,
             "demand_charge_savings_vnd": demand_charge_savings_vnd,
@@ -113,7 +126,10 @@ def calculate_vietnam_esco_cash_flow(
             "replacement_cost_vnd": replacement_cost_vnd,
             "depreciation_vnd": depreciation_by_year[year_index],
             "interest_vnd": interest_vnd,
-        })
+        }
+        if dppa_year is not None:
+            row.update(dppa_year)
+        preliminary_rows.append(row)
         taxable_income_by_year.append(taxable_income_vnd)
 
     cit_by_year = calculate_cit(taxable_income_by_year)
@@ -136,12 +152,27 @@ def calculate_vietnam_esco_cash_flow(
         bau_evn_bill_year_vnd = bau_evn_bill_vnd * (
             (1 + evn_energy_escalation_rate) ** year_index
         )
-        offtaker_post_project_cost_vnd = (
-            optimized_evn_bill_year_vnd
-            + row["esco_energy_revenue_vnd"]
-            + row["esco_demand_revenue_vnd"]
-            + row["esco_grid_arbitrage_revenue_vnd"]
-        )
+        if dppa_settlement is None:
+            offtaker_post_project_cost_vnd = (
+                optimized_evn_bill_year_vnd
+                + row["esco_energy_revenue_vnd"]
+                + row["esco_demand_revenue_vnd"]
+                + row["esco_grid_arbitrage_revenue_vnd"]
+            )
+        else:
+            # Under DPPA the customer pays the regulated chain + retail demand
+            # + the share of demand savings credited back to the ESCO. The
+            # discount-to-EVN optimized_evn_bill is no longer the right basis
+            # for the energy side.
+            capacity_multiplier = (1 + evn_capacity_escalation_rate) ** year_index
+            optimized_demand_charge_year_vnd = (
+                optimized_demand_charge_vnd * capacity_multiplier
+            )
+            offtaker_post_project_cost_vnd = (
+                row["dppa_offtaker_cost_vnd"]
+                + optimized_demand_charge_year_vnd
+                + row["esco_demand_revenue_vnd"]
+            )
         offtaker_savings_vnd = bau_evn_bill_year_vnd - offtaker_post_project_cost_vnd
 
         row.update({
@@ -151,6 +182,10 @@ def calculate_vietnam_esco_cash_flow(
             "ending_debt_balance_vnd": debt_schedule[year_index]["ending_balance_vnd"],
             "cash_available_for_debt_service_vnd": cash_available_for_debt_service_vnd,
             "equity_cash_flow_vnd": equity_cash_flow_vnd,
+            "bau_evn_bill_vnd": bau_evn_bill_year_vnd,
+            "optimized_evn_bill_vnd": optimized_evn_bill_year_vnd,
+            "bau_demand_charge_vnd": bau_demand_charge_vnd * capacity_multiplier,
+            "optimized_demand_charge_vnd": optimized_demand_charge_vnd * capacity_multiplier,
             "offtaker_post_project_cost_vnd": offtaker_post_project_cost_vnd,
             "offtaker_savings_vnd": offtaker_savings_vnd,
             "offtaker_savings_fraction": (
@@ -189,10 +224,14 @@ def calculate_vietnam_esco_cash_flow(
     }
     _add_usd_aliases(summary)
 
-    return {
+    result = {
         "annual_cash_flows": annual_cash_flows,
         "summary": summary,
     }
+    if dppa_settlement is not None:
+        result["dppa_hourly_breakout"] = dppa_settlement.get("hourly_breakout", [])
+        result["dppa_monthly_breakout"] = dppa_settlement.get("monthly_breakout", [])
+    return result
 
 
 def _add_usd_aliases(values):
@@ -319,3 +358,37 @@ def _average(values):
 
 def _value_for_year(values, year_index):
     return values[year_index] if year_index < len(values) else 0
+
+
+def _dppa_year_terms(dppa_settlement, year_index, energy_multiplier):
+    if dppa_settlement is None:
+        return None
+
+    year_one = dppa_settlement["year_one"]
+    escalation = dppa_settlement["escalation"]
+    fee_multiplier = (1 + escalation.get("fee_escalation_rate", 0.0)) ** year_index
+    cfd_multiplier = (1 + escalation.get("cfd_strike_escalation_rate", 0.0)) ** year_index
+
+    c_dn_vnd = year_one["c_dn_vnd"] * fee_multiplier
+    c_dppa_vnd = year_one["c_dppa_vnd"] * fee_multiplier
+    c_cl_vnd = year_one["c_cl_vnd"] * fee_multiplier
+    c_bl_vnd = year_one["c_bl_vnd"] * energy_multiplier
+    cfd_strike_revenue_vnd = year_one["cfd_strike_revenue_vnd"] * cfd_multiplier
+    cfd_fmp_offset_vnd = year_one["cfd_fmp_offset_vnd"] * fee_multiplier
+    cfd_net_vnd = cfd_strike_revenue_vnd - cfd_fmp_offset_vnd
+    generator_fmp_revenue_vnd = year_one["generator_fmp_revenue_vnd"] * fee_multiplier
+    generator_revenue_vnd = generator_fmp_revenue_vnd + cfd_net_vnd
+    dppa_offtaker_cost_vnd = c_dn_vnd + c_dppa_vnd + c_cl_vnd + c_bl_vnd + cfd_net_vnd
+
+    return {
+        "c_dn_vnd": c_dn_vnd,
+        "c_dppa_vnd": c_dppa_vnd,
+        "c_cl_vnd": c_cl_vnd,
+        "c_bl_vnd": c_bl_vnd,
+        "cfd_strike_revenue_vnd": cfd_strike_revenue_vnd,
+        "cfd_fmp_offset_vnd": cfd_fmp_offset_vnd,
+        "cfd_net_vnd": cfd_net_vnd,
+        "generator_fmp_revenue_vnd": generator_fmp_revenue_vnd,
+        "generator_revenue_vnd": generator_revenue_vnd,
+        "dppa_offtaker_cost_vnd": dppa_offtaker_cost_vnd,
+    }

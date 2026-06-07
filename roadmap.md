@@ -117,6 +117,69 @@ REopt API is a US-centric distributed energy optimization platform. This repo is
 
 ---
 
+## Phase 3 — DPPA Settlement Layer (target: weeks 8–10)
+
+**Goal:** Add a Direct Power Purchase Agreement settlement mode on top of the Phase 2 ESCO pro forma. The Phase 2 discount-to-EVN base case remains the default. DPPA is opt-in via a new `dppa.type` enum in the case JSON. v1 covers grid-connected DPPA with a bilateral CfD overlay (`grid_dppa_cfd`); pure-spot grid DPPA is reachable via `cfd_contract_volume_kwh_per_hour = 0`. Private-wire DPPA and factory-side BESS are deferred.
+
+The Phase 2 reference workbook gate must keep passing with **zero delta** on every summary number when `dppa.type = "none"`.
+
+### Deliverables
+
+1. **`proforma_vietnam/dppa_settlement.py`** — new module
+   - `load_fmp_series(path)` reads [DPPA DOC/fmp_cfmp_vn.json](DPPA DOC/fmp_cfmp_vn.json) (keys `_metadata`, `fmp_vnd_per_kwh`, `cfmp_vnd_per_kwh`; 8760 entries).
+   - `settle_dppa_year_one(dppa_inputs, reopt_outputs, evn_tariff_inputs)` returns per-hour and per-month settlement primitives: `c_dn`, `c_dppa`, `c_cl`, `c_bl`, CfD, generator revenue, offtaker DPPA cost.
+   - Applies the ND57 formulas: `Q_adj = Q_re_meter / (k × K_pp) × delta`, etc. See [proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md](proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md) Phase 3 section for full equations.
+
+2. **`proforma_vietnam/cash_flow.py`** — wire the DPPA branch
+   - Add optional `dppa_settlement=None` kwarg to `calculate_vietnam_esco_cash_flow`. When `None`, code path is byte-identical to Phase 2.
+   - When provided, zero out `base_energy_revenue_vnd` and replace `offtaker_post_project_cost_vnd` with the DPPA identity. Adds new annual output keys: `c_dn_vnd`, `c_dppa_vnd`, `c_cl_vnd`, `c_bl_vnd`, `cfd_net_vnd`, `generator_revenue_vnd`.
+
+3. **`proforma_vietnam/case_builder.py`** — case JSON parsing
+   - New `_dppa_inputs(case_config, voltage_level)` that validates the `dppa.type` enum, enforces voltage eligibility for `grid_dppa_cfd` (≥22kV per ND57 Art. 16), derives `K_pp` from voltage if not supplied, and loads the FMP series.
+   - When `dppa.type != "none"`, force `ElectricStorage.can_grid_charge = False` (co-located BESS only). Raise a validation error if the case JSON explicitly sets `can_grid_charge = True` alongside DPPA.
+
+4. **`proforma_vietnam/esco_pro_forma.py`** — orchestrator update
+   - When `dppa.type != "none"`, call `settle_dppa_year_one(...)` and pass the result as `dppa_settlement` into `calculate_vietnam_esco_cash_flow`.
+   - Extract `pv_to_grid` and `grid_to_load` series alongside the existing extractions.
+
+5. **`proforma_vietnam/xlsx_builder.py`** — workbook extension
+   - 4 new sheets, rendered only when `dppa.type != "none"`: DPPA Configuration, Hourly Settlement (8760 rows), Monthly Settlement (12 rows), DPPA Annual Summary.
+   - Cash Flow sheet gets 3 right-edge columns (`generator_revenue_usd`, `cfd_net_usd`, `dppa_offtaker_cost_usd`). They render as zero on the `none` path so existing column readers are not disturbed.
+
+6. **`proforma_vietnam/reference_workbook_comparison.py`** — sibling helper
+   - Phase 2 `compare_reference_workbook(...)` is untouched.
+   - New `compare_dppa_reference_workbook(...)` validates the `grid_dppa_cfd` fixture against the implementation at 1% tolerance.
+
+7. **`reoptjl/views.py`** + **`proforma_vietnam/run_case.py`** — query-param plumbing
+   - Add a single JSON-encoded `dppa_config` GET parameter (URL-encoded) to the Vietnam proforma override pipeline. One param instead of ten; accommodates the 8760 FMP series.
+   - Extend `VIETNAM_REPORT_QUERY_KEYS` in [run_case.py](proforma_vietnam/run_case.py) accordingly.
+
+8. **Tests** — `proforma_vietnam/tests/`
+   - `test_reference_workbook_unchanged.py` — asserts zero delta on the Phase 2 gate after the merge.
+   - `test_dppa_settlement_grid_cfd.py::test_known_day` — hand-computed 24-hour fixture; asserts ±1% on every line item and the year-one summary.
+   - `test_case_builder_dppa_validation.py` — enforces voltage eligibility, `can_grid_charge` forced off, FMP series load.
+
+### Acceptance criteria
+
+- Phase 2 reference gate passes with zero delta (`tests/test_reference_workbook_unchanged.py`).
+- Hand-computed `grid_dppa_cfd` fixture matches within 1% on `C_DN`, `C_DPPA`, `C_CL`, `C_BL`, CfD, generator revenue, and offtaker total cost.
+- Case builder raises a validation error if `dppa.type = "grid_dppa_cfd"` is set at a voltage level outside `{"110kv_and_above", "22_to_110kv"}`.
+- Case builder raises a validation error if `dppa.type != "none"` is set alongside `ElectricStorage.can_grid_charge = True`.
+- An end-to-end run via [run_case.py](proforma_vietnam/run_case.py) on a `case_5` clone of `case_2` with `dppa.type = "grid_dppa_cfd"` produces a workbook with the 4 new sheets populated.
+
+### Not in Phase 3
+
+- Private-wire DPPA (Điều 25).
+- Factory-side BESS configuration (offtaker-owned, grid-chargeable).
+- REopt optimizer alignment with FMP (`tou_energy_rates_per_kwh = FMP × K_pp`). Optimizer continues to size against EVN-retail tariff.
+- Spot-price stochastics, REC accounting, congestion pricing, multi-generator portfolios, multi-buyer `delta < 1`.
+- MOIT annual re-set of `f_dppa` and `f_cl` (held constant in real terms, escalating at `evn_energy_escalation_rate`).
+- `K_pp` re-calibration over project life.
+- Django ORM persistence of DPPA params.
+- Julia changes.
+
+---
+
 ## Critical Files
 
 **New:**
@@ -187,16 +250,13 @@ docker-compose up -d
 
 ---
 
-## Deferred (Phase 3+)
+## Deferred (Phase 4+)
 
-- DPPA type fields (`dppa_type`, `dppa_wheeling_charge_per_kwh`)
-- Virtual DPPA voltage eligibility enforcement (≥110kV / 22–110kV)
-- Loss factor settlement (`k`, `K_pp`, `Q_m(h)` calculation)
-- FMP/CFMP hourly series for CfD settlement
-- Julia optimizer Vietnam-awareness (tariff multipliers inside the MILP)
+- Private-wire DPPA (Điều 25)
+- Factory-side BESS (offtaker-owned, grid-chargeable)
+- Julia optimizer Vietnam-awareness (FMP / DPPA settlement inside the MILP)
 - JSON API response for ProForma data
 - PDF investment memo generation
-- Multi-scenario DPPA comparison (private wire vs. grid-connected)
 - Production platform integration (country = Vietnam as a first-class market)
 
-These are intentionally held back until Phase 1 + Phase 2 are shipped and validated against at least one real customer project.
+These are intentionally held back until Phase 3 is shipped and validated against at least one real customer project.

@@ -14,6 +14,7 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None):
     pv_to_load = _sum_series([pv.get("electric_to_load_series_kw", []) for pv in pv_outputs])
     pv_to_storage = _sum_series([pv.get("electric_to_storage_series_kw", []) for pv in pv_outputs])
     pv_curtailed = _sum_series([pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs])
+    pv_to_grid = _sum_series([pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs])
     grid_to_load = _series(utility_outputs.get("electric_to_load_series_kw"))
     grid_to_storage = _series(utility_outputs.get("electric_to_storage_series_kw"))
     storage_to_load = _series(storage_outputs.get("storage_to_load_series_kw"))
@@ -38,11 +39,17 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None):
             "pv_to_storage_kwh": sum(pv_to_storage),
             "storage_to_load_kwh": sum(storage_to_load),
             "pv_curtailed_kwh": sum(pv_curtailed),
+            "pv_to_grid_kwh": sum(pv_to_grid),
+            # Effective grid export under DPPA = optimizer-determined export + would-be
+            # curtailed surplus (the generator dumps everything at FMP, no curtailment).
+            "pv_to_grid_effective_kwh": sum(pv_to_grid) + sum(pv_curtailed),
             "grid_to_storage_kwh": sum(grid_to_storage),
         },
         "results_comparison": _results_comparison(tariff_outputs),
         "load_duration": _load_duration(load_series, grid_to_load),
         "developer_financial_performance": cash_flow_result.get("summary", {}),
+        "dppa_hourly_breakout": cash_flow_result.get("dppa_hourly_breakout", []),
+        "dppa_monthly_breakout": cash_flow_result.get("dppa_monthly_breakout", []),
     }
 
 

@@ -33,6 +33,93 @@ CASH_FLOW_COLUMNS = [
     ("DSCR", "dscr"),
 ]
 
+DPPA_CASH_FLOW_EXTRA_COLUMNS = [
+    ("Generator Revenue (USD)", "generator_revenue_usd"),
+    ("CfD Net (USD)", "cfd_net_usd"),
+    ("DPPA Offtaker Cost (USD)", "dppa_offtaker_cost_usd"),
+]
+
+DPPA_CONFIG_ROWS = [
+    ("DPPA Type", "type"),
+    ("CfD Strike (VND/kWh)", "cfd_strike_per_kwh_vnd"),
+    ("CfD Strike Escalation Rate", "cfd_strike_escalation_rate"),
+    ("Transmission Loss Factor k", "transmission_loss_factor_k"),
+    ("Distribution Loss Factor K_pp", "distribution_loss_factor_kpp"),
+    ("Allocation Fraction delta", "allocation_fraction_delta"),
+    ("System Service Fee (VND/kWh)", "c_dppa_service_fee_vnd_per_kwh"),
+    ("Delta Settlement Adder (VND/kWh)", "c_cl_settlement_adder_vnd_per_kwh"),
+    ("Fee Escalation Rate", "fee_escalation_rate"),
+    ("FMP Series Path", "fmp_series_path"),
+]
+
+DPPA_HOURLY_COLUMNS = [
+    ("Hour", "hour"),
+    ("Load (kW)", "load_kw"),
+    ("Q_re_meter (kW)", "q_re_meter_kw"),
+    ("Q_re_delivered (kW)", "q_re_delivered_kw"),
+    ("Q_adj (kW)", "q_adj_kw"),
+    ("FMP (VND/kWh)", "fmp_vnd_per_kwh"),
+    ("C_DN (VND)", "c_dn_vnd"),
+    ("C_DPPA (VND)", "c_dppa_vnd"),
+    ("C_CL (VND)", "c_cl_vnd"),
+    ("C_BL (VND)", "c_bl_vnd"),
+    ("CfD Payment (VND)", "cfd_payment_vnd"),
+]
+
+DPPA_MONTHLY_COLUMNS = [
+    ("Month", "month"),
+    ("C_DN (VND)", "c_dn_vnd"),
+    ("C_DPPA (VND)", "c_dppa_vnd"),
+    ("C_CL (VND)", "c_cl_vnd"),
+    ("C_BL (VND)", "c_bl_vnd"),
+    ("CfD Net (VND)", "cfd_net_vnd"),
+    ("Generator Revenue (VND)", "generator_revenue_vnd"),
+    ("Customer Total (VND)", "customer_total_vnd"),
+]
+
+DPPA_ANNUAL_COLUMNS = [
+    ("Year", "year"),
+    ("C_DN (USD)", "c_dn_usd"),
+    ("C_DPPA (USD)", "c_dppa_usd"),
+    ("C_CL (USD)", "c_cl_usd"),
+    ("C_BL (USD)", "c_bl_usd"),
+    ("CfD Net (USD)", "cfd_net_usd"),
+    ("Generator Revenue (USD)", "generator_revenue_usd"),
+    ("DPPA Offtaker Cost (USD)", "dppa_offtaker_cost_usd"),
+]
+
+# Year-1 BAU vs DPPA comparison sheet. Each row pulls from the year-1 cash-flow
+# row + assumptions; ("section", None, None) renders as a section header.
+BAU_VS_DPPA_ROWS = [
+    ("section", "Buyer (Factory) — Year 1 Outflow (USD)", None),
+    ("BAU EVN energy + demand bill", "bau_evn_bill_usd", "bau"),
+    ("C_DN spot energy (Q_adj × CFMP × K_pp)", "c_dn_usd", "dppa"),
+    ("C_DPPA system service fee", "c_dppa_usd", "dppa"),
+    ("C_CL settlement adder", "c_cl_usd", "dppa"),
+    ("C_BL retail shortfall (P_evn × shortfall)", "c_bl_usd", "dppa"),
+    ("CfD payment to ESCO (positive = pay)", "cfd_net_usd", "dppa"),
+    ("Optimized demand charge (kept by EVN)", "optimized_demand_charge_year_usd", "dppa"),
+    ("ESCO demand savings share charged back", "esco_demand_revenue_usd", "dppa"),
+    ("Total buyer outflow", "total_buyer_outflow_usd", "both"),
+    ("Buyer savings vs BAU", "buyer_savings_vs_bau_usd", "delta"),
+    ("Buyer savings as % of BAU", "buyer_savings_fraction", "delta_fraction"),
+    ("section", "Seller (ESCO / Generator) — Year 1 Revenue (USD)", None),
+    ("Discount-to-EVN energy revenue (Phase 2)", "esco_phase2_energy_revenue_usd", "bau_esco"),
+    ("FMP market revenue (Q_re_meter × FMP)", "generator_fmp_revenue_usd", "dppa"),
+    ("CfD net (from buyer)", "cfd_net_usd", "dppa"),
+    ("Demand savings share (80%)", "esco_demand_revenue_usd", "both_esco"),
+    ("ESCO grid arbitrage revenue", "esco_grid_arbitrage_revenue_usd", "both_esco"),
+    ("Total ESCO / generator revenue", "total_seller_revenue_usd", "both_esco"),
+    ("section", "System Energy Flows (kWh / yr)", None),
+    ("PV → load", "pv_to_load_kwh", "flow"),
+    ("PV → storage", "pv_to_storage_kwh", "flow"),
+    ("PV → grid (export at FMP)", "pv_to_grid_effective_kwh", "flow"),
+    ("Storage → load", "storage_to_load_kwh", "flow"),
+    ("Q_re_meter (total generator injection)", "q_re_meter_kwh", "flow"),
+    ("Q_adj (loss-adjusted customer-side)", "q_adj_kwh", "flow"),
+    ("EVN retail shortfall", "shortfall_kwh", "flow"),
+]
+
 TAX_SCHEDULE_COLUMNS = [
     ("Year", "year"),
     ("Depreciation (USD)", "depreciation_usd"),
@@ -101,6 +188,14 @@ HEADER_FONT = Font(bold=True)
 
 def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=None):
     report_data = report_data or {}
+    assumptions = assumptions or {}
+    dppa_config = _active_dppa_config(assumptions)
+    cash_flow_columns = (
+        CASH_FLOW_COLUMNS + DPPA_CASH_FLOW_EXTRA_COLUMNS
+        if dppa_config is not None
+        else CASH_FLOW_COLUMNS
+    )
+
     workbook = Workbook()
     summary_sheet = workbook.active
     summary_sheet.title = "Summary"
@@ -136,7 +231,7 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     )
     _write_table_sheet(
         workbook.create_sheet("Cash Flow"),
-        CASH_FLOW_COLUMNS,
+        cash_flow_columns,
         cash_flow_result.get("annual_cash_flows", []),
     )
     _write_table_sheet(
@@ -155,12 +250,133 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         report_data.get("developer_financial_performance", cash_flow_result.get("summary", {})),
         chart_title="Developer Financial Performance",
     )
-    _write_assumptions_sheet(workbook.create_sheet("Assumptions"), assumptions or {})
+    _write_assumptions_sheet(workbook.create_sheet("Assumptions"), assumptions)
+
+    if dppa_config is not None:
+        _write_key_value_sheet(
+            workbook.create_sheet("DPPA Configuration"),
+            DPPA_CONFIG_ROWS,
+            dppa_config,
+        )
+        _write_table_sheet(
+            workbook.create_sheet("Hourly Settlement"),
+            DPPA_HOURLY_COLUMNS,
+            report_data.get("dppa_hourly_breakout", []),
+        )
+        _write_table_sheet(
+            workbook.create_sheet("Monthly Settlement"),
+            DPPA_MONTHLY_COLUMNS,
+            report_data.get("dppa_monthly_breakout", []),
+        )
+        _write_table_sheet(
+            workbook.create_sheet("DPPA Annual Summary"),
+            DPPA_ANNUAL_COLUMNS,
+            cash_flow_result.get("annual_cash_flows", []),
+        )
+        _write_bau_vs_dppa_sheet(
+            workbook.create_sheet("Year 1 BAU vs DPPA"),
+            cash_flow_result,
+            report_data,
+            assumptions,
+        )
 
     for worksheet in workbook.worksheets:
         _autosize_columns(worksheet)
 
     return workbook
+
+
+def _write_bau_vs_dppa_sheet(worksheet, cash_flow_result, report_data, assumptions):
+    annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
+    year_one = annual_rows[0]
+    hourly = report_data.get("dppa_hourly_breakout", []) or []
+    annual_production = report_data.get("annual_production") or {}
+
+    def g(key):
+        return year_one.get(key, 0.0) or 0.0
+
+    bau_evn_bill_usd = g("bau_evn_bill_usd")
+    c_dn_usd = g("c_dn_usd")
+    c_dppa_usd = g("c_dppa_usd")
+    c_cl_usd = g("c_cl_usd")
+    c_bl_usd = g("c_bl_usd")
+    cfd_net_usd = g("cfd_net_usd")
+    esco_demand_revenue_usd = g("esco_demand_revenue_usd")
+    esco_grid_arb_usd = g("esco_grid_arbitrage_revenue_usd")
+    gen_fmp_usd = g("generator_fmp_revenue_usd")
+    offtaker_post_cost_usd = g("offtaker_post_project_cost_usd")
+    optimized_demand_charge_year_usd = g("optimized_demand_charge_usd")
+
+    buyer_savings_usd = bau_evn_bill_usd - offtaker_post_cost_usd
+    buyer_savings_fraction = (
+        buyer_savings_usd / bau_evn_bill_usd if bau_evn_bill_usd else None
+    )
+
+    total_seller_revenue_usd = gen_fmp_usd + cfd_net_usd + esco_demand_revenue_usd + esco_grid_arb_usd
+
+    # Energy flows from annual_production (if present) else sum from hourly.
+    def _sum_hourly(key):
+        return sum(row.get(key, 0.0) or 0.0 for row in hourly)
+
+    pv_to_load_kwh = annual_production.get("pv_to_load_kwh") or 0.0
+    pv_to_storage_kwh = annual_production.get("pv_to_storage_kwh") or 0.0
+    storage_to_load_kwh = annual_production.get("storage_to_load_kwh") or 0.0
+    pv_to_grid_effective_kwh = annual_production.get("pv_to_grid_effective_kwh") or 0.0
+    q_re_meter_kwh = _sum_hourly("q_re_meter_kw")
+    q_adj_kwh = sum((row.get("q_adj_kw") or row.get("q_re_meter_kw", 0.0) / (1.026 * 1.027263)) for row in hourly)
+    shortfall_kwh = sum(max((row.get("load_kw", 0.0) or 0.0) - (row.get("q_adj_kw", 0.0) or 0.0), 0.0) for row in hourly)
+
+    values = {
+        "bau_evn_bill_usd": bau_evn_bill_usd,
+        "c_dn_usd": c_dn_usd,
+        "c_dppa_usd": c_dppa_usd,
+        "c_cl_usd": c_cl_usd,
+        "c_bl_usd": c_bl_usd,
+        "cfd_net_usd": cfd_net_usd,
+        "optimized_demand_charge_year_usd": optimized_demand_charge_year_usd,
+        "esco_demand_revenue_usd": esco_demand_revenue_usd,
+        "total_buyer_outflow_usd": offtaker_post_cost_usd,
+        "buyer_savings_vs_bau_usd": buyer_savings_usd,
+        "buyer_savings_fraction": buyer_savings_fraction,
+        "esco_phase2_energy_revenue_usd": 0.0,  # zeroed under DPPA per design doc
+        "generator_fmp_revenue_usd": gen_fmp_usd,
+        "esco_grid_arbitrage_revenue_usd": esco_grid_arb_usd,
+        "total_seller_revenue_usd": total_seller_revenue_usd,
+        "pv_to_load_kwh": pv_to_load_kwh,
+        "pv_to_storage_kwh": pv_to_storage_kwh,
+        "pv_to_grid_effective_kwh": pv_to_grid_effective_kwh,
+        "storage_to_load_kwh": storage_to_load_kwh,
+        "q_re_meter_kwh": q_re_meter_kwh,
+        "q_adj_kwh": q_adj_kwh,
+        "shortfall_kwh": shortfall_kwh,
+    }
+
+    worksheet.cell(row=1, column=1, value="Line Item").font = HEADER_FONT
+    worksheet.cell(row=1, column=2, value="Year 1 (USD)").font = HEADER_FONT
+    worksheet.cell(row=1, column=3, value="Side").font = HEADER_FONT
+
+    row_index = 2
+    for label, key, side in BAU_VS_DPPA_ROWS:
+        if label == "section":
+            worksheet.cell(row=row_index, column=1, value=key).font = HEADER_FONT
+            worksheet.cell(row=row_index, column=1).fill = HEADER_FILL
+            row_index += 1
+            continue
+        worksheet.cell(row=row_index, column=1, value=label)
+        worksheet.cell(row=row_index, column=2, value=values.get(key))
+        worksheet.cell(row=row_index, column=3, value=side)
+        row_index += 1
+
+    worksheet.column_dimensions["A"].width = 48
+    worksheet.column_dimensions["B"].width = 20
+    worksheet.column_dimensions["C"].width = 14
+
+
+def _active_dppa_config(assumptions):
+    dppa = assumptions.get("dppa") if assumptions else None
+    if not dppa or dppa.get("type", "none") == "none":
+        return None
+    return dppa
 
 
 def _write_summary_sheet(worksheet, summary):
@@ -211,7 +427,12 @@ def _write_assumptions_sheet(worksheet, assumptions):
     worksheet.cell(row=1, column=1).fill = HEADER_FILL
     worksheet.cell(row=1, column=2).fill = HEADER_FILL
 
-    for row_index, (key, value) in enumerate(assumptions.items(), start=2):
+    flat = {
+        key: value
+        for key, value in assumptions.items()
+        if not isinstance(value, (dict, list))
+    }
+    for row_index, (key, value) in enumerate(flat.items(), start=2):
         worksheet.cell(row=row_index, column=1, value=key)
         worksheet.cell(row=row_index, column=2, value=value)
 

@@ -144,8 +144,22 @@ def _print_run_failure(run_uuid, results):
 
 
 def _download_vietnam_report(api_base, run_uuid, assumptions):
-    query = parse.urlencode(_vietnam_report_query_params(assumptions))
-    with request.urlopen(f"{_results_url(api_base, run_uuid)}?{query}") as response:
+    query = _vietnam_report_query_params(assumptions)
+    dppa_blob = query.pop("dppa_config", None)
+    url = f"{_results_url(api_base, run_uuid)}?{parse.urlencode(query)}"
+    # POST dppa_config in the body — the 8760-list FMP and CfD volume series
+    # overflow GET URL limits (HTTP 414) when sent as a query parameter.
+    if dppa_blob is None:
+        post_request = request.Request(url)
+    else:
+        body = parse.urlencode({"dppa_config": dppa_blob}).encode("utf-8")
+        post_request = request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    with request.urlopen(post_request) as response:
         return response.read()
 
 
@@ -155,6 +169,9 @@ def _vietnam_report_query_params(assumptions):
         value = assumptions.get(key)
         if value is not None:
             query[key] = value
+    dppa = assumptions.get("dppa")
+    if dppa:
+        query["dppa_config"] = json.dumps(dppa)
     return query
 
 

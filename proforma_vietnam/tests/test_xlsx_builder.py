@@ -99,6 +99,103 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertGreater(len(workbook["Developer Financials"]._charts), 0)
 
 
+    def test_omits_dppa_sheets_when_dppa_type_is_none_or_missing(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(),
+            assumptions={"esco_energy_discount_fraction": 0.9},
+        )
+
+        self.assertNotIn("DPPA Configuration", workbook.sheetnames)
+        self.assertNotIn("Hourly Settlement", workbook.sheetnames)
+        self.assertNotIn("Monthly Settlement", workbook.sheetnames)
+        self.assertNotIn("DPPA Annual Summary", workbook.sheetnames)
+
+    def test_adds_four_dppa_sheets_when_dppa_type_is_grid_dppa_cfd(self):
+        cash_flow = _cash_flow_result()
+        cash_flow["annual_cash_flows"][0].update({
+            "c_dn_vnd": 100.0,
+            "c_dppa_vnd": 20.0,
+            "c_cl_vnd": 10.0,
+            "c_bl_vnd": 40.0,
+            "cfd_net_vnd": 5.0,
+            "generator_revenue_vnd": 150.0,
+            "dppa_offtaker_cost_vnd": 175.0,
+        })
+        workbook = build_vietnam_esco_workbook(
+            cash_flow,
+            assumptions={
+                "esco_energy_discount_fraction": 0.9,
+                "dppa": {
+                    "type": "grid_dppa_cfd",
+                    "cfd_strike_per_kwh_vnd": 1700.0,
+                    "cfd_contract_volume_kwh_per_hour": 80.0,
+                    "transmission_loss_factor_k": 1.026,
+                    "distribution_loss_factor_kpp": 1.027263,
+                    "allocation_fraction_delta": 1.0,
+                    "c_dppa_service_fee_vnd_per_kwh": 360.0,
+                    "c_cl_settlement_adder_vnd_per_kwh": 163.0,
+                    "fmp_series_path": "DPPA DOC/fmp_cfmp_vn.json",
+                },
+            },
+            report_data={
+                "dppa_hourly_breakout": [
+                    {
+                        "hour": 1, "load_kw": 100.0, "q_re_meter_kw": 80.0,
+                        "q_re_delivered_kw": 80.0, "q_adj_kw": 75.9,
+                        "fmp_vnd_per_kwh": 1500.0, "c_dn_vnd": 113850.0,
+                        "c_dppa_vnd": 27324.0, "c_cl_vnd": 12372.0,
+                        "c_bl_vnd": 48200.0, "cfd_payment_vnd": 16000.0,
+                    },
+                ],
+                "dppa_monthly_breakout": [
+                    {"month": 1, "c_dn_vnd": 100.0, "c_dppa_vnd": 20.0, "c_cl_vnd": 10.0,
+                     "c_bl_vnd": 40.0, "cfd_net_vnd": 5.0, "generator_revenue_vnd": 150.0,
+                     "customer_total_vnd": 175.0},
+                ],
+            },
+        )
+
+        self.assertIn("DPPA Configuration", workbook.sheetnames)
+        self.assertIn("Hourly Settlement", workbook.sheetnames)
+        self.assertIn("Monthly Settlement", workbook.sheetnames)
+        self.assertIn("DPPA Annual Summary", workbook.sheetnames)
+
+        hourly = workbook["Hourly Settlement"]
+        self.assertEqual(hourly.cell(row=1, column=1).value, "Hour")
+        self.assertEqual(hourly.cell(row=2, column=1).value, 1)
+        self.assertEqual(hourly.cell(row=2, column=7).value, 113850.0)
+
+        monthly = workbook["Monthly Settlement"]
+        self.assertEqual(monthly.cell(row=1, column=1).value, "Month")
+        self.assertEqual(monthly.cell(row=2, column=2).value, 100.0)
+
+    def test_grid_dppa_cfd_cash_flow_sheet_includes_generator_revenue_and_cfd_columns(self):
+        cash_flow = _cash_flow_result()
+        cash_flow["annual_cash_flows"][0].update({
+            "c_dn_vnd": 100.0,
+            "c_dppa_vnd": 20.0,
+            "c_cl_vnd": 10.0,
+            "c_bl_vnd": 40.0,
+            "cfd_net_vnd": 5.0,
+            "generator_revenue_vnd": 150.0,
+            "dppa_offtaker_cost_vnd": 175.0,
+        })
+        workbook = build_vietnam_esco_workbook(
+            cash_flow,
+            assumptions={
+                "esco_energy_discount_fraction": 0.9,
+                "dppa": {"type": "grid_dppa_cfd"},
+            },
+        )
+
+        cash_flow_sheet = workbook["Cash Flow"]
+        headers = [cash_flow_sheet.cell(row=1, column=col).value
+                   for col in range(1, cash_flow_sheet.max_column + 1)]
+        self.assertIn("Generator Revenue (USD)", headers)
+        self.assertIn("CfD Net (USD)", headers)
+        self.assertIn("DPPA Offtaker Cost (USD)", headers)
+
+
 def _cash_flow_result():
     return {
         "summary": {

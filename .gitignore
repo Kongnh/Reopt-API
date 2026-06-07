@@ -3,6 +3,12 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# PVWatts auto-fetch cache (regenerated on demand)
+outputs/pvwatts_cache/
+
+# Excel temp lock files
+~$*.xlsx
+
 keys.py
 .idea
 input_files/*

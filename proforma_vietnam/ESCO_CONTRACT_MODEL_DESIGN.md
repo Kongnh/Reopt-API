@@ -1,6 +1,6 @@
 # Vietnam ESCO Contract Model Design
 
-Last updated: 2026-05-25
+Last updated: 2026-06-06
 
 ## Purpose
 
@@ -278,3 +278,175 @@ target equity IRR, but that is outside the first cash-flow implementation.
   ESCO.
 - Offtaker savings are calculated after all ESCO payments.
 - ROI, IRR, NPV, DSCR, and payback are outputs.
+
+## Phase 3: DPPA Settlement Layer
+
+Phase 3 adds a Direct Power Purchase Agreement (DPPA) settlement mode on top of
+the Phase 2 ESCO cash flow. The Phase 2 discount-to-EVN base case remains the
+default behavior. DPPA settlement is opt-in via a new `dppa.type` enum.
+
+### Scope
+
+Included in Phase 3:
+
+- Grid-connected DPPA with bilateral CfD overlay (`dppa.type = "grid_dppa_cfd"`).
+- Pure-spot grid DPPA (Điều 14–16 without CfD) reachable by setting
+  `cfd_contract_volume_kwh_per_hour = 0`.
+- BESS co-located with the RE generator only.
+- Single-entity model where the ESCO is also the renewable generator.
+
+Excluded from Phase 3 (deferred):
+
+- Private-wire DPPA (Điều 25).
+- Factory-side BESS configuration.
+- REopt optimizer alignment with FMP.
+- Spot-price stochastics, REC accounting, congestion pricing.
+- Multi-buyer allocation (`delta < 1`).
+- MOIT annual re-set of `f_dppa` and `f_cl`.
+
+### Contract Type Enum
+
+```text
+dppa.type = "none"           # Phase 2 behavior (default)
+dppa.type = "grid_dppa_cfd"  # Grid-connected DPPA per ND57 Điều 14-18
+```
+
+Eligibility for `grid_dppa_cfd` (ND57 Điều 16):
+
+```text
+voltage_level in {"110kv_and_above", "22_to_110kv"}
+```
+
+### BESS Configuration
+
+Two BESS siting options exist in Vietnam DPPA deals:
+
+- Co-located with the RE generator: sits upstream of the offtaker meter; can
+  only charge from PV.
+- Factory-side (offtaker-owned): sits behind the offtaker meter; can charge
+  from the grid at retail tariff.
+
+Phase 3 covers only the co-located case. The case builder forces
+`ElectricStorage.can_grid_charge = false` and raises a validation error if the
+case JSON sets it to `true`.
+
+### Energy Buckets
+
+Sourced from REopt V3 dispatch output series. BESS sits upstream of the
+offtaker meter, so its discharge counts toward generator-side injection.
+
+```text
+Q_re_meter[h]    = pv_to_load[h]
+                 + pv_to_grid[h]
+                 + storage_to_load[h]
+                 + storage_to_grid[h]
+
+Q_re_delivered[h] = pv_to_load[h] + storage_to_load[h]
+
+shortfall[h]      = max(load[h] - Q_adj[h], 0)
+```
+
+### Settlement Math
+
+ND57-prescribed losses and fees are applied per hour. Defaults reflect 2025
+NLDC and EVN values.
+
+```text
+Q_adj[h] = Q_re_meter[h] / (k * K_pp) * delta
+```
+
+```text
+C_DN[h]   = Q_adj[h] * FMP[h]                # spot energy -> ESCO/generator
+C_DPPA[h] = Q_adj[h] * f_dppa_per_kwh        # -> EVN/regulator
+C_CL[h]   = Q_adj[h] * f_cl_per_kwh          # -> EVN/regulator
+C_BL[h]   = shortfall[h] * P_evn[h]          # -> EVN retail TOU
+CfD[h]    = (P_c[h] - FMP[h]) * Q_c[h]       # offtaker <-> ESCO
+```
+
+ESCO/generator revenue and offtaker DPPA cost per hour:
+
+```text
+generator_revenue[h] = Q_re_meter[h] * FMP[h] + CfD[h]
+offtaker_cost[h]     = C_DN[h] + C_DPPA[h] + C_CL[h] + C_BL[h] + CfD[h]
+```
+
+Defaults:
+
+```text
+k                              = 1.026
+K_pp (>=110 kV)                = 1.008525
+K_pp (22 to 110 kV)            = 1.027263
+delta                          = 1.0
+f_dppa_per_kwh (2025, VND)     = 360
+f_cl_per_kwh   (2025, VND)     = 163
+```
+
+### Annual Escalation
+
+```text
+f_dppa[year]     = f_dppa[year_1] * (1 + dppa.fee_escalation_rate)^(year - 1)
+f_cl[year]       = f_cl[year_1]   * (1 + dppa.fee_escalation_rate)^(year - 1)
+FMP[year]        = FMP[year_1]    * (1 + dppa.fee_escalation_rate)^(year - 1)
+P_c[year]        = P_c[year_1]    * (1 + dppa.cfd_strike_escalation_rate)^(year - 1)
+C_BL[year]       = C_BL[year_1]   * (1 + evn_energy_escalation_rate)^(year - 1)
+```
+
+`dppa.cfd_strike_escalation_rate` is signed. Positive values model an
+escalating strike. Negative values model a strike that ratchets down annually
+per the PPA negotiation. Default 0.
+
+Default for `dppa.fee_escalation_rate` is the existing
+`evn_energy_escalation_rate` (4 percent per year).
+
+### Cash-Flow Attribution
+
+```text
+Stream                                  | none       | grid_dppa_cfd
+ESCO discount-to-EVN energy revenue     | OFF -> ESCO| zero (replaced)
+Demand savings share (80/20)            | OFF -> ESCO| OFF -> ESCO
+Grid arbitrage (when can_grid_charge)   | OFF -> ESCO| n/a (forced off)
+C_DN spot energy                        | -          | OFF -> ESCO (via system)
+C_DPPA system fee                       | -          | OFF -> EVN
+C_CL delta adder                        | -          | OFF -> EVN
+C_BL retail shortfall                   | OFF -> EVN | OFF -> EVN
+CfD net                                 | -          | OFF <-> ESCO (signed)
+Retail demand charge                    | OFF -> EVN | OFF -> EVN
+```
+
+For `dppa.type = "none"`, only the Phase 2 streams apply and the cash-flow
+identities reduce exactly to the existing `calculate_vietnam_esco_cash_flow`
+formulas. The Phase 2 reference workbook gate is preserved by construction.
+
+### New Inputs
+
+All new keys live in the case JSON under a new top-level `dppa` block. The
+case builder flattens them into the existing assumptions dict. None of these
+fields are added to the REopt payload; the optimizer is unaware of DPPA
+settlement.
+
+```text
+dppa.type                                 string enum, default "none"
+dppa.fmp_series_path                      string, default "DPPA DOC/fmp_cfmp_vn.json"
+dppa.cfd_strike_per_kwh_vnd               float, required for grid_dppa_cfd
+dppa.cfd_strike_escalation_rate           float (signed), default 0.0
+dppa.cfd_contract_volume_kwh_per_hour     float or 8760-list, required
+dppa.transmission_loss_factor_k           float, default 1.026
+dppa.distribution_loss_factor_kpp         float, derived from voltage_level
+dppa.allocation_fraction_delta            float in (0, 1], default 1.0
+dppa.c_dppa_service_fee_vnd_per_kwh       float, default 360
+dppa.c_cl_settlement_adder_vnd_per_kwh    float, default 163
+dppa.fee_escalation_rate                  float, default evn_energy_escalation_rate
+```
+
+### Acceptance Criteria
+
+- With `dppa.type = "none"` the existing reference workbook comparison passes
+  with zero delta on every summary number.
+- With `dppa.type = "grid_dppa_cfd"`, a hand-computed 24-hour fixture matches
+  the implementation within 1 percent on `C_DN`, `C_DPPA`, `C_CL`, `C_BL`,
+  CfD, generator revenue, and offtaker total cost.
+- The case builder raises a validation error if `dppa.type != "none"` is set
+  alongside `ElectricStorage.can_grid_charge = true`.
+- The case builder raises a validation error if `dppa.type = "grid_dppa_cfd"`
+  is set at a voltage level outside `{"110kv_and_above", "22_to_110kv"}`.
+

@@ -84,6 +84,82 @@ class VietnamCashFlowTests(TestCase):
 
         self.assertEqual(result["annual_cash_flows"][0]["esco_grid_arbitrage_revenue_vnd"], 500000)
 
+    def test_dppa_settlement_replaces_esco_energy_revenue_with_generator_revenue(self):
+        result = calculate_vietnam_esco_cash_flow(
+            project_served_pv_kwh=[10, 20],
+            evn_energy_rates_vnd_per_kwh=[1000, 2000],
+            bau_evn_bill_vnd=1000000,
+            optimized_evn_bill_vnd=700000,
+            bau_demand_charge_vnd=0,
+            optimized_demand_charge_vnd=0,
+            pv_capex_vnd=0,
+            bess_capex_vnd=0,
+            annual_om_vnd=0,
+            esco_energy_discount_fraction=0.9,
+            debt_fraction=0,
+            project_years=1,
+            dppa_settlement={
+                "type": "grid_dppa_cfd",
+                "esco_energy_revenue_vnd": 0.0,
+                "year_one": {
+                    "c_dn_vnd": 100.0,
+                    "c_dppa_vnd": 25.0,
+                    "c_cl_vnd": 10.0,
+                    "c_bl_vnd": 40.0,
+                    "cfd_strike_revenue_vnd": 170.0,
+                    "cfd_fmp_offset_vnd": 150.0,
+                    "generator_fmp_revenue_vnd": 200.0,
+                },
+                "escalation": {"fee_escalation_rate": 0.0, "cfd_strike_escalation_rate": 0.0},
+                "hourly_breakout": [],
+                "monthly_breakout": [],
+            },
+        )
+
+        annual = result["annual_cash_flows"][0]
+        self.assertEqual(annual["esco_energy_revenue_vnd"], 220.0)  # 200 FMP + (170-150) CfD
+        self.assertEqual(annual["c_dn_vnd"], 100.0)
+        self.assertEqual(annual["c_bl_vnd"], 40.0)
+        self.assertEqual(annual["cfd_net_vnd"], 20.0)
+        self.assertEqual(annual["generator_revenue_vnd"], 220.0)
+
+    def test_dppa_settlement_replaces_offtaker_post_project_cost_with_dppa_chain(self):
+        result = calculate_vietnam_esco_cash_flow(
+            project_served_pv_kwh=[],
+            evn_energy_rates_vnd_per_kwh=[],
+            bau_evn_bill_vnd=1000000,
+            optimized_evn_bill_vnd=9999999,  # ignored under DPPA
+            bau_demand_charge_vnd=300000,
+            optimized_demand_charge_vnd=100000,
+            pv_capex_vnd=0,
+            bess_capex_vnd=0,
+            annual_om_vnd=0,
+            esco_energy_discount_fraction=0.9,
+            debt_fraction=0,
+            project_years=1,
+            dppa_settlement={
+                "type": "grid_dppa_cfd",
+                "esco_energy_revenue_vnd": 0.0,
+                "year_one": {
+                    "c_dn_vnd": 500000.0,
+                    "c_dppa_vnd": 100000.0,
+                    "c_cl_vnd": 50000.0,
+                    "c_bl_vnd": 200000.0,
+                    "cfd_strike_revenue_vnd": 0.0,
+                    "cfd_fmp_offset_vnd": 0.0,
+                    "generator_fmp_revenue_vnd": 500000.0,
+                },
+                "escalation": {"fee_escalation_rate": 0.0, "cfd_strike_escalation_rate": 0.0},
+                "hourly_breakout": [],
+                "monthly_breakout": [],
+            },
+        )
+
+        annual = result["annual_cash_flows"][0]
+        # offtaker = (C_DN + C_DPPA + C_CL + C_BL + CfD net) + optimized_demand + esco_demand_revenue
+        # = (500k + 100k + 50k + 200k + 0) + 100k + (200k * 0.8) = 850k + 100k + 160k = 1,110,000
+        self.assertEqual(annual["offtaker_post_project_cost_vnd"], 1110000.0)
+
     def test_outputs_investor_metrics_and_uses_vietnam_tax_depreciation(self):
         result = calculate_vietnam_esco_cash_flow(
             project_served_pv_kwh=[1000],

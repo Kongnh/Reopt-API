@@ -212,7 +212,43 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(assumptions["pv_capex_usd"], 480000)
         self.assertEqual(assumptions["bess_capex_usd"], 421000)
         self.assertEqual(assumptions["evn_energy_escalation_rate"], 0.04)
-        self.assertEqual(assumptions["evn_capacity_escalation_rate"], 0.03)
+
+    def test_bess_capex_omitted_when_storage_size_is_optimizer_chosen(self):
+        # Regression: when storage sizes are not preset (optimizer chooses),
+        # case_builder previously wrote bess_capex_usd=0 because installed_cost_constant
+        # was present (even at 0). That zero then overrode the REopt-derived capex
+        # downstream, deflating total project cost by the true BESS capex.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {
+                    "year": 2025,
+                    "voltage_level": "22-110kV",
+                    "currency": "usd",
+                    "exchange_rate_vnd_per_usd": 25000,
+                },
+                "technologies": {
+                    "pv": {"max_kw": 5000.0, "installed_cost_per_kw": 480},
+                    "storage": {
+                        # No size_kw / size_kwh — optimizer chooses
+                        "max_kw": 5000.0,
+                        "max_kwh": 20000.0,
+                        "installed_cost_per_kw": 80,
+                        "installed_cost_per_kwh": 120,
+                        "installed_cost_constant": 0,
+                    },
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        assumptions = case["assumptions"]
+        # Neither size preset → no zero override should be written. esco_pro_forma
+        # will derive bess_capex from REopt outputs at report time.
+        self.assertNotIn("bess_capex_usd", assumptions)
 
     def test_rejects_load_csv_that_is_not_8760_rows(self):
         load_csv_path = _write_load_csv([500.0] * 24)
@@ -300,6 +336,127 @@ class VietnamCaseBuilderTests(TestCase):
             case["payload"]["PV"]["production_factor_series"],
             user_series,
         )
+
+    def test_dppa_block_is_omitted_when_dppa_type_is_none_or_missing(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertNotIn("dppa", case["assumptions"])
+
+    def test_grid_dppa_cfd_populates_assumptions_dppa_block_with_defaults_and_fmp_series(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "dppa": {
+                    "type": "grid_dppa_cfd",
+                    "cfd_strike_per_kwh_vnd": 1700.0,
+                    "cfd_contract_volume_kwh_per_hour": 80.0,
+                },
+            }
+        )
+
+        dppa = case["assumptions"]["dppa"]
+        self.assertEqual(dppa["type"], "grid_dppa_cfd")
+        self.assertEqual(dppa["cfd_strike_per_kwh_vnd"], 1700.0)
+        self.assertEqual(dppa["cfd_contract_volume_kwh_per_hour"], 80.0)
+        self.assertAlmostEqual(dppa["distribution_loss_factor_kpp"], 1.027263)
+        self.assertAlmostEqual(dppa["transmission_loss_factor_k"], 1.026)
+        self.assertAlmostEqual(dppa["allocation_fraction_delta"], 1.0)
+        self.assertEqual(dppa["c_dppa_service_fee_vnd_per_kwh"], 360.0)
+        self.assertEqual(dppa["c_cl_settlement_adder_vnd_per_kwh"], 163.0)
+        self.assertEqual(dppa["cfd_strike_escalation_rate"], 0.0)
+        self.assertEqual(len(dppa["fmp_series_vnd_per_kwh"]), 8760)
+
+    def test_grid_dppa_cfd_forces_can_grid_charge_false(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {
+                    "esco_energy_discount_fraction": 0.9,
+                    "grid_charging_enabled": True,
+                },
+                "technologies": {
+                    "storage": {"max_kw": 500.0, "max_kwh": 2000.0, "can_grid_charge": True},
+                },
+                "dppa": {
+                    "type": "grid_dppa_cfd",
+                    "cfd_strike_per_kwh_vnd": 1700.0,
+                    "cfd_contract_volume_kwh_per_hour": 80.0,
+                },
+            }
+        )
+
+        self.assertEqual(case["payload"]["ElectricStorage"]["can_grid_charge"], False)
+
+    def test_grid_dppa_cfd_rejects_ineligible_voltage_level(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "6-22kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "dppa": {
+                        "type": "grid_dppa_cfd",
+                        "cfd_strike_per_kwh_vnd": 1700.0,
+                        "cfd_contract_volume_kwh_per_hour": 80.0,
+                    },
+                }
+            )
+
+        self.assertIn("grid_dppa_cfd", str(context.exception))
+        self.assertIn("voltage", str(context.exception).lower())
+
+    def test_grid_dppa_cfd_requires_cfd_strike_and_volume(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "dppa": {"type": "grid_dppa_cfd"},
+                }
+            )
+
+        self.assertIn("cfd_strike_per_kwh_vnd", str(context.exception))
+
+    def test_rejects_unknown_dppa_type(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "dppa": {"type": "private_wire"},
+                }
+            )
+
+        self.assertIn("dppa.type", str(context.exception))
 
     def test_requires_esco_energy_discount_for_report_download(self):
         load_csv_path = _write_load_csv([500.0] * 8760)

@@ -487,6 +487,17 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         assumptions["grid_charging_enabled"] = value
         cash_flow_overrides["grid_charging_enabled"] = value
 
+    raw_dppa_config = request.GET.get("dppa_config") or request.POST.get("dppa_config")
+    if raw_dppa_config is not None:
+        try:
+            dppa_inputs = json.loads(raw_dppa_config)
+        except (ValueError, TypeError):
+            raise ValueError("dppa_config must be a valid JSON document.")
+        if not isinstance(dppa_inputs, dict):
+            raise ValueError("dppa_config must encode a JSON object.")
+        assumptions["dppa"] = dppa_inputs
+        cash_flow_overrides["dppa_inputs"] = dppa_inputs
+
     return assumptions, cash_flow_overrides
 
 
