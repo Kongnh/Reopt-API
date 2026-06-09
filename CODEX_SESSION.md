@@ -1,17 +1,20 @@
 # Codex Session Handoff
 
-Last updated: 2026-06-07
+Last updated: 2026-06-09
 
 ## Current State
 
 - Repository: `C:\Users\kongn\Pictures\CodeProject\Reopt API\REopt_API`
-- Branch: `master`
+- Branch: `master` (`[ahead 5]` of `origin/master`), HEAD `f22c9131`.
 - Remote: `origin` -> `https://github.com/Kongnh/Reopt-API.git`
-- Latest commits (this session):
+- Latest commits (prior session, none new on 2026-06-09):
   - `8e0c2d1c` Refresh case_1/3/4 outputs after bess_capex fix
   - `290b8dc2` Ship Phase 3 DPPA settlement with Factory A case_5
-- Git state at close: working tree clean for tracked files; untracked artifacts remaining are an Excel-locked workbook copy `outputs/vietnam_case/factory_a/case_5/vietnam_report_*_v5.xlsx` and the pre-layout stale workbook `outputs/vietnam_case/factory_a/vietnam_report_b729db40-*.xlsx`. Both need manual cleanup after closing Excel.
-- Detailed delivery log archived in `SESSION_NOTES.md` (2026-06-07 entry).
+- **2026-06-09 work (uncommitted):** found and removed a non-physical 24-hour ~40 MW spike in `Sample Load Profile/Emivest.csv` (one day, ~8% of annual energy, real peak only ~2.4 MW). Wrote `Sample Load Profile/Emivest_clean.csv` (anomalous hours replaced with hour-of-day means), repointed `case_1..4/case.json` to it, and re-ran case_1..4 end-to-end on docker (all `optimal`). case_5 NOT re-run — still on the dirty load and now inconsistent with case_1..4.
+- **New deck:** `outputs/vietnam_case/factory_a/Factory_A_Solar_BESS_Case_Study.pptx` — 7 slides, English, corporate white background, native editable PPTX charts + table. Built by `outputs/vietnam_case/factory_a/build_deck.py` from `outputs/vietnam_case/factory_a/clean_metrics.json`. Scope: case_1..4 only (case_5 DPPA excluded). Financial lens = ESCO developer (Project/Equity IRR, DSCR, 70% debt). Verified visually via LibreOffice → PDF → PNG render of all 7 slides.
+- Git state at close: working tree dirty — modified case_1..4 `case.json`/`payload.json`/`results.json`, deleted old per-case workbooks, plus untracked `Emivest_clean.csv`, the deck `.pptx`, `build_deck.py`, `clean_metrics.json`, and four new per-case workbooks. No commit made.
+- Docker stack (django/celery/julia/db/redis) left **running**; `docker compose down` when finished.
+- Detailed delivery log in `SESSION_NOTES.md` (2026-06-09 entry).
 
 ## Completed Context
 
@@ -39,19 +42,21 @@ All five Phase 3 design questions remain resolved (see [proforma_vietnam/ESCO_CO
 - **Curtailed PV under self-consumption REopt run is credited as DPPA grid export at FMP.** Optimizer stays in self-consumption mode (no FMP signal); the generator owns the meter under DPPA and dumps surplus rather than curtailing. Case_2's 1.57 GWh/yr of curtailed PV → +$435k year-1 generator revenue under DPPA accounting.
 - **CfD volume shape**: 8760-hour series matched to expected `Q_re_meter` (including would-be-curtailed surplus), not a flat scalar.
 
-## Honest Factory A Economics (post-bess_capex fix)
+## Honest Factory A Economics
 
-All cases share `$2.85M` PV capex. BESS capex from REopt:
+**case_1..4 rebuilt 2026-06-09 on the cleaned load profile (`Emivest_clean.csv`).** ESCO developer lens, 70% debt:
 
-| Case | Description | BESS capex | Total capex | Equity IRR | NPV (USD) |
-|---|---|---:|---:|---:|---:|
-| case_1 | Current TOU + PV + BESS | $1.13M | $3.71M | 18.1% | $1.65M |
-| case_2 | QĐ963 TOU + PV + BESS (baseline) | $1.44M | $4.29M | 16.0% | $1.44M |
-| case_3 | QĐ963 + two-component pilot | $1.93M | $4.88M | 12.3% | $0.65M |
-| case_4 | QĐ963 TOU + PV only | $0.00M | $1.66M | 18.7% | $0.80M |
-| case_5 | QĐ963 + PV + BESS + grid_dppa_cfd | $1.44M | $4.29M | 14.5% | $0.77M |
+| Case | Description | PV (kW) | BESS (kW / kWh) | Clean self-supply | Total capex | Equity IRR | NPV (USD) | Payback |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| case_1 | Current TOU + PV + BESS | 5,322 | 1,662 / 8,250 | 59.5% | $3.68M | 18.2% | $1.65M | 9.4 yr |
+| case_2 | QĐ963 TOU + PV + BESS (baseline) | 5,914 | 1,796 / 10,699 | 65.5% | $4.27M | 16.1% | $1.44M | 10.5 yr |
+| case_3 | QĐ963 + two-component pilot | 5,765 | 1,830 / 11,693 | 65.8% | $4.32M | 12.4% | $0.59M | 12.2 yr |
+| case_4 | QĐ963 TOU + PV only | 3,453 | — | 35.8% | $1.66M | 18.7% | $0.80M | 9.0 yr |
+| case_5 | QĐ963 + PV + BESS + grid_dppa_cfd | 5,946 | 1,797 / 10,767 | — | $4.29M | 14.5% | $0.77M | — |
 
-Notable: case_4 (PV-only) beats case_2 (PV+BESS) on equity IRR — at current BESS prices ($80/kW + $120/kWh), BESS barely earns its keep for this load shape. Case_5 (DPPA at strike 2000) loses to case_2 because the CfD is one-way transfer at this strike.
+- **case_5 row is STALE** — it was computed on the dirty (spiked) load in the 2026-06-07 session and has not been re-run on `Emivest_clean.csv`. Re-run before comparing to case_1..4.
+- Cleaning the load most affected case_3: on clean data the battery is **1,830 kW** (was 4,783 kW on dirty data, where it chased the spike). case_3 still shaves grid peak 2,428 → 1,311 kW (−46%), demand-charge savings $128,781/yr.
+- Notable: case_4 (PV-only) still edges case_2 (PV+BESS) on equity IRR — at current BESS prices ($80/kW + $120/kWh) the battery earns its keep on clean energy share and absolute savings/NPV, not on IRR. case_5 (DPPA at strike 2000) loses to case_2 because the CfD is a one-way transfer at this strike.
 
 ## Resume Here Next Session
 
@@ -71,9 +76,14 @@ To explore item 1 (deal-term sweep):
 - [x] Fix DPPA-VND-into-USD-cash-flow unit mixing.
 - [x] Fix `bess_capex_usd=0` override bug; regenerate all five case assumptions/workbooks.
 - [x] Commit Phase 3 + the five fixes (`290b8dc2`, `8e0c2d1c`).
-- [ ] Push to `origin/master` (branch is now ahead by several commits).
+- [ ] Push to `origin/master` (branch is now ahead by 5 commits).
 - [ ] Manual cleanup: close Excel, remove `case_5/vietnam_report_*_v5.xlsx` + `~$*.xlsx` lock + stale parent `vietnam_report_b729db40-*.xlsx`.
 - [ ] Decide whether to pursue Active Product Direction item 1 (deal-term sweep) or move on to item 2/3/4.
+- [x] (2026-06-09) Clean the 24-hour ~40 MW spike in `Emivest.csv`; re-run case_1..4 on `Emivest_clean.csv`.
+- [x] (2026-06-09) Build the 7-slide English CEBA case-study deck (`Factory_A_Solar_BESS_Case_Study.pptx`) from cleaned case_1..4 data.
+- [ ] Re-run case_5 on `Emivest_clean.csv` so it is consistent with case_1..4 (currently stale on dirty load).
+- [ ] Decide whether to commit the 2026-06-09 cleaned-load re-run + deck artifacts.
+- [ ] `docker compose down` (stack left running on 2026-06-09).
 
 ## Session Close Procedure
 

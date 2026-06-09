@@ -1,3 +1,73 @@
+# 2026-06-09 - Load-Profile Spike Cleaning + Re-run case_1..4 + New 7-Slide CEBA Deck
+
+- User asked for a standalone, max-7-slide, corporate white-background CEBA case-study deck focused only on the four Factory A cases (case_5 DPPA explicitly excluded), in English, built from the data in `outputs/vietnam_case/factory_a`.
+- No commit made this session (user asked only to build the deck and update handoff notes). Working tree dirty; see Git state below.
+
+## Data-quality finding + fix (load profile spike)
+
+- While extracting metrics I found `Sample Load Profile/Emivest.csv` contained a non-physical spike: exactly 24 contiguous hours (indices 7344-7367, early November) at ~38,000-41,780 kW while the site's real operating peak is ~2,000-2,428 kW and the mean is 1,157 kW.
+  - That one day was ~8% of annual energy (10,139.6 MWh dirty) and set the annual peak at 41,780 kW (vs realistic monthly peaks ~2,000-2,400 kW).
+  - It badly distorted case_3 (two-component/demand-charge tariff): the dirty run sized a 4,783 kW battery chasing the spike, and reported a BAU demand charge of ~$611k mostly from that single day.
+- User chose "Clean & re-run 4 cases" (AskUserQuestion).
+- Cleaning: wrote `Sample Load Profile/Emivest_clean.csv` — replaced each of the 24 anomalous hours with the hour-of-day mean computed from all non-anomalous hours (preserves a realistic daily shape rather than flat-capping). Result: annual energy 10,139.6 → 9,340.1 MWh; peak 41,780 → 2,428 kW.
+- Pointed `case_1..4/case.json` `load_profile.path` at `Sample Load Profile/Emivest_clean.csv` (case_5 left untouched).
+
+## Re-ran case_1..4 end-to-end on docker
+
+- `docker compose up -d` (only `db` was up at session start). Julia was already warm from a prior run.
+- Ran `python -m proforma_vietnam.run_case --case outputs/vietnam_case/factory_a/case_N/case.json --poll-seconds 5 --max-polls 120` for case_1..4; all returned exit 0 / status `optimal`.
+- Gotcha 1 — stale workbooks: each run writes a NEW `vietnam_report_<run_uuid>.xlsx`, so old ones accumulate. My first dedup attempt compared a glob path (backslash on Windows) against a constructed forward-slash path; the mismatch deleted the just-generated workbooks too. Recovered by re-running all four cases. Lesson: match the xlsx to the current `results.json` `run_uuid` and normalize separators before deleting.
+- Gotcha 2 — partial results.json: case_2's saved `results.json` came back with only `Financial`+`ElectricTariff` output sections (captured mid-serialization). Re-fetched full results via `curl http://localhost:8000/v3/job/<uuid>/results` — then all 7 output sections present.
+- Final metric extraction matches each xlsx to its `results.json` `run_uuid` (proper path handling) and is saved to `outputs/vietnam_case/factory_a/clean_metrics.json`.
+
+## Clean Factory A economics (case_1..4, cleaned load; ESCO developer lens, 70% debt)
+
+| Case | Scenario | PV (kW) | BESS (kW / kWh) | Clean self-supply | Total CapEx | Equity IRR | 25-yr NPV | Avg DSCR | Payback |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| case_4 | Solar only, QĐ963 TOU | 3,453 | — | 35.8% | $1.66M | 18.7% | $0.80M | 1.33 | 9.0 yr |
+| case_1 | Solar+BESS, current TOU | 5,322 | 1,662 / 8,250 | 59.5% | $3.68M | 18.2% | $1.65M | 1.31 | 9.4 yr |
+| case_2 | Solar+BESS, QĐ963 TOU | 5,914 | 1,796 / 10,699 | 65.5% | $4.27M | 16.1% | $1.44M | 1.21 | 10.5 yr |
+| case_3 | Solar+BESS, QĐ963 + two-component | 5,765 | 1,830 / 11,693 | 65.8% | $4.32M | 12.4% | $0.59M | 1.01 | 12.2 yr |
+
+- case_3 grid peak shaved 2,428 → 1,311 kW (−46%); demand-charge savings $128,781/yr; total bill $757,870 → $263,380 (−65%).
+- These supersede the case_1..4 rows in the 2026-06-07 "Honest Factory A Economics" table, which were computed on the dirty (spiked) load. The biggest change is case_3: clean battery is 1,830 kW (was 4,783 kW on dirty data).
+- **case_5 was NOT re-run** and still reflects the dirty load — it is now inconsistent with case_1..4. Re-run it on the cleaned profile before using it alongside the others.
+
+## Deck built
+
+- `outputs/vietnam_case/factory_a/Factory_A_Solar_BESS_Case_Study.pptx` — 7 slides, 16:9, white background, English, native (editable) PowerPoint charts + table.
+  1. Title. 2. The study (Factory A profile + 4 scenarios + method). 3. Finding 1: solar-only stalls at ~36%. 4. Finding 2: BESS nearly doubles clean supply (36%→66%) and savings (+$324k/yr). 5. Finding 3: two-component tariff → peak-shaving (−46% peak, −$129k/yr demand charge). 6. Side-by-side techno-economic table. 7. Conclusions + recommendation.
+- Builder script committed as an artifact: `outputs/vietnam_case/factory_a/build_deck.py` (uses `python-pptx`, reads `clean_metrics.json`). `python-pptx` was pip-installed this session.
+- Financial lens: ESCO developer (Project/Equity IRR, DSCR, 70% debt) from the Vietnam report workbook Summary sheet — not the REopt offtaker-savings NPV.
+- Deck footnotes disclose the 24-hour load-spike removal.
+
+## Verification evidence
+
+- Re-ran all 4 cases to status `optimal`; extracted metrics from the run-matched workbooks.
+- Deck verified visually: installed LibreOffice (winget), converted PPTX → PDF (`soffice --headless --convert-to pdf`), rasterized to PNG (PyMuPDF), and inspected all 7 slides. First render showed heavy theme drop-shadows; fixed by stripping each autoshape's `<p:style>` effectRef in `build_deck.py` (`_no_shadow`) for a flat corporate look; re-rendered and confirmed.
+- Structural check: 7 slides, charts present on slides 3/4/5, table on slide 6, zero shapes overflowing slide bounds; all numbers cross-checked against `clean_metrics.json`.
+- Temporary `_render/` PNG/PDF directory deleted after inspection.
+
+## Files changed / added
+
+- Source/inputs: `Sample Load Profile/Emivest_clean.csv` (new); `case_1..4/case.json` (load path → cleaned CSV).
+- Regenerated per case_1..4: `payload.json`, `assumptions.json`, `results.json`, and new `vietnam_report_<uuid>.xlsx` (old per-case workbooks deleted).
+- New deck assets: `outputs/vietnam_case/factory_a/Factory_A_Solar_BESS_Case_Study.pptx`, `build_deck.py`, `clean_metrics.json`.
+- No `proforma_vietnam/` source code or tests changed.
+
+## Git state at close
+
+- Branch `master`, `[ahead 5]` of `origin/master`. HEAD `f22c9131`. No commit this session.
+- Modified (tracked): case_1..4 `case.json` / `payload.json` / `results.json`; deleted (tracked): the four old per-case workbooks.
+- Untracked: `Sample Load Profile/Emivest_clean.csv`, the new deck `.pptx`, `build_deck.py`, `clean_metrics.json`, and the four new per-case `vietnam_report_<uuid>.xlsx`.
+
+## Blockers / assumptions / open follow-ups
+
+- Docker stack (django/celery/julia/db/redis) was left **running**; `docker compose down` when done.
+- case_5 still on dirty load — re-run on `Emivest_clean.csv` before comparing to case_1..4.
+- The pre-existing prior-session cleanup item (case_5 Excel-locked `*_v5.xlsx` + stale parent `vietnam_report_b729db40-*.xlsx`) is still outstanding.
+- Decide whether to commit the cleaned-load re-run + deck artifacts (the `outputs/...` tree is tracked, so the regenerated case_1..4 outputs and deck would enter git on commit).
+
 # 2026-06-07 - Case_5 End-to-End Validation, Model Corrections, bess_capex Fix, Commits
 
 - User asked to continue from the prior session and build the deferred Factory A `case_5` end-to-end. The validation surfaced four substantive model corrections + one capex accounting bug, all fixed and committed in this session.
