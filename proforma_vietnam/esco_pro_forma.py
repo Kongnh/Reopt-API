@@ -18,6 +18,7 @@ def calculate_esco_pro_forma_from_reopt_results(
         tariff_money_values_currency,
     )
     dppa_inputs = cash_flow_overrides.pop("dppa_inputs", None)
+    battery_replacement_year = cash_flow_overrides.pop("battery_replacement_year", None)
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
 
@@ -76,6 +77,26 @@ def calculate_esco_pro_forma_from_reopt_results(
         "esco_energy_discount_fraction": esco_energy_discount_fraction,
         "owner_discount_rate_fraction": financial_inputs.get("owner_discount_rate_fraction", 0.10),
     }
+
+    pv_input_list = _as_list(inputs.get("PV"))
+    degradation_rates = [
+        pv.get("degradation_fraction")
+        for pv in pv_input_list
+        if pv.get("degradation_fraction")
+    ]
+    if degradation_rates:
+        cash_flow_inputs["pv_degradation_rate"] = max(degradation_rates)
+
+    replacement_costs = _bess_replacement_costs(
+        storage_inputs, storage_outputs, battery_replacement_year
+    )
+    if replacement_costs is not None:
+        cash_flow_inputs["replacement_costs_by_year"] = _money_series(
+            replacement_costs,
+            exchange_rate_vnd_per_usd,
+            tariff_money_values_currency,
+        )
+
     cash_flow_inputs.update(cash_flow_overrides)
 
     if dppa_inputs is not None and dppa_inputs.get("type", DPPA_TYPE_NONE) == DPPA_TYPE_GRID_CFD:
@@ -166,6 +187,35 @@ def _pv_capex(pv_outputs):
         _value(pv, "size_kw") * _value(pv, "installed_cost_per_kw")
         for pv in pv_outputs
     )
+
+
+def _bess_replacement_costs(storage_inputs, storage_outputs, replacement_year_override=None):
+    """Battery replacement schedule derived from REopt replacement inputs.
+
+    REopt carries replace_cost_per_kw / replace_cost_per_kwh and
+    battery_replacement_year on ElectricStorage inputs; the proforma books the
+    replacement as an expense in that year. An explicit override wins over the
+    year echoed in saved results so the schedule can change without a re-run.
+    """
+    replacement_year = (
+        replacement_year_override
+        if replacement_year_override is not None
+        else storage_inputs.get("battery_replacement_year")
+    )
+    if not replacement_year or replacement_year < 1:
+        return None
+
+    cost = (
+        _value(storage_outputs, "size_kw") * _value(storage_inputs, "replace_cost_per_kw")
+        + _value(storage_outputs, "size_kwh") * _value(storage_inputs, "replace_cost_per_kwh")
+        + _value(storage_inputs, "replace_cost_constant")
+    )
+    if cost <= 0:
+        return None
+
+    costs = [0.0] * int(replacement_year)
+    costs[int(replacement_year) - 1] = cost
+    return costs
 
 
 def _storage_capex(storage_inputs, storage_outputs):

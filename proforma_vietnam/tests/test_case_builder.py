@@ -149,6 +149,47 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertNotIn("unsupported_financial_key", assumptions)
         self.assertNotIn("unsupported_esco_key", assumptions)
 
+    def test_pv_depreciation_and_battery_replacement_pass_through_assumptions(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "financial": {"pv_depreciation_years": 15},
+                "technologies": {
+                    "storage": {"battery_replacement_year": 11},
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["pv_depreciation_years"], 15)
+        self.assertEqual(case["assumptions"]["battery_replacement_year"], 11)
+        self.assertEqual(
+            case["payload"]["ElectricStorage"]["battery_replacement_year"], 11
+        )
+
+    def test_om_escalation_and_pv_degradation_pass_through_assumptions(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "financial": {
+                    "om_escalation_rate": 0.03,
+                    "pv_degradation_rate": 0.006,
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["om_escalation_rate"], 0.03)
+        self.assertEqual(case["assumptions"]["pv_degradation_rate"], 0.006)
+
     def test_builds_two_component_pilot_tariff_when_enabled(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 
@@ -376,9 +417,29 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertAlmostEqual(dppa["transmission_loss_factor_k"], 1.026)
         self.assertAlmostEqual(dppa["allocation_fraction_delta"], 1.0)
         self.assertEqual(dppa["c_dppa_service_fee_vnd_per_kwh"], 360.0)
-        self.assertEqual(dppa["c_cl_settlement_adder_vnd_per_kwh"], 163.0)
-        self.assertEqual(dppa["cfd_strike_escalation_rate"], 0.0)
+        self.assertEqual(dppa["c_cl_settlement_adder_vnd_per_kwh"], 163.3)
+        self.assertEqual(dppa["cfd_strike_escalation_rate"], 0.04)
         self.assertEqual(len(dppa["fmp_series_vnd_per_kwh"]), 8760)
+
+    def test_grid_dppa_cfd_preserves_explicit_strike_escalation_override(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "dppa": {
+                    "type": "grid_dppa_cfd",
+                    "cfd_strike_per_kwh_vnd": 1700.0,
+                    "cfd_strike_escalation_rate": 0.02,
+                    "cfd_contract_volume_kwh_per_hour": 80.0,
+                },
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["dppa"]["cfd_strike_escalation_rate"], 0.02)
 
     def test_grid_dppa_cfd_forces_can_grid_charge_false(self):
         load_csv_path = _write_load_csv([500.0] * 8760)

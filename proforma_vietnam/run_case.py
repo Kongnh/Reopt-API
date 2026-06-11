@@ -28,6 +28,10 @@ VIETNAM_REPORT_QUERY_KEYS = [
     "exchange_rate_vnd_per_usd",
     "evn_energy_escalation_rate",
     "evn_capacity_escalation_rate",
+    "om_escalation_rate",
+    "pv_degradation_rate",
+    "pv_depreciation_years",
+    "battery_replacement_year",
     "demand_savings_esco_share",
     "grid_charging_enabled",
 ]

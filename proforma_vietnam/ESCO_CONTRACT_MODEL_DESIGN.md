@@ -343,8 +343,15 @@ Q_re_meter[h]    = pv_to_load[h]
 
 Q_re_delivered[h] = pv_to_load[h] + storage_to_load[h]
 
-shortfall[h]      = max(load[h] - Q_adj[h], 0)
+Q_Khc[h]          = min(load[h], Q_adj[h])
+
+shortfall[h]      = load[h] - Q_Khc[h]
 ```
+
+`Q_Khc` is the matched-consumption settlement quantity (corrected 2026-06-11):
+the buyer settles C_DN/C_DPPA/C_CL only on the portion of loss-adjusted
+generation it actually consumes in the hour. Excess generation above the
+hourly load is sold by the generator at FMP and is never billed to the buyer.
 
 ### Settlement Math
 
@@ -352,15 +359,16 @@ ND57-prescribed losses and fees are applied per hour. Defaults reflect 2025
 NLDC and EVN values.
 
 ```text
-Q_adj[h] = Q_re_meter[h] / (k * K_pp) * delta
+Q_adj[h] = Q_re_meter[h] / K_pp * delta
 ```
 
 ```text
-C_DN[h]   = Q_adj[h] * FMP[h]                # spot energy -> ESCO/generator
-C_DPPA[h] = Q_adj[h] * f_dppa_per_kwh        # -> EVN/regulator
-C_CL[h]   = Q_adj[h] * f_cl_per_kwh          # -> EVN/regulator
+C_DN[h]   = Q_Khc[h] * CFMP[h] * K_pp        # spot energy, buyer-side price
+C_DPPA[h] = Q_Khc[h] * f_dppa_per_kwh        # -> EVN/regulator
+C_CL[h]   = Q_Khc[h] * f_cl_per_kwh          # -> EVN/regulator
 C_BL[h]   = shortfall[h] * P_evn[h]          # -> EVN retail TOU
-CfD[h]    = (P_c[h] - FMP[h]) * Q_c[h]       # offtaker <-> ESCO
+Q_cfd[h]  = min(Q_c[h], Q_Khc[h])
+CfD[h]    = (P_c[h] - FMP[h]) * Q_cfd[h]     # offtaker <-> ESCO, matched contracted volume
 ```
 
 ESCO/generator revenue and offtaker DPPA cost per hour:
@@ -373,13 +381,17 @@ offtaker_cost[h]     = C_DN[h] + C_DPPA[h] + C_CL[h] + C_BL[h] + CfD[h]
 Defaults:
 
 ```text
-k                              = 1.026
+k                              = 1.026  # price conversion only: CFMP = FMP * k
 K_pp (>=110 kV)                = 1.008525
 K_pp (22 to 110 kV)            = 1.027263
 delta                          = 1.0
 f_dppa_per_kwh (2025, VND)     = 360
-f_cl_per_kwh   (2025, VND)     = 163
+f_cl_per_kwh   (2025, VND)     = 163.3
 ```
+
+Per the official NSMO CD7 simulation examples, `k` converts FMP to CFMP and
+does not reduce the settlement quantity. CfD settlement is capped by both the
+contract volume and the buyer's matched-consumption quantity.
 
 ### Annual Escalation
 
@@ -397,6 +409,27 @@ per the PPA negotiation. Default 0.
 
 Default for `dppa.fee_escalation_rate` is the existing
 `evn_energy_escalation_rate` (4 percent per year).
+
+### Multi-Year Mechanics (added 2026-06-11)
+
+The cash flow applies the following real-world mechanics across the analysis
+period (all opt-out by overriding the relevant input):
+
+- **PV degradation**: generation-linked revenue and buyer settlement terms
+  scale by `(1 - pv_degradation_rate)^(year - 1)`. The rate is derived from
+  the REopt `PV.degradation_fraction` input (default 0.5 percent per year).
+  Matched energy lost to degradation is repurchased from EVN at retail
+  (added to the residual bill / C_BL). The CfD settles on the contracted
+  volume and does not degrade.
+- **O&M escalation**: `om_escalation_rate` compounds annual O&M (default 0).
+- **Battery replacement**: a replacement expense is booked in the configured
+  `battery_replacement_year` assumption (Factory A cases use year 11) at
+  `size_kw × replace_cost_per_kw + size_kwh × replace_cost_per_kwh`,
+  derived automatically from REopt inputs/outputs unless the assumption or
+  `replacement_costs_by_year` is overridden.
+- **Vietnam CIT**: 4-year exemption + 9-year 50 percent reduction counted
+  from the first profitable year (no later than year 4, Circular 78/2014
+  Art. 18), with 5-year tax-loss carryforward (Art. 9).
 
 ### Cash-Flow Attribution
 
@@ -428,13 +461,13 @@ settlement.
 dppa.type                                 string enum, default "none"
 dppa.fmp_series_path                      string, default "DPPA DOC/fmp_cfmp_vn.json"
 dppa.cfd_strike_per_kwh_vnd               float, required for grid_dppa_cfd
-dppa.cfd_strike_escalation_rate           float (signed), default 0.0
+dppa.cfd_strike_escalation_rate           float (signed), default 0.04
 dppa.cfd_contract_volume_kwh_per_hour     float or 8760-list, required
-dppa.transmission_loss_factor_k           float, default 1.026
+dppa.transmission_loss_factor_k           float, default 1.026; price conversion only
 dppa.distribution_loss_factor_kpp         float, derived from voltage_level
 dppa.allocation_fraction_delta            float in (0, 1], default 1.0
 dppa.c_dppa_service_fee_vnd_per_kwh       float, default 360
-dppa.c_cl_settlement_adder_vnd_per_kwh    float, default 163
+dppa.c_cl_settlement_adder_vnd_per_kwh    float, default 163.3
 dppa.fee_escalation_rate                  float, default evn_energy_escalation_rate
 ```
 
@@ -449,4 +482,3 @@ dppa.fee_escalation_rate                  float, default evn_energy_escalation_r
   alongside `ElectricStorage.can_grid_charge = true`.
 - The case builder raises a validation error if `dppa.type = "grid_dppa_cfd"`
   is set at a voltage level outside `{"110kv_and_above", "22_to_110kv"}`.
-

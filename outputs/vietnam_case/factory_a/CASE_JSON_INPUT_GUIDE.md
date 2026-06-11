@@ -149,7 +149,7 @@ Storage size is optimized by core REopt. Battery power is controlled by kW bound
 | `technologies.storage.replace_cost_per_kwh` | `0` | Battery energy capacity replacement cost in USD/kWh at `battery_replacement_year`. |
 | `technologies.storage.replace_cost_constant` | `0` | Fixed battery replacement cost in USD at `cost_constant_replacement_year`. |
 | `technologies.storage.inverter_replacement_year` | `10` | Project year for battery power/inverter replacement cost. |
-| `technologies.storage.battery_replacement_year` | `10` | Project year for battery energy capacity replacement cost. |
+| `technologies.storage.battery_replacement_year` | `11` | Project year for battery energy capacity replacement cost. |
 | `technologies.storage.cost_constant_replacement_year` | `10` | Project year for fixed replacement cost. |
 | `technologies.storage.om_cost_fraction_of_installed_cost` | `0.02` | Core REopt annual storage O&M field. It is a fraction of total installed storage cost. Total installed storage cost includes `installed_cost_per_kw * optimized_kw`, `installed_cost_per_kwh * optimized_kwh`, and `installed_cost_constant`. `0.02` means 2% of total installed storage cost per year. |
 

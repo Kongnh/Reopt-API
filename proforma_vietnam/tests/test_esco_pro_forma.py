@@ -192,6 +192,76 @@ class VietnamEscoProFormaAdapterTests(TestCase):
         )
 
 
+    def test_bess_replacement_cost_derived_from_reopt_replacement_inputs(self):
+        reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        reopt_results["inputs"]["ElectricStorage"].update({
+            "replace_cost_per_kw": 80.0,
+            "replace_cost_per_kwh": 100.0,
+            "battery_replacement_year": 10,
+        })
+        reopt_results["outputs"]["ElectricStorage"].update({
+            "size_kw": 10.0,
+            "size_kwh": 20.0,
+        })
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=12,
+        )
+
+        rows = result["annual_cash_flows"]
+        self.assertEqual(rows[0]["replacement_cost_vnd"], 0)
+        # Replacement lands in year 10 (index 9): 10×80 + 20×100 = 2,800.
+        self.assertAlmostEqual(rows[9]["replacement_cost_vnd"], 2800.0)
+        self.assertEqual(rows[10]["replacement_cost_vnd"], 0)
+
+    def test_battery_replacement_year_override_beats_reopt_inputs(self):
+        # Saved results.json may echo battery_replacement_year=10 from the
+        # original REopt run; an explicit override (e.g. year 11 from updated
+        # assumptions) must win so the schedule can change without a re-run.
+        reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        reopt_results["inputs"]["ElectricStorage"].update({
+            "replace_cost_per_kw": 80.0,
+            "replace_cost_per_kwh": 100.0,
+            "battery_replacement_year": 10,
+        })
+        reopt_results["outputs"]["ElectricStorage"].update({
+            "size_kw": 10.0,
+            "size_kwh": 20.0,
+        })
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=12,
+            battery_replacement_year=11,
+        )
+
+        rows = result["annual_cash_flows"]
+        self.assertEqual(rows[9]["replacement_cost_vnd"], 0)
+        # Replacement lands in year 11 (index 10): 10×80 + 20×100 = 2,800.
+        self.assertAlmostEqual(rows[10]["replacement_cost_vnd"], 2800.0)
+        self.assertEqual(rows[11]["replacement_cost_vnd"], 0)
+
+    def test_pv_degradation_rate_derived_from_reopt_pv_inputs(self):
+        reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        reopt_results["inputs"]["PV"] = {"degradation_fraction": 0.01}
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            project_years=2,
+        )
+
+        rows = result["annual_cash_flows"]
+        self.assertAlmostEqual(
+            rows[1]["esco_energy_revenue_vnd"],
+            rows[0]["esco_energy_revenue_vnd"] * 0.99,
+        )
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

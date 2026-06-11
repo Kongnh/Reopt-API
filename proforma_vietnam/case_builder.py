@@ -38,6 +38,9 @@ FINANCIAL_ASSUMPTION_KEYS = [
     "debt_term_years",
     "annual_om_usd",
     "annual_om_vnd",
+    "om_escalation_rate",
+    "pv_degradation_rate",
+    "pv_depreciation_years",
 ]
 PV_PAYLOAD_KEYS = [
     "min_kw",
@@ -290,6 +293,9 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         ),
     }
     assumptions.update(_allowlisted(financial, FINANCIAL_ASSUMPTION_KEYS))
+    storage = technologies.get("storage", {})
+    if storage.get("battery_replacement_year") is not None:
+        assumptions["battery_replacement_year"] = storage["battery_replacement_year"]
     exchange_rate = tariff_config.get("exchange_rate_vnd_per_usd")
     if financial.get("annual_om_vnd") is not None:
         assumptions["annual_om_usd"] = _vnd_to_usd(financial["annual_om_vnd"], exchange_rate)

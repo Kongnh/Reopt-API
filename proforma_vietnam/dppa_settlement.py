@@ -8,8 +8,8 @@ DPPA_TYPE_GRID_CFD = "grid_dppa_cfd"
 DEFAULT_TRANSMISSION_LOSS_FACTOR_K = 1.026
 DEFAULT_ALLOCATION_FRACTION_DELTA = 1.0
 DEFAULT_C_DPPA_SERVICE_FEE_VND_PER_KWH = 360.0
-DEFAULT_C_CL_SETTLEMENT_ADDER_VND_PER_KWH = 163.0
-DEFAULT_CFD_STRIKE_ESCALATION_RATE = 0.0
+DEFAULT_C_CL_SETTLEMENT_ADDER_VND_PER_KWH = 163.3
+DEFAULT_CFD_STRIKE_ESCALATION_RATE = 0.04
 
 DISTRIBUTION_LOSS_FACTOR_KPP_BY_VOLTAGE = {
     "110kv_and_above": 1.008525,
@@ -32,9 +32,9 @@ def load_fmp_series(path):
 def load_cfmp_series(path):
     """Read the 8760-hour CFMP series (VND/kWh) from the reference JSON file.
 
-    CFMP is the customer-side spot price (FMP marked up by distribution losses)
-    used in C_DN settlement per ND57 Art. 14-18 and the user's clarified
-    formula: C_DN = Q_adj × CFMP × K_pp.
+    CFMP is the customer-side spot price (FMP marked up by the per-trading-
+    cycle loss conversion factor k, CFMP = FMP × k) used in C_DN settlement
+    per ND57 Art. 14-18 and CD7: C_DN = Q_Khc × CFMP × K_pp.
     """
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     series = raw.get("cfmp_vnd_per_kwh")
@@ -57,7 +57,7 @@ def settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)
         )
 
     fmp = list(dppa_inputs["fmp_series_vnd_per_kwh"])
-    cfmp = list(dppa_inputs.get("cfmp_series_vnd_per_kwh") or fmp)
+    cfmp = list(dppa_inputs.get("cfmp_series_vnd_per_kwh") or [])
     p_evn = list(evn_energy_rates_vnd_per_kwh)
     horizon = max(
         len(fmp),
@@ -87,8 +87,6 @@ def settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)
     storage_to_load = _pad(dispatch.get("storage_to_load_kw", []), horizon)
     storage_to_grid = _pad(dispatch.get("storage_to_grid_kw", []), horizon)
 
-    loss_divisor = k * kpp
-
     hourly_rows = []
     sums = {
         "c_dn_vnd": 0.0,
@@ -101,6 +99,9 @@ def settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)
         "q_re_meter_kwh": 0.0,
         "q_re_delivered_kwh": 0.0,
         "q_adj_kwh": 0.0,
+        "q_khc_kwh": 0.0,
+        "q_cfd_kwh": 0.0,
+        "matched_retail_value_vnd": 0.0,
         "q_pv_curtailed_kwh": 0.0,
         "q_pv_to_grid_effective_kwh": 0.0,
     }
@@ -113,22 +114,35 @@ def settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)
         pv_to_grid_effective = pv_to_grid[h] + pv_curtailed[h]
         q_re_meter = pv_to_load[h] + pv_to_grid_effective + storage_to_load[h] + storage_to_grid[h]
         q_re_delivered = pv_to_load[h] + storage_to_load[h]
-        q_adj = q_re_meter / loss_divisor * delta
+        # Quantity conversion generator meter → customer uses Kpp only
+        # (CD7 Ví dụ 1: Qm 6,048,000 kWh ↔ Q_khhc 6,000,000 kWh = ÷1.008).
+        # k adjusts the market price the customer pays, never the volume.
+        q_adj = q_re_meter / kpp * delta
         fmp_h = fmp[h] if h < len(fmp) else 0.0
-        cfmp_h = cfmp[h] if h < len(cfmp) else fmp_h
+        # CFMP = FMP × k. A published CFMP series already embodies the
+        # per-trading-cycle k (the FMP/CFMP spread); without one, fall back
+        # to the regulated constant k.
+        cfmp_h = cfmp[h] if h < len(cfmp) else fmp_h * k
         p_evn_h = p_evn[h] if h < len(p_evn) else 0.0
         q_c_h = q_c[h]
 
-        # Customer-side spot energy charge per the clarified ND57 formula:
-        # C_DN = Q_KHhc × CFMP × K_pp, where Q_KHhc is the loss-adjusted
-        # customer consumption (Q_adj) and CFMP is the buyer-side spot price.
-        c_dn = q_adj * cfmp_h * kpp
-        c_dppa = q_adj * f_dppa
-        c_cl = q_adj * f_cl
-        shortfall = max(load_kw[h] - q_adj, 0.0)
+        # Customer-side settlement quantity per ND57: Q_Khc = min(load, Q_adj).
+        # The buyer pays C_DN/C_DPPA/C_CL only on matched consumption; excess
+        # generation above the hourly load stays with the generator as spot
+        # revenue and is never billed to the buyer.
+        q_khc = min(load_kw[h], q_adj)
+        # C_DN = Q_Khc × CFMP × K_pp, where CFMP is the buyer-side spot price.
+        c_dn = q_khc * cfmp_h * kpp
+        c_dppa = q_khc * f_dppa
+        c_cl = q_khc * f_cl
+        shortfall = max(load_kw[h] - q_khc, 0.0)
         c_bl = shortfall * p_evn_h
-        cfd_strike_revenue = p_c * q_c_h
-        cfd_fmp_offset = fmp_h * q_c_h
+        # CfD settles only on DPPA volume the customer actually receives —
+        # min(Q_c, Q_Khc) per CD7 Ví dụ 4 — never on contracted volume the
+        # buyer did not absorb.
+        q_cfd = min(q_c_h, q_khc)
+        cfd_strike_revenue = p_c * q_cfd
+        cfd_fmp_offset = fmp_h * q_cfd
         cfd_net = cfd_strike_revenue - cfd_fmp_offset
         gen_fmp_revenue = q_re_meter * fmp_h
 
@@ -142,6 +156,11 @@ def settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)
         sums["q_re_meter_kwh"] += q_re_meter
         sums["q_re_delivered_kwh"] += q_re_delivered
         sums["q_adj_kwh"] += q_adj
+        sums["q_khc_kwh"] += q_khc
+        sums["q_cfd_kwh"] += q_cfd
+        # Retail value of the matched energy — used downstream to price the
+        # energy lost to PV degradation back at the EVN retail rate.
+        sums["matched_retail_value_vnd"] += q_khc * p_evn_h
         sums["q_pv_curtailed_kwh"] += pv_curtailed[h]
         sums["q_pv_to_grid_effective_kwh"] += pv_to_grid_effective
 
@@ -152,6 +171,8 @@ def settle_dppa_year_one(*, dppa_inputs, dispatch, evn_energy_rates_vnd_per_kwh)
             "q_re_delivered_kw": q_re_delivered,
             "cfmp_vnd_per_kwh": cfmp_h,
             "q_adj_kw": q_adj,
+            "q_khc_kw": q_khc,
+            "q_cfd_kw": q_cfd,
             "fmp_vnd_per_kwh": fmp_h,
             "c_dn_vnd": c_dn,
             "c_dppa_vnd": c_dppa,
