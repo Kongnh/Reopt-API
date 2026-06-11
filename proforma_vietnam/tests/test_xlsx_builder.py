@@ -14,6 +14,9 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertEqual(
             workbook.sheetnames,
             [
+                "Executive Summary",
+                "Buyer Analysis",
+                "Developer Returns",
                 "Summary",
                 "System Sizing",
                 "Results Comparison",
@@ -99,6 +102,72 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertGreater(len(workbook["Developer Financials"]._charts), 0)
 
 
+    def test_executive_summary_presents_both_sides_kpis(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(),
+            assumptions={"esco_energy_discount_fraction": 0.9},
+            report_data=_report_data(),
+        )
+
+        sheet = workbook["Executive Summary"]
+        labels = {
+            sheet.cell(row=row, column=2).value: sheet.cell(row=row, column=3)
+            for row in range(1, sheet.max_row + 1)
+        }
+
+        self.assertIn("Equity IRR", labels)
+        self.assertEqual(labels["Equity IRR"].value, 0.14)
+        self.assertEqual(labels["Equity IRR"].number_format, "0.0%")
+        self.assertIn("Total Investment (USD)", labels)
+        self.assertEqual(labels["Total Investment (USD)"].value, 1000000)
+        self.assertEqual(labels["Total Investment (USD)"].number_format, "#,##0")
+        self.assertIn("Year 1 Buyer Savings (USD)", labels)
+        self.assertEqual(labels["Year 1 Buyer Savings (USD)"].value, 50000)
+
+    def test_buyer_analysis_has_annual_savings_table_with_cumulative_column(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(),
+            assumptions={"esco_energy_discount_fraction": 0.9},
+            report_data=_report_data(),
+        )
+
+        sheet = workbook["Buyer Analysis"]
+        headers = [
+            sheet.cell(row=row, column=1).value
+            for row in range(1, sheet.max_row + 1)
+        ]
+        self.assertIn("Year", headers)
+        header_row = headers.index("Year") + 1
+        year_headers = [
+            sheet.cell(row=header_row, column=col).value
+            for col in range(1, sheet.max_column + 1)
+        ]
+        self.assertIn("BAU Cost (USD)", year_headers)
+        self.assertIn("Cost With Project (USD)", year_headers)
+        self.assertIn("Savings (USD)", year_headers)
+        self.assertIn("Cumulative Savings (USD)", year_headers)
+
+    def test_developer_returns_sheet_has_kpis_and_annual_equity_cash_flow(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(),
+            assumptions={"esco_energy_discount_fraction": 0.9},
+            report_data=_report_data(),
+        )
+
+        sheet = workbook["Developer Returns"]
+        values = [
+            sheet.cell(row=row, column=2).value
+            for row in range(1, sheet.max_row + 1)
+        ]
+        self.assertIn("Minimum DSCR (debt years)", values)
+        self.assertIn("Equity IRR", values)
+        headers_anywhere = []
+        for row in range(1, sheet.max_row + 1):
+            for col in range(1, sheet.max_column + 1):
+                headers_anywhere.append(sheet.cell(row=row, column=col).value)
+        self.assertIn("Equity Cash Flow (USD)", headers_anywhere)
+        self.assertIn("Cumulative Equity CF (USD)", headers_anywhere)
+
     def test_omits_dppa_sheets_when_dppa_type_is_none_or_missing(self):
         workbook = build_vietnam_esco_workbook(
             _cash_flow_result(),
@@ -142,6 +211,7 @@ class VietnamXlsxBuilderTests(TestCase):
                     {
                         "hour": 1, "load_kw": 100.0, "q_re_meter_kw": 80.0,
                         "q_re_delivered_kw": 80.0, "q_adj_kw": 75.9,
+                        "q_khc_kw": 75.9,
                         "fmp_vnd_per_kwh": 1500.0, "c_dn_vnd": 113850.0,
                         "c_dppa_vnd": 27324.0, "c_cl_vnd": 12372.0,
                         "c_bl_vnd": 48200.0, "cfd_payment_vnd": 16000.0,
@@ -163,7 +233,11 @@ class VietnamXlsxBuilderTests(TestCase):
         hourly = workbook["Hourly Settlement"]
         self.assertEqual(hourly.cell(row=1, column=1).value, "Hour")
         self.assertEqual(hourly.cell(row=2, column=1).value, 1)
-        self.assertEqual(hourly.cell(row=2, column=7).value, 113850.0)
+        headers = [hourly.cell(row=1, column=col).value
+                   for col in range(1, hourly.max_column + 1)]
+        self.assertIn("Q_Khc (kW)", headers)
+        c_dn_column = headers.index("C_DN (VND)") + 1
+        self.assertEqual(hourly.cell(row=2, column=c_dn_column).value, 113850.0)
 
         monthly = workbook["Monthly Settlement"]
         self.assertEqual(monthly.cell(row=1, column=1).value, "Month")

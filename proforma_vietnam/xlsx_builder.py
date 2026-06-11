@@ -1,6 +1,8 @@
+from datetime import date
+
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
-from openpyxl.styles import Font, PatternFill
+from openpyxl.styles import Alignment, Font, PatternFill
 
 
 SUMMARY_ROWS = [
@@ -58,6 +60,7 @@ DPPA_HOURLY_COLUMNS = [
     ("Q_re_meter (kW)", "q_re_meter_kw"),
     ("Q_re_delivered (kW)", "q_re_delivered_kw"),
     ("Q_adj (kW)", "q_adj_kw"),
+    ("Q_Khc (kW)", "q_khc_kw"),
     ("FMP (VND/kWh)", "fmp_vnd_per_kwh"),
     ("C_DN (VND)", "c_dn_vnd"),
     ("C_DPPA (VND)", "c_dppa_vnd"),
@@ -93,7 +96,7 @@ DPPA_ANNUAL_COLUMNS = [
 BAU_VS_DPPA_ROWS = [
     ("section", "Buyer (Factory) — Year 1 Outflow (USD)", None),
     ("BAU EVN energy + demand bill", "bau_evn_bill_usd", "bau"),
-    ("C_DN spot energy (Q_adj × CFMP × K_pp)", "c_dn_usd", "dppa"),
+    ("C_DN spot energy (Q_Khc × CFMP × K_pp)", "c_dn_usd", "dppa"),
     ("C_DPPA system service fee", "c_dppa_usd", "dppa"),
     ("C_CL settlement adder", "c_cl_usd", "dppa"),
     ("C_BL retail shortfall (P_evn × shortfall)", "c_bl_usd", "dppa"),
@@ -117,6 +120,7 @@ BAU_VS_DPPA_ROWS = [
     ("Storage → load", "storage_to_load_kwh", "flow"),
     ("Q_re_meter (total generator injection)", "q_re_meter_kwh", "flow"),
     ("Q_adj (loss-adjusted customer-side)", "q_adj_kwh", "flow"),
+    ("Q_Khc (matched consumption, settled)", "q_khc_kwh", "flow"),
     ("EVN retail shortfall", "shortfall_kwh", "flow"),
 ]
 
@@ -182,8 +186,46 @@ DEVELOPER_FINANCIAL_ROWS = [
     ("ROI", "roi_fraction"),
 ]
 
-HEADER_FILL = PatternFill("solid", fgColor="D9EAF7")
-HEADER_FONT = Font(bold=True)
+NAVY = "1F3864"
+ACCENT = "2E74B5"
+LIGHT_BAND = "EDF2F9"
+
+HEADER_FILL = PatternFill("solid", fgColor=NAVY)
+HEADER_FONT = Font(bold=True, color="FFFFFF")
+TITLE_FILL = PatternFill("solid", fgColor=NAVY)
+TITLE_FONT = Font(bold=True, color="FFFFFF", size=13)
+SECTION_FILL = PatternFill("solid", fgColor=ACCENT)
+SECTION_FONT = Font(bold=True, color="FFFFFF", size=10)
+SUBTITLE_FONT = Font(italic=True, size=9, color="595959")
+NOTE_FONT = Font(italic=True, size=9, color="595959")
+KPI_FONT = Font(bold=True, size=11)
+
+FORMAT_AMOUNT = "#,##0"
+FORMAT_PERCENT = "0.0%"
+FORMAT_RATIO = "0.00"
+FORMAT_YEARS = "0.0"
+
+# Sheets that carry their own bespoke layout and column widths.
+CUSTOM_LAYOUT_SHEETS = {"Executive Summary", "Buyer Analysis", "Developer Returns"}
+
+BUYER_ANNUAL_COLUMNS = [
+    ("Year", "year", None),
+    ("BAU Cost (USD)", "bau_evn_bill_usd", FORMAT_AMOUNT),
+    ("Cost With Project (USD)", "offtaker_post_project_cost_usd", FORMAT_AMOUNT),
+    ("Savings (USD)", "offtaker_savings_usd", FORMAT_AMOUNT),
+    ("Savings (% of BAU)", "offtaker_savings_fraction", FORMAT_PERCENT),
+]
+
+DEVELOPER_ANNUAL_COLUMNS = [
+    ("Year", "year", None),
+    ("Revenue (USD)", "esco_revenue_usd", FORMAT_AMOUNT),
+    ("O&M + Replacement (USD)", None, FORMAT_AMOUNT),
+    ("CIT (USD)", "cit_usd", FORMAT_AMOUNT),
+    ("CFADS (USD)", "cash_available_for_debt_service_usd", FORMAT_AMOUNT),
+    ("Debt Service (USD)", "debt_service_usd", FORMAT_AMOUNT),
+    ("DSCR", "dscr", FORMAT_RATIO),
+    ("Equity Cash Flow (USD)", "equity_cash_flow_usd", FORMAT_AMOUNT),
+]
 
 
 def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=None):
@@ -197,9 +239,19 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     )
 
     workbook = Workbook()
-    summary_sheet = workbook.active
-    summary_sheet.title = "Summary"
+    executive_sheet = workbook.active
+    executive_sheet.title = "Executive Summary"
+    _write_executive_summary(
+        executive_sheet, cash_flow_result, assumptions, report_data, dppa_config
+    )
+    _write_buyer_analysis(
+        workbook.create_sheet("Buyer Analysis"), cash_flow_result, dppa_config
+    )
+    _write_developer_returns(
+        workbook.create_sheet("Developer Returns"), cash_flow_result
+    )
 
+    summary_sheet = workbook.create_sheet("Summary")
     _write_summary_sheet(summary_sheet, cash_flow_result.get("summary", {}))
     _write_key_value_sheet(
         workbook.create_sheet("System Sizing"),
@@ -281,9 +333,353 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         )
 
     for worksheet in workbook.worksheets:
-        _autosize_columns(worksheet)
+        if worksheet.title not in CUSTOM_LAYOUT_SHEETS:
+            _autosize_columns(worksheet)
+
+    for title in CUSTOM_LAYOUT_SHEETS:
+        if title in workbook.sheetnames:
+            workbook[title].sheet_properties.tabColor = NAVY
 
     return workbook
+
+
+def _minimum_debt_service_dscr(cash_flow_result):
+    dscr_values = [
+        row["dscr"]
+        for row in cash_flow_result.get("annual_cash_flows", [])
+        if row.get("debt_service_vnd") and row.get("dscr") is not None
+    ]
+    return min(dscr_values) if dscr_values else None
+
+
+def _write_title(worksheet, title, subtitle, last_column):
+    worksheet.merge_cells(
+        start_row=1, start_column=2, end_row=1, end_column=last_column
+    )
+    cell = worksheet.cell(row=1, column=2, value=title)
+    cell.fill = TITLE_FILL
+    cell.font = TITLE_FONT
+    cell.alignment = Alignment(vertical="center")
+    worksheet.row_dimensions[1].height = 26
+    worksheet.cell(row=2, column=2, value=subtitle).font = SUBTITLE_FONT
+    worksheet.sheet_view.showGridLines = False
+
+
+def _write_section_header(worksheet, row, label, last_column):
+    for column in range(2, last_column + 1):
+        worksheet.cell(row=row, column=column).fill = SECTION_FILL
+    cell = worksheet.cell(row=row, column=2, value=label)
+    cell.font = SECTION_FONT
+
+
+def _write_kpi_rows(worksheet, start_row, rows):
+    """Write (label, value, number_format, note) tuples as label/value lines."""
+    row = start_row
+    for label, value, number_format, note in rows:
+        worksheet.cell(row=row, column=2, value=label)
+        value_cell = worksheet.cell(row=row, column=3, value=value)
+        value_cell.font = KPI_FONT
+        if number_format:
+            value_cell.number_format = number_format
+        if note:
+            worksheet.cell(row=row, column=4, value=note).font = NOTE_FONT
+        if row % 2 == 0:
+            for column in (2, 3, 4):
+                worksheet.cell(row=row, column=column).fill = PatternFill(
+                    "solid", fgColor=LIGHT_BAND
+                )
+        row += 1
+    return row
+
+
+def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_data, dppa_config):
+    summary = cash_flow_result.get("summary", {})
+    annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
+    year_one = annual_rows[0]
+    sizing = report_data.get("system_sizing", {}) or {}
+
+    case_name = assumptions.get("case_name") or "Vietnam ESCO / DPPA Case"
+    contract_label = (
+        "Grid-connected DPPA with CfD (ND57/2025)" if dppa_config else
+        "ESCO discount-to-EVN tariff (behind-the-meter)"
+    )
+    _write_title(
+        worksheet,
+        f"Investment & PPA Negotiation Summary — {case_name}",
+        f"{contract_label}  ·  prepared {date.today().isoformat()}  ·  "
+        "REopt dispatch + proforma_vietnam financial model",
+        last_column=4,
+    )
+
+    lifetime_bau = sum(_lookup(row, "bau_evn_bill_usd") or 0.0 for row in annual_rows)
+    lifetime_savings = sum(_lookup(row, "offtaker_savings_usd") or 0.0 for row in annual_rows)
+    minimum_dscr = _minimum_debt_service_dscr(cash_flow_result)
+
+    row = 4
+    _write_section_header(worksheet, row, "Project & System", 4)
+    row = _write_kpi_rows(worksheet, row + 1, [
+        ("PV Size (kW)", sizing.get("pv_kw"), FORMAT_AMOUNT, None),
+        ("Battery Power (kW)", sizing.get("battery_kw"), FORMAT_AMOUNT, None),
+        ("Battery Energy (kWh)", sizing.get("battery_kwh"), FORMAT_AMOUNT, None),
+        ("Total Investment (USD)", _lookup(summary, "total_capex_usd"), FORMAT_AMOUNT, None),
+    ])
+
+    row += 1
+    _write_section_header(worksheet, row, "Contract Terms", 4)
+    terms = []
+    if dppa_config is not None:
+        volume = dppa_config.get("cfd_contract_volume_kwh_per_hour")
+        annual_volume = (
+            sum(volume) if isinstance(volume, list)
+            else (volume or 0.0) * 8760
+        )
+        terms.extend([
+            ("CfD Strike Price (VND/kWh)", dppa_config.get("cfd_strike_per_kwh_vnd"), FORMAT_AMOUNT, None),
+            ("CfD Strike Escalation (per year)", dppa_config.get("cfd_strike_escalation_rate"), FORMAT_PERCENT, None),
+            ("Annual Contract Volume (kWh)", annual_volume, FORMAT_AMOUNT, None),
+            ("Transmission Loss Factor k", dppa_config.get("transmission_loss_factor_k"), FORMAT_RATIO, None),
+            ("Distribution Loss Factor K_pp", dppa_config.get("distribution_loss_factor_kpp"), "0.000000", None),
+            ("DPPA Service Fee (VND/kWh)", dppa_config.get("c_dppa_service_fee_vnd_per_kwh"), FORMAT_AMOUNT, None),
+            ("Settlement Adder C_CL (VND/kWh)", dppa_config.get("c_cl_settlement_adder_vnd_per_kwh"), FORMAT_AMOUNT, None),
+        ])
+    else:
+        terms.extend([
+            ("ESCO Energy Price (fraction of EVN tariff)", assumptions.get("esco_energy_discount_fraction"), FORMAT_PERCENT, None),
+            ("Demand Savings Share to ESCO", assumptions.get("demand_savings_esco_share"), FORMAT_PERCENT, None),
+        ])
+    terms.append(("Analysis Period (Years)", len(annual_rows), None, None))
+    row = _write_kpi_rows(worksheet, row + 1, terms)
+
+    row += 1
+    _write_section_header(worksheet, row, "Developer (Seller) Returns", 4)
+    row = _write_kpi_rows(worksheet, row + 1, [
+        ("Equity IRR", summary.get("equity_irr_fraction"), FORMAT_PERCENT, None),
+        ("Project IRR", summary.get("project_irr_fraction"), FORMAT_PERCENT, None),
+        ("NPV (USD)", _lookup(summary, "npv_usd"), FORMAT_AMOUNT, "At owner discount rate"),
+        ("Minimum DSCR (debt years)", minimum_dscr, FORMAT_RATIO, "Lender covenant view"),
+        ("Average DSCR", summary.get("average_dscr"), FORMAT_RATIO, None),
+        ("Simple Payback (Years)", summary.get("simple_payback_years"), FORMAT_YEARS, None),
+        ("Equity Investment (USD)", _lookup(summary, "equity_investment_usd"), FORMAT_AMOUNT, None),
+        ("Debt Principal (USD)", _lookup(summary, "debt_principal_usd"), FORMAT_AMOUNT, None),
+    ])
+
+    row += 1
+    _write_section_header(worksheet, row, "Buyer (Offtaker) Outcome", 4)
+    row = _write_kpi_rows(worksheet, row + 1, [
+        ("Year 1 BAU Cost (USD)", _lookup(year_one, "bau_evn_bill_usd"), FORMAT_AMOUNT, None),
+        ("Year 1 Cost With Project (USD)", _lookup(year_one, "offtaker_post_project_cost_usd"), FORMAT_AMOUNT, None),
+        ("Year 1 Buyer Savings (USD)", _lookup(year_one, "offtaker_savings_usd"), FORMAT_AMOUNT, None),
+        ("Year 1 Savings (% of BAU)", year_one.get("offtaker_savings_fraction"), FORMAT_PERCENT, None),
+        ("First 10 Years Buyer Savings (USD)", _lookup(summary, "buyer_savings_10yr_usd"), FORMAT_AMOUNT, "Cumulative, years 1-10"),
+        ("First 10 Years Savings (% of BAU)", summary.get("buyer_savings_10yr_fraction"), FORMAT_PERCENT, None),
+        ("Lifetime Buyer Savings (USD)", lifetime_savings, FORMAT_AMOUNT, "Sum over analysis period"),
+        (
+            "Lifetime Savings (% of BAU)",
+            (lifetime_savings / lifetime_bau) if lifetime_bau else None,
+            FORMAT_PERCENT,
+            None,
+        ),
+    ])
+
+    row += 1
+    _write_section_header(worksheet, row, "Model Basis & Conventions", 4)
+    notes = [
+        "Buyer settlement quantity Q_Khc = min(hourly load, loss-adjusted generation Q_adj); "
+        "excess generation is sold by the generator at FMP and never billed to the buyer."
+        if dppa_config else
+        "ESCO is paid a discount to the time-specific EVN tariff for project-served energy.",
+        "PV degradation, O&M escalation and battery replacement (REopt schedule) are applied across the analysis period.",
+        (
+            "PV straight-line depreciation over "
+            f"{assumptions.get('pv_depreciation_years', 20)} years "
+            "(Circular 45/2013/TT-BTC permits 7-20 years for generating equipment)."
+        ),
+        "Vietnam CIT: 4-year exemption + 9-year 50% reduction from first profitable year; "
+        "5-year tax-loss carryforward.",
+        "All USD figures at the fixed contract exchange rate; FX drift between VND revenue "
+        "and USD reporting is not modelled.",
+    ]
+    for note in notes:
+        row += 1
+        worksheet.cell(row=row, column=2, value="•  " + note).font = NOTE_FONT
+
+    worksheet.column_dimensions["A"].width = 2
+    worksheet.column_dimensions["B"].width = 42
+    worksheet.column_dimensions["C"].width = 18
+    worksheet.column_dimensions["D"].width = 36
+
+
+def _write_buyer_analysis(worksheet, cash_flow_result, dppa_config):
+    annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
+    year_one = annual_rows[0]
+    summary = cash_flow_result.get("summary", {})
+
+    _write_title(
+        worksheet,
+        "Buyer Analysis — Cost vs Business-As-Usual",
+        "Annual electricity cost with the project compared against the EVN-only baseline (USD)",
+        last_column=6,
+    )
+
+    row = 4
+    _write_section_header(worksheet, row, "Year 1 Snapshot", 6)
+    snapshot = [
+        ("Year 1 BAU Cost (USD)", _lookup(year_one, "bau_evn_bill_usd"), FORMAT_AMOUNT, None),
+        ("Year 1 Cost With Project (USD)", _lookup(year_one, "offtaker_post_project_cost_usd"), FORMAT_AMOUNT, None),
+        ("Year 1 Savings (USD)", _lookup(year_one, "offtaker_savings_usd"), FORMAT_AMOUNT, None),
+        ("Year 1 Savings (% of BAU)", year_one.get("offtaker_savings_fraction"), FORMAT_PERCENT, None),
+    ]
+    if dppa_config is not None:
+        snapshot.extend([
+            ("of which C_DN spot energy (USD)", _lookup(year_one, "c_dn_usd"), FORMAT_AMOUNT, None),
+            ("of which C_DPPA + C_CL fees (USD)",
+             (_lookup(year_one, "c_dppa_usd") or 0.0) + (_lookup(year_one, "c_cl_usd") or 0.0),
+             FORMAT_AMOUNT, None),
+            ("of which C_BL retail shortfall (USD)", _lookup(year_one, "c_bl_usd"), FORMAT_AMOUNT, None),
+            ("of which CfD payment, net (USD)", _lookup(year_one, "cfd_net_usd"), FORMAT_AMOUNT,
+             "Positive = buyer pays generator"),
+        ])
+    snapshot.extend([
+        ("First 10 Years Savings (USD)", _lookup(summary, "buyer_savings_10yr_usd"), FORMAT_AMOUNT,
+         "Cumulative, years 1-10"),
+        ("First 10 Years Savings (% of BAU)", summary.get("buyer_savings_10yr_fraction"), FORMAT_PERCENT, None),
+        ("Lifetime Savings (USD)", _lookup(summary, "buyer_savings_lifetime_usd"), FORMAT_AMOUNT,
+         "Cumulative over analysis period"),
+        ("Lifetime Savings (% of BAU)", summary.get("buyer_savings_lifetime_fraction"), FORMAT_PERCENT, None),
+    ])
+    row = _write_kpi_rows(worksheet, row + 1, snapshot)
+
+    row += 1
+    header_row = row
+    headers = [label for label, _key, _fmt in BUYER_ANNUAL_COLUMNS] + ["Cumulative Savings (USD)"]
+    for column_index, header in enumerate(headers, start=1):
+        cell = worksheet.cell(row=header_row, column=column_index, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+
+    cumulative = 0.0
+    for offset, annual in enumerate(annual_rows, start=1):
+        data_row = header_row + offset
+        for column_index, (_label, key, number_format) in enumerate(BUYER_ANNUAL_COLUMNS, start=1):
+            cell = worksheet.cell(row=data_row, column=column_index, value=_lookup(annual, key))
+            if number_format:
+                cell.number_format = number_format
+        cumulative += _lookup(annual, "offtaker_savings_usd") or 0.0
+        cumulative_cell = worksheet.cell(
+            row=data_row, column=len(headers), value=cumulative
+        )
+        cumulative_cell.number_format = FORMAT_AMOUNT
+
+    if len(annual_rows) > 1:
+        chart = LineChart()
+        chart.title = "Cumulative Buyer Savings (USD)"
+        data = Reference(
+            worksheet,
+            min_col=len(headers),
+            min_row=header_row,
+            max_row=header_row + len(annual_rows),
+        )
+        categories = Reference(
+            worksheet,
+            min_col=1,
+            min_row=header_row + 1,
+            max_row=header_row + len(annual_rows),
+        )
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(categories)
+        chart.height = 8
+        chart.width = 18
+        worksheet.add_chart(chart, "H4")
+
+    worksheet.column_dimensions["A"].width = 10
+    for letter in ("B", "C", "D", "E", "F"):
+        worksheet.column_dimensions[letter].width = 22
+
+
+def _write_developer_returns(worksheet, cash_flow_result):
+    summary = cash_flow_result.get("summary", {})
+    annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
+    minimum_dscr = _minimum_debt_service_dscr(cash_flow_result)
+
+    _write_title(
+        worksheet,
+        "Developer Returns — Financing & Cash Flow",
+        "Seller/ESCO investment case: sources & uses, return metrics and annual equity cash flow (USD)",
+        last_column=8,
+    )
+
+    row = 4
+    _write_section_header(worksheet, row, "Sources & Uses", 8)
+    row = _write_kpi_rows(worksheet, row + 1, [
+        ("Total Investment (USD)", _lookup(summary, "total_capex_usd"), FORMAT_AMOUNT, None),
+        ("Debt Principal (USD)", _lookup(summary, "debt_principal_usd"), FORMAT_AMOUNT, None),
+        ("Equity Investment (USD)", _lookup(summary, "equity_investment_usd"), FORMAT_AMOUNT, None),
+    ])
+
+    row += 1
+    _write_section_header(worksheet, row, "Return Metrics", 8)
+    row = _write_kpi_rows(worksheet, row + 1, [
+        ("Equity IRR", summary.get("equity_irr_fraction"), FORMAT_PERCENT, None),
+        ("Project IRR", summary.get("project_irr_fraction"), FORMAT_PERCENT, None),
+        ("NPV (USD)", _lookup(summary, "npv_usd"), FORMAT_AMOUNT, "At owner discount rate"),
+        ("Minimum DSCR (debt years)", minimum_dscr, FORMAT_RATIO, None),
+        ("Average DSCR", summary.get("average_dscr"), FORMAT_RATIO, None),
+        ("Simple Payback (Years)", summary.get("simple_payback_years"), FORMAT_YEARS, None),
+        ("ROI (cumulative equity CF / equity)", summary.get("roi_fraction"), FORMAT_PERCENT, None),
+    ])
+
+    row += 1
+    header_row = row
+    headers = [label for label, _key, _fmt in DEVELOPER_ANNUAL_COLUMNS] + ["Cumulative Equity CF (USD)"]
+    for column_index, header in enumerate(headers, start=1):
+        cell = worksheet.cell(row=header_row, column=column_index, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+
+    cumulative = -(_lookup(summary, "equity_investment_usd") or 0.0)
+    for offset, annual in enumerate(annual_rows, start=1):
+        data_row = header_row + offset
+        for column_index, (_label, key, number_format) in enumerate(DEVELOPER_ANNUAL_COLUMNS, start=1):
+            if key is None:
+                value = (
+                    (_lookup(annual, "annual_om_usd") or 0.0)
+                    + (_lookup(annual, "replacement_cost_usd") or 0.0)
+                )
+            else:
+                value = _lookup(annual, key)
+            cell = worksheet.cell(row=data_row, column=column_index, value=value)
+            if number_format:
+                cell.number_format = number_format
+        cumulative += _lookup(annual, "equity_cash_flow_usd") or 0.0
+        cumulative_cell = worksheet.cell(
+            row=data_row, column=len(headers), value=cumulative
+        )
+        cumulative_cell.number_format = FORMAT_AMOUNT
+
+    if len(annual_rows) > 1:
+        chart = LineChart()
+        chart.title = "Cumulative Equity Cash Flow (USD)"
+        data = Reference(
+            worksheet,
+            min_col=len(headers),
+            min_row=header_row,
+            max_row=header_row + len(annual_rows),
+        )
+        categories = Reference(
+            worksheet,
+            min_col=1,
+            min_row=header_row + 1,
+            max_row=header_row + len(annual_rows),
+        )
+        chart.add_data(data, titles_from_data=True)
+        chart.set_categories(categories)
+        chart.height = 8
+        chart.width = 18
+        worksheet.add_chart(chart, "K4")
+
+    worksheet.column_dimensions["A"].width = 10
+    for letter in ("B", "C", "D", "E", "F", "G", "H", "I"):
+        worksheet.column_dimensions[letter].width = 20
 
 
 def _write_bau_vs_dppa_sheet(worksheet, cash_flow_result, report_data, assumptions):
@@ -324,7 +720,19 @@ def _write_bau_vs_dppa_sheet(worksheet, cash_flow_result, report_data, assumptio
     pv_to_grid_effective_kwh = annual_production.get("pv_to_grid_effective_kwh") or 0.0
     q_re_meter_kwh = _sum_hourly("q_re_meter_kw")
     q_adj_kwh = sum((row.get("q_adj_kw") or row.get("q_re_meter_kw", 0.0) / (1.026 * 1.027263)) for row in hourly)
-    shortfall_kwh = sum(max((row.get("load_kw", 0.0) or 0.0) - (row.get("q_adj_kw", 0.0) or 0.0), 0.0) for row in hourly)
+    q_khc_kwh = sum(
+        (row.get("q_khc_kw") if row.get("q_khc_kw") is not None
+         else min(row.get("load_kw", 0.0) or 0.0, row.get("q_adj_kw", 0.0) or 0.0))
+        for row in hourly
+    )
+    shortfall_kwh = sum(
+        max(
+            (row.get("load_kw", 0.0) or 0.0)
+            - (row.get("q_khc_kw") if row.get("q_khc_kw") is not None else (row.get("q_adj_kw", 0.0) or 0.0)),
+            0.0,
+        )
+        for row in hourly
+    )
 
     values = {
         "bau_evn_bill_usd": bau_evn_bill_usd,
@@ -348,6 +756,7 @@ def _write_bau_vs_dppa_sheet(worksheet, cash_flow_result, report_data, assumptio
         "storage_to_load_kwh": storage_to_load_kwh,
         "q_re_meter_kwh": q_re_meter_kwh,
         "q_adj_kwh": q_adj_kwh,
+        "q_khc_kwh": q_khc_kwh,
         "shortfall_kwh": shortfall_kwh,
     }
 
@@ -382,10 +791,27 @@ def _active_dppa_config(assumptions):
 def _write_summary_sheet(worksheet, summary):
     for row_index, (label, key) in enumerate(SUMMARY_ROWS, start=1):
         worksheet.cell(row=row_index, column=1, value=label)
-        worksheet.cell(row=row_index, column=2, value=_lookup(summary, key))
+        value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(summary, key))
+        number_format = _number_format_for(key)
+        if number_format:
+            value_cell.number_format = number_format
 
     worksheet.column_dimensions["A"].width = 28
     worksheet.column_dimensions["B"].width = 18
+
+
+def _number_format_for(key):
+    if key is None:
+        return None
+    if key == "dscr" or "dscr" in key:
+        return FORMAT_RATIO
+    if key.endswith("_years") or key == "year":
+        return None
+    if key.endswith(("_fraction", "_rate")):
+        return FORMAT_PERCENT
+    if key.endswith(("_usd", "_vnd", "_kwh", "_kw")):
+        return FORMAT_AMOUNT
+    return None
 
 
 def _write_key_value_sheet(worksheet, rows, values, chart_title=None):
@@ -396,7 +822,10 @@ def _write_key_value_sheet(worksheet, rows, values, chart_title=None):
 
     for row_index, (label, key) in enumerate(rows, start=2):
         worksheet.cell(row=row_index, column=1, value=label)
-        worksheet.cell(row=row_index, column=2, value=_lookup(values, key))
+        value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(values, key))
+        number_format = _number_format_for(key)
+        if number_format:
+            value_cell.number_format = number_format
 
     worksheet.freeze_panes = "A2"
     worksheet.column_dimensions["A"].width = 34
@@ -412,9 +841,13 @@ def _write_table_sheet(worksheet, columns, rows, chart_title=None):
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
 
+    column_formats = [_number_format_for(key) for _header, key in columns]
     for row_index, row in enumerate(rows, start=2):
         for column_index, (_header, key) in enumerate(columns, start=1):
-            worksheet.cell(row=row_index, column=column_index, value=_lookup(row, key))
+            cell = worksheet.cell(row=row_index, column=column_index, value=_lookup(row, key))
+            number_format = column_formats[column_index - 1]
+            if number_format:
+                cell.number_format = number_format
 
     worksheet.freeze_panes = "A2"
     if chart_title and rows:
