@@ -1,3 +1,394 @@
+# 2026-06-11 (final) - Stabilization Commits + Case_6 Lower-Strike Boundary
+
+- Aligned `ESCO_CONTRACT_MODEL_DESIGN.md` and `CODEX_SESSION.md` with the
+  tested CD7 implementation: k is price-only, Q_adj divides by K_pp only, CfD
+  is capped by matched quantity, C_cl defaults to 163.3, and Factory A battery
+  replacement is year 11.
+- Refreshed case_1..4 saved assumptions via `run_case --dry-run`, then rebuilt
+  their reports offline. Updated `clean_metrics.json`. The existing CEBA PPTX
+  is explicitly stale because its case_3 bankability claim conflicts with the
+  corrected model (case_3 minimum DSCR 0.83x).
+- Created focused commits:
+  - `46382938` fix(vietnam): align DPPA settlement and lifecycle economics
+  - `5a74cc86` feat(vietnam): add DPPA negotiation sweep
+  - `139f8f01` feat(vietnam): redesign investment report workbook
+  - `25799b46` data(vietnam): refresh Factory A cases and DPPA studies
+  - `13e25cd6` feat(vietnam): run case 6 lower-strike sensitivity
+- Added custom inclusive strike-grid CLI options to
+  `run_dppa_negotiation_sweep.py` and ran case_6 across 1,200-1,400 VND/kWh
+  in 50 VND/kWh increments with the existing 70/80/90/100% volume grid.
+- Lower-strike result: 0/20 balanced. Twelve scenarios pass both buyer gates,
+  but none pass the 1.20x lender DSCR gate. Closest buyer-positive term:
+  `strike_1300_volume_70`, buyer lifetime savings +0.46%, seller equity IRR
+  17.85%, minimum DSCR 1.143x.
+- Commercial conclusion: pricing alone cannot balance case_6 under the current
+  lender threshold. Next study should hold buyer-positive ~1,300 VND/kWh terms
+  and test lower leverage / DSCR-sized debt, debt-service reserve, or debt
+  sculpting.
+- Assumption review:
+  - PV depreciation remains configurable 7-20 years, default 20.
+  - k=1.026 remains only the no-CFMP fallback/default; actual cases use hourly
+    CFMP series.
+  - Fixed FX over 25 years is not treated as confirmed practice; add an FX
+    sensitivity before investor-facing use.
+- Verification: `python -m unittest discover -s proforma_vietnam/tests -v`
+  passed 112 tests. All three negotiation studies pass direct and workbook
+  reconciliation.
+
+# 2026-06-11 (later) - CD7 Alignment: k Semantics, CfD Cap, Year-11 Replacement, Multi-Horizon Buyer Gate
+
+User directives (all implemented TDD, 111 tests green):
+
+1. **PV depreciation explicit & configurable**: Circular 45/2013/TT-BTC permits
+   7-20 years for generating equipment. `pv_depreciation_years` (default 20,
+   validated 7-20 in `tax_model.validate_pv_depreciation_years`) now flows
+   case.json `financial.pv_depreciation_years` → assumptions → run_case/views
+   query param → cash_flow; noted on the workbook Model Basis sheet.
+2. **k semantics fixed per CD7 / user clarification**: k is a *price*
+   conversion (CFMP = FMP × k, varies per trading cycle, already embodied in
+   the `fmp_cfmp_vn.json` FMP/CFMP spread — measured hourly ratio 1.0058-1.0603).
+   `dppa_settlement.py` no longer divides delivered volume by k:
+   `Q_adj = Q_re_meter / Kpp × δ` (CD7 Ví dụ 1: Qm 6,048,000 ↔ Q_khhc
+   6,000,000 = ÷1.008). No-CFMP fallback is now `FMP × k`, not `FMP`.
+3. **CD7 simulation cross-check** (`6. CD7. Mo phong, vi du ve co che DPPA.pdf`):
+   - C_cl default corrected 163.0 → 163.3 VND/kWh (also patched into saved
+     case_5/case_6 `assumptions.json`).
+   - **CfD settles on received volume**: per Ví dụ 4 (plant 1,000 kWh,
+     consumed 900, "Doanh thu CfD chỉ tính trên 900 kWh"), CfD now settles
+     hourly on `min(Q_c, Q_Khc)`; `q_cfd_kwh` tracked in sums + hourly rows.
+     Case Q_c series stay at 100% of generation per user decision.
+   - New acceptance test reproduces CD7 Ví dụ 1 totals exactly (C_DN
+     7,446,297,600 VND, C_KH 11,186,097,600 VND, generator 7,857,600,000 VND).
+   - Flagged only (no change): CD7 settles CfD/C_DN on monthly-average FMP,
+     ours hourly (finer); CD7 uses flat P1 retail for C_BL, ours hourly TOU.
+4. **Battery replacement year 10 → 11** in all case JSONs + guide; new
+   `battery_replacement_year` assumptions override beats the year echoed in
+   saved results.json (needed offline; Docker unavailable). Replacement now
+   lands after the 10-year debt term.
+5. **Multi-horizon evaluation**: cash_flow summary gains
+   `buyer_savings_10yr_usd/_fraction` and `buyer_savings_lifetime_usd/_fraction`
+   (cumulative vs cumulative BAU). Sweep buyer gate = 10-year AND lifetime
+   cumulative ≥ 0 (Year 1 reported as context); Pareto frontier on lifetime
+   savings vs equity IRR; workbooks gained Buyer 10yr + Lifetime heatmaps and
+   exec-summary lines.
+
+## Corrected results (rebuilt offline via rebuild_report; reconciliations pass)
+
+- **case_5** (run `ea6e1964`): equity IRR 16.9%, project IRR 13.5%, NPV $1.52M,
+  min DSCR 1.14x (replacement now post-debt), payback 9.1y. Buyer: Y1 −8.7%,
+  10yr −8.9% (−$0.82M), lifetime −9.3% (−$2.98M). The CfD cap removed the
+  buyer→seller transfer on surplus volume (strike 2000 > FMP), cutting seller
+  IRR 19.0→16.9% and improving the buyer 6 pts.
+- **case_6** (run `96571e84`): equity IRR 26.9%, project IRR 18.2%, NPV $2.54M,
+  min DSCR 1.50x, payback 4.7y. Buyer: −14.4% on all horizons (was −28.8% Y1)
+  — the CfD cap bites hardest here because the small-battery system exports
+  most PV, so most contracted volume was never consumed by the buyer.
+- **case_5 sweep**: 0/36 balanced. Buyer gate 16/36, seller 24/36, lender 2/36
+  (CfD cap cut seller revenue → min DSCR 0.82-1.19 in most scenarios).
+  Buyer-best `strike_1400_volume_100`: 10yr +9.8%, lifetime +9.4%.
+- **case_6 sweep**: 0/36 balanced. Seller 36/36, lender 32/36, buyer 0/36 —
+  closest `strike_1400_volume_100` at −1.4% (10yr and lifetime). Strikes just
+  below 1,400 VND/kWh should produce the first balanced deal.
+
+Files: dppa_settlement.py, tax_model.py, cash_flow.py, esco_pro_forma.py,
+case_builder.py, run_case.py, run_dppa_negotiation_sweep.py,
+dppa_negotiation_sweep.py, dppa_negotiation_workbook.py, xlsx_builder.py,
+reoptjl/views.py, all proforma_vietnam tests touched, case JSONs + case_5/6
+assumptions.json + CASE_JSON_INPUT_GUIDE.md, regenerated case_5/6 workbooks
+and both sweep output packages.
+
+# 2026-06-11 - Model Audit: Q_Khc Settlement Fix + Real-World Mechanics + Consultant Workbook
+
+- User asked to (1) audit/validate the Vietnam ESCO PPA + grid virtual-PPA
+  financial model against real-world practice and fix misalignments, and
+  (2) redesign the vietnam report workbook into a clean consultant-style
+  deliverable for both developer and buyer in PPA negotiation.
+
+## Bugs found and fixed (all TDD, 99 tests green)
+
+1. **Buyer settled on unconsumed energy (critical)**: `dppa_settlement.py`
+   charged C_DN/C_DPPA/C_CL on full `Q_adj` even when generation exceeded
+   hourly load. Per ND57 / `vietnam_market_context.md`, the settlement
+   quantity is `Q_Khc = min(load, Q_adj)`. On case_5 the buyer was billed for
+   1.40 GWh/yr it never consumed (19.3% of Q_adj, ≈ $106k/yr): Year-1 buyer
+   savings move from −28.7% to −14.9% at strike 2000. `q_khc_kwh` and
+   `matched_retail_value_vnd` now surface in settlement sums, hourly rows and
+   the workbook.
+2. **Stale `capacity_multiplier`** in `cash_flow.py`: non-DPPA annual rows
+   displayed `bau/optimized_demand_charge_vnd` escalated by the *final* year's
+   multiplier for every year (leaked loop variable). Display-only; fixed.
+3. **No PV degradation**: revenue escalated 4%/yr with no production decay.
+   Now `pv_degradation_rate` (derived from REopt `PV.degradation_fraction`,
+   0.005 in all Factory A cases) shrinks generation-linked terms; lost matched
+   energy is repurchased at EVN retail (residual bill / C_BL).
+4. **No battery replacement**: `replacement_costs_by_year` existed but was
+   never populated. Now auto-derived from REopt
+   `battery_replacement_year` + `replace_cost_per_kw/kwh` (case_5: $1.21M in
+   year 10) unless overridden.
+5. **CIT not law-aligned**: added 5-year tax-loss carryforward and the
+   exemption clock counted from first profitable year capped at year 4
+   (Circular 78/2014 Art. 9 / Art. 18).
+6. **Flat O&M**: new `om_escalation_rate` input (default 0), wired through
+   case_builder/run_case/views/sweep.
+
+## Flagged but NOT changed (documented in workbook "Model Basis" notes)
+
+- Fixed FX (25,000 VND/USD) across 25 years; VND depreciation not modelled.
+- PV depreciation 20yr in code vs 10yr in `vietnam_market_context.md` table.
+- `k = 1.026` in code vs `k = 1.02` in market context doc.
+- Replacement expensed (not depreciated); CfD settles on contracted volume
+  regardless of degradation.
+
+## Workbook redesign (`xlsx_builder.py`)
+
+- Three new consultant-facing front sheets: **Executive Summary** (system,
+  contract terms, seller returns, buyer outcome, model-basis notes),
+  **Buyer Analysis** (Year-1 snapshot + DPPA cost stack + 25-year savings
+  table with cumulative chart), **Developer Returns** (sources & uses, return
+  metrics incl. minimum DSCR, annual CFADS/DSCR/equity CF table + chart).
+- Navy/white styling, number formats everywhere, no gridlines on front
+  sheets; existing sheets kept as appendix; Hourly Settlement and the BAU vs
+  DPPA sheet now carry Q_Khc columns/labels (sweep reconciler updated).
+- New offline CLI `python -m proforma_vietnam.rebuild_report --case-dir <dir>`
+  rebuilds the workbook from saved results.json/assumptions.json without
+  Django/REopt (Docker was down; report is pure post-processing).
+
+## Regenerated artifacts (corrected model)
+
+- case_5 (`ea6e1964`): equity IRR 19.0%, project IRR 14.6%, NPV $1.98M,
+  min DSCR −0.92 (year-10 battery replacement coincides with final debt
+  year), avg DSCR 1.18, payback 7.3yr; Y1 buyer savings −14.9%.
+- case_6 (`96571e84`): equity IRR 36.9%, NPV $3.78M, min DSCR 1.84,
+  payback 3.1yr; Y1 buyer savings −28.8%.
+- Both 36-scenario sweeps re-run; direct + workbook reconciliations pass.
+  case_5 study: 13 scenarios now pass the buyer gate (was 0);
+  buyer-best `strike_1400_volume_100` = +9.0% Y1 savings, but lender gate
+  fails everywhere (replacement-year DSCR). case_6 study: seller 36/36,
+  lender 32/36, buyer 0/36 — buyer-best −2.8% at `strike_1400_volume_70`.
+- Commercial read: the oversized case_5 BESS cannot carry its own
+  replacement; case_6 sizing is bankable but needs a lower strike (<1400) or
+  buyer-side fee relief to clear the buyer gate.
+- Stale workbooks deleted (kept only run-uuid-matched): case_5 `bc785b6f`,
+  `bf7a908a`; case_6 `86acaddb`.
+
+## Verification
+
+- `python -m unittest discover -s proforma_vietnam/tests -p "test_*.py"`:
+  99 tests, OK (Django/docker unavailable this session).
+- Both reference workbook gates stayed green (defaults backward compatible).
+- Regenerated case_5 Executive Summary visually verified via openpyxl readback.
+- `reoptjl/views.py` compile-checked.
+
+# 2026-06-10 - Global 4% CfD Strike Escalation And Factory A Reruns
+
+- User approved making `4%` annual CfD strike escalation the global DPPA
+  default and requested it be explicit in generated assumptions.
+- Changed `DEFAULT_CFD_STRIKE_ESCALATION_RATE` from `0.0` to `0.04`, updated
+  the contract-model design default, and set case_5/case_6 source JSON
+  explicitly to `0.04`.
+- Added regression coverage proving omitted DPPA escalation resolves to `0.04`,
+  explicit overrides remain supported, and Year 2 strike revenue is exactly
+  `1.04x` Year 1.
+- Regenerated case_5 end to end:
+  - Run UUID `ea6e1964-f331-45e4-94e7-1e712e45464c`, status `optimal`.
+  - Equity IRR `21.2%`, NPV `$2.58M`, minimum DSCR `1.24x`, average DSCR
+    `1.46x`, simple payback `7.14 years`.
+- Regenerated case_6 end to end:
+  - Run UUID `96571e84-2d04-401b-8135-e0c9766ad445`, status `optimal`.
+  - Equity IRR `37.7%`, NPV `$4.03M`, minimum DSCR `1.84x`, average DSCR
+    `2.13x`, simple payback `3.05 years`.
+- Regenerated both 36-scenario negotiation sweeps. Both direct and workbook
+  reconciliations pass.
+  - case_5: zero balanced deals; all scenarios now pass seller IRR, 28 still
+    fail lender plus buyer, and 8 fail buyer only.
+  - case_6: zero balanced deals; all 36 pass seller and lender gates and fail
+    only the Year 1 buyer gate.
+- Commercial conclusion: escalating the strike improves lifetime seller and
+  lender economics but does not change Year 1 buyer cost, so the next
+  sensitivity must target the buyer-side cost stack.
+- Verification:
+  - Focused default/override/compounding tests passed.
+  - `python -m unittest discover -s proforma_vietnam/tests -p 'test_*.py'`
+    passed 82 tests.
+  - `docker-compose exec -T django python manage.py test proforma_vietnam -v 1`
+    passed 82 tests with no Django system-check issues.
+  - Fixed a negotiation-runner test that hardcoded Windows path separators
+    after Docker correctly exposed the portability defect.
+  - Both generated workbooks show `CfD Strike Escalation Rate = 0.04`; both
+    sweeps contain 36 unique scenarios and pass direct/workbook reconciliation.
+  - `git diff --check` passed; only expected Windows LF/CRLF warnings remain.
+
+# 2026-06-10 - Factory A case_6 DPPA Commercial Negotiation Sweep
+
+- Generalized `proforma_vietnam/run_dppa_negotiation_sweep.py` with a
+  `--reference-case` option. `case_5` remains the default and keeps its original
+  output directory; other cases use a suffixed study directory.
+- Ran:
+  `python -m proforma_vietnam.run_dppa_negotiation_sweep --reference-case case_6`.
+- Wrote 36-scenario JSON, XLSX, and Markdown artifacts under
+  `outputs/vietnam_case/factory_a/dppa_negotiation_study_case_6/`.
+- The evaluator uses fixed `case_6` technical results and assumptions while
+  retaining non-DPPA `case_2` as the comparison baseline.
+- Result: zero balanced deals and zero negotiation-frontier scenarios.
+  Buyer-best `strike_1400_volume_70` is 35.2% worse than BAU and 46.1% worse
+  than non-DPPA `case_2`. Lender-best `strike_2200_volume_100` reaches 1.88x
+  minimum DSCR and 36.9% equity IRR but is 69.4% worse than BAU.
+- `strike_2000_volume_100` reconciliation passed against both the direct
+  `case_6` cash-flow calculation and the existing `case_6` workbook at the
+  configured `1e-6` relative tolerance.
+- TDD evidence:
+  - Red: `python -m unittest proforma_vietnam.tests.test_dppa_negotiation_sweep`
+    failed because the new reference-case helpers did not exist.
+  - Green: the same focused command passed 6 tests after implementation.
+- Verification:
+  - `python -m unittest discover -s proforma_vietnam/tests -p 'test_*.py'`
+    passed 80 tests.
+  - `python manage.py test proforma_vietnam.tests.test_dppa_negotiation_sweep`
+    remains unavailable locally because Django is not installed.
+
+# 2026-06-10 - Factory A case_6 Minimum BESS
+
+- User requested a case matching `case_5` except for the minimum storage
+  requirement: battery power at 10% of solar capacity and two hours of energy.
+- Approved rounded fixed sizes: PV `5,914 kW`; BESS `592 kW / 1,184 kWh`.
+- Created the approved design and plan under `docs/superpowers/`, plus
+  `outputs/vietnam_case/factory_a/case_6/`.
+- Preserved every other current `case_5` input. A structured comparison passed
+  after normalizing only the case name, fixed size bounds, and regenerated DPPA
+  contract-volume series.
+- Initial dispatch run UUID: `04e45388-89a3-4912-bd6a-0929cc1535f2`.
+- Regenerated the 8760 DPPA contract volume from
+  `PV-to-load + PV-to-grid + curtailed PV + storage-to-load + storage-to-grid`.
+- Final run UUID: `86acaddb-4dc9-4654-affb-12db1c2bfacf`; status `optimal`.
+- Final verification: PV `5,914 kW`; BESS `592 kW / 1,184 kWh`; contract volume
+  `7,896,846.067 kWh/year`; maximum hourly reconciliation delta `0`.
+- Final financial results: total capex `$3,028,160.00`; equity IRR `30.707%`;
+  NPV `$2,158,972.58`; average DSCR `1.773x`; minimum DSCR `1.708x`; simple
+  payback `3.348 years`; Year 1 generator revenue `$631,747.69`; Year 1 DPPA
+  offtaker cost `$1,239,750.06`.
+- Final workbook:
+  `outputs/vietnam_case/factory_a/case_6/vietnam_report_86acaddb-4dc9-4654-affb-12db1c2bfacf.xlsx`.
+  Workbook reconciliation against the direct financial-model calculation
+  passed.
+- Execution notes: the first submission attempt occurred during Django's
+  startup/reloader window and did not reach the application. Retrying after
+  service readiness succeeded without code changes. The cloned JSON was also
+  normalized to BOM-free UTF-8 before submission.
+
+# 2026-06-10 - DPPA Commercial Negotiation Sweep Implemented
+
+- Implemented the approved fixed-system DPPA commercial negotiation sweep without rerunning REopt or cloning case directories.
+- Added:
+  - `proforma_vietnam/dppa_negotiation_sweep.py` for the 36-scenario grid, metric extraction, balanced-deal gates, and Pareto classification.
+  - `proforma_vietnam/dppa_negotiation_workbook.py` for the nine-sheet joint-negotiation workbook and concise Markdown summary.
+  - `proforma_vietnam/run_dppa_negotiation_sweep.py` for Factory A artifact loading, sweep execution, output writing, and clean `case_5` reconciliation.
+  - `proforma_vietnam/tests/test_dppa_negotiation_sweep.py`.
+  - `docs/superpowers/plans/2026-06-10-dppa-commercial-negotiation-sweep.md`.
+- Generated:
+  - `outputs/vietnam_case/factory_a/dppa_negotiation_study/results.json`.
+  - `outputs/vietnam_case/factory_a/dppa_negotiation_study/Factory_A_DPPA_Negotiation_Sweep.xlsx`.
+  - `outputs/vietnam_case/factory_a/dppa_negotiation_study/NEGOTIATION_SUMMARY.md`.
+- Result:
+  - Exactly 36 unique strike/volume scenarios evaluated.
+  - Zero scenarios pass all three balanced-deal gates.
+  - Every scenario increases Factory A Year 1 cost versus BAU.
+  - Buyer-best `strike_1400_volume_100`: 4.8% higher buyer Year 1 cost versus BAU and 13.2% higher versus non-DPPA `case_2`.
+  - Lender-best `strike_2200_volume_100`: 1.27x minimum DSCR and 17.7% seller equity IRR, but 36.7% higher buyer Year 1 cost versus BAU.
+- Reconciliation:
+  - `strike_2000_volume_100` matches the direct clean `case_5` calculation at zero relative delta.
+  - It also matches `case_5/vietnam_report_bc785b6f-2b82-4684-b583-3010ca6a9904.xlsx` at zero relative delta for Year 1 settlement totals, equity IRR, NPV, minimum DSCR, and average DSCR.
+- TDD/verification:
+  - Initial red run: `python -m unittest proforma_vietnam.tests.test_dppa_negotiation_sweep -v` failed with the expected missing sweep-module import.
+  - Focused suite: 5 tests passed.
+  - Full local suite: `python -m unittest discover -s proforma_vietnam/tests -v` passed, 79 tests.
+  - `python -m compileall` passed for all new modules/tests.
+  - Docker/Django test command could not run because local Django is not installed and Docker Desktop was unavailable.
+
+# 2026-06-10 - DPPA Commercial Negotiation Sweep Design
+
+- User selected the next-session direction: a fixed-system DPPA commercial term sweep supporting a joint negotiation between Factory A and the ESCO/generator.
+- Approved scenario grid:
+  - CfD strikes from `1,400` through `2,200 VND/kWh`, inclusive, in `100 VND/kWh` increments.
+  - Contract volumes at `70%`, `80%`, `90%`, and `100%` of the clean `case_2` expected hourly `Q_re_meter`.
+  - Exactly 36 scenarios.
+- Approved approach:
+  - Keep clean `case_2` technical sizing and dispatch fixed.
+  - Reuse existing DPPA settlement and Vietnam ESCO cash-flow functions.
+  - Do not clone 36 case directories and do not rerun REopt.
+- Approved balanced-deal gates:
+  - Factory Year 1 savings versus BAU `>= 0%`.
+  - ESCO/generator equity IRR `>= 12%`.
+  - Minimum DSCR during debt-service years `>= 1.20x`.
+- The factory result versus non-DPPA `case_2` is a prominent disclosure metric, but it is not a qualification gate.
+- Approved outputs: machine-readable results, a joint-negotiation workbook, a Pareto negotiation frontier, a recommended term range, and a concise negotiation summary.
+- Wrote and committed the approved design:
+  - Spec: `docs/superpowers/specs/2026-06-10-dppa-commercial-negotiation-sweep-design.md`.
+  - Commit: `b417ee9f docs: define DPPA negotiation sweep design`.
+- Verification:
+  - Design spec placeholder scan returned no matches.
+  - `git diff --check -- docs/superpowers/specs/2026-06-10-dppa-commercial-negotiation-sweep-design.md` passed before commit.
+- Next step: user reviews the written spec; after approval, write the detailed implementation plan under `docs/superpowers/plans/`.
+
+# 2026-06-09 - Clean-Load case_5 DPPA Re-run
+
+- Repointed `outputs/vietnam_case/factory_a/case_5/case.json` from `Sample Load Profile/Emivest.csv` to `Sample Load Profile/Emivest_clean.csv`.
+- First successful clean-load run exposed a second stale dependency: the embedded 8760 CfD contract-volume series still reflected dirty-load `case_2` (`7,707,474.773 kWh/year`) rather than clean-load `case_2` Q_re_meter (`7,664,883.239 kWh/year`).
+- Refreshed `case_5.dppa.cfd_contract_volume_kwh_per_hour` from clean `case_2` PV-to-load + PV-to-grid + curtailed PV + storage-to-load + storage-to-grid. Changed 2,922 hourly values.
+- Final run UUID: `bc785b6f-2b82-4684-b583-3010ca6a9904`; optimizer status `optimal`.
+- Final workbook: `outputs/vietnam_case/factory_a/case_5/vietnam_report_bc785b6f-2b82-4684-b583-3010ca6a9904.xlsx`.
+- Final clean-load metrics:
+  - PV: `5,913.5567 kW`.
+  - BESS: `1,796.0 kW / 10,698.95 kWh`.
+  - Total capex: `$4,266,061.216`.
+  - Project IRR: `11.81%`; Equity IRR: `14.47%`.
+  - NPV: `$763,328.59`; average DSCR: `1.213`; simple payback: `10.60 years`.
+  - Buyer savings vs BAU: `-28.73%` at the current 2,000 VND/kWh strike.
+- Verification:
+  - Confirmed all `case_1..5` configs reference `Emivest_clean.csv`.
+  - Confirmed `case_5` payload load series exactly matches clean `case_2` (`9,340,091.626 kWh/year`, `2,428 kW` peak).
+  - Confirmed `case_5` optimizer sizing exactly matches clean `case_2`.
+  - Confirmed the refreshed CfD volume equals clean `case_2` Q_re_meter hour by hour.
+  - Confirmed the latest workbook contains all five DPPA-specific sheets and its reported Q_re_meter equals the contract-volume annual sum.
+  - `git diff --check` passed for the regenerated `case_5` JSON files.
+- Operational notes:
+  - Initial submission attempts failed while Django was still starting; retry after the API reported ready succeeded.
+  - One completed retry hit a transient Windows `OSError 22` while replacing `results.json`; the file immediately reopened read/write and the next end-to-end retry succeeded.
+  - Docker stack remains running.
+
+# 2026-06-09 - Graphify Code Map + Vietnam Study Evidence Map
+
+- User asked to run `/graphify` for the codebase. Full repo detection found 847 supported files / ~3.73M words, over the graphify threshold; top noisy scope was legacy `reo/`.
+- Narrowed first map to `reoptjl` + `proforma_vietnam`:
+  - Focused corpus: 244 files / ~282,786 words.
+  - Code files extracted: 241.
+  - Docs/images skipped: 3 because no LLM backend key (`GEMINI_API_KEY`, `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) was configured.
+  - AST/code graph output: 1,990 nodes, 2,996 edges, 247 communities.
+- User then asked to include the current Vietnam study scope:
+  - `outputs/vietnam_case/factory_a`
+  - `DPPA DOC`
+  - `Sample Load Profile`
+  - `vietnam_market_context.md`
+  - `roadmap.md`
+  - `proforma_vietnam/ESCO_CONTRACT_MODEL_DESIGN.md`
+- Added deterministic study-layer extraction:
+  - Markdown headings for the root/design docs.
+  - PDF file/text-sample nodes for DPPA reference docs.
+  - JSON structure and case settings for Factory A cases and `DPPA DOC/fmp_cfmp_vn.json`.
+  - CSV stats for load profiles, including explicit `Emivest.csv` stale-load and `Emivest_clean.csv` clean-load topic links.
+  - Workbook sheet nodes and PowerPoint slide-title nodes.
+  - Explicit bridges from study topics to implementation nodes: `settle_dppa_year_one()`, `_dppa_inputs()`, `load_fmp_series()`, `load_cfmp_series()`, `calculate_vietnam_esco_cash_flow()`, `calculate_esco_pro_forma_from_reopt_results()`, `build_vietnam_esco_workbook()`, and `build_evn_tariff()`.
+- Final merged graph in `graphify-out/`: 2,505 nodes, 3,691 edges, 248 communities. New study community: `247 - Vietnam Study Evidence`.
+- Outputs:
+  - `graphify-out/graph.html`
+  - `graphify-out/graph.json`
+  - `graphify-out/GRAPH_REPORT.md`
+  - `graphify-out/VIETNAM_STUDY_GRAPH_REPORT.md`
+  - `graphify-out/vietnam_study_map_summary.json`
+- Verification query run:
+  - `python -m graphify query "How does case_5 stale load connect to DPPA settlement and Factory A clean metrics?" --graph graphify-out\graph.json --budget 1200`
+  - Query reached `case_5/case.json`, `Sample Load Profile/Emivest.csv` via the `Case 5 Stale Load` topic, `DPPA DOC/fmp_cfmp_vn.json`, `FMP`, `CFMP`, and implementation nodes including `settle_dppa_year_one()` and `load_fmp_series()`.
+- Current limitation: graphify semantic extraction was not run because no LLM backend API key was configured; the study layer is deterministic and evidence-oriented, not a full semantic read of all PDF/doc content.
+
 # 2026-06-09 - Load-Profile Spike Cleaning + Re-run case_1..4 + New 7-Slide CEBA Deck
 
 - User asked for a standalone, max-7-slide, corporate white-background CEBA case-study deck focused only on the four Factory A cases (case_5 DPPA explicitly excluded), in English, built from the data in `outputs/vietnam_case/factory_a`.
