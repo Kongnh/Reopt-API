@@ -12,6 +12,7 @@ from proforma_vietnam.dppa_negotiation_workbook import (
 )
 from proforma_vietnam.run_dppa_negotiation_sweep import (
     default_output_dir_name,
+    inclusive_strikes,
     reconcile_cash_flows,
     reference_case_paths,
 )
@@ -197,6 +198,14 @@ class DppaNegotiationSweepTests(TestCase):
             default_output_dir_name("case_6"),
             "dppa_negotiation_study_case_6",
         )
+
+    def test_inclusive_strikes_builds_custom_grid_and_rejects_invalid_ranges(self):
+        self.assertEqual(inclusive_strikes(1200, 1400, 50), (1200, 1250, 1300, 1350, 1400))
+
+        with self.assertRaisesRegex(ValueError, "positive"):
+            inclusive_strikes(1200, 1400, 0)
+        with self.assertRaisesRegex(ValueError, "greater than or equal"):
+            inclusive_strikes(1400, 1200, 50)
 
 
 def _reference_dppa_inputs():

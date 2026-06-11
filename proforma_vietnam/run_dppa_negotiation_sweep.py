@@ -4,7 +4,10 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-from proforma_vietnam.dppa_negotiation_sweep import run_dppa_negotiation_sweep
+from proforma_vietnam.dppa_negotiation_sweep import (
+    DEFAULT_STRIKES_VND_PER_KWH,
+    run_dppa_negotiation_sweep,
+)
 from proforma_vietnam.dppa_negotiation_workbook import (
     build_dppa_negotiation_summary,
     build_dppa_negotiation_workbook,
@@ -25,6 +28,9 @@ def main(argv=None):
     parser.add_argument("--factory-a-dir", default=str(DEFAULT_FACTORY_A_DIR))
     parser.add_argument("--reference-case", default=DEFAULT_REFERENCE_CASE)
     parser.add_argument("--out", default=None)
+    parser.add_argument("--strike-start", type=int, default=DEFAULT_STRIKES_VND_PER_KWH[0])
+    parser.add_argument("--strike-stop", type=int, default=DEFAULT_STRIKES_VND_PER_KWH[-1])
+    parser.add_argument("--strike-step", type=int, default=100)
     args = parser.parse_args(argv)
 
     factory_dir = Path(args.factory_a_dir)
@@ -37,6 +43,11 @@ def main(argv=None):
         factory_dir=factory_dir,
         out_dir=out_dir,
         reference_case=args.reference_case,
+        strikes_vnd_per_kwh=inclusive_strikes(
+            args.strike_start,
+            args.strike_stop,
+            args.strike_step,
+        ),
     )
     return 0
 
@@ -45,6 +56,14 @@ def default_output_dir_name(reference_case):
     if reference_case == DEFAULT_REFERENCE_CASE:
         return DEFAULT_OUTPUT_DIR_NAME
     return f"{DEFAULT_OUTPUT_DIR_NAME}_{reference_case}"
+
+
+def inclusive_strikes(start, stop, step):
+    if step <= 0:
+        raise ValueError("strike step must be positive")
+    if stop < start:
+        raise ValueError("strike stop must be greater than or equal to strike start")
+    return tuple(range(start, stop + 1, step))
 
 
 def reference_case_paths(factory_dir, reference_case):
@@ -60,6 +79,7 @@ def run_factory_a_negotiation_sweep(
     factory_dir,
     out_dir,
     reference_case=DEFAULT_REFERENCE_CASE,
+    strikes_vnd_per_kwh=DEFAULT_STRIKES_VND_PER_KWH,
 ):
     case_2_results_path = factory_dir / "case_2" / "results.json"
     case_2_assumptions_path = factory_dir / "case_2" / "assumptions.json"
@@ -99,6 +119,7 @@ def run_factory_a_negotiation_sweep(
             "case_2_run_uuid": case_2_results.get("run_uuid"),
             "reference_case_run_uuid": reference_results.get("run_uuid"),
         },
+        strikes_vnd_per_kwh=strikes_vnd_per_kwh,
     )
 
     sweep_reference_cash_flow = evaluator(reference_dppa_inputs)
