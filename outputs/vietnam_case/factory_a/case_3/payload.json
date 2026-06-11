@@ -26337,7 +26337,7 @@
     "replace_cost_per_kwh": 100,
     "replace_cost_constant": 0,
     "inverter_replacement_year": 10,
-    "battery_replacement_year": 10,
+    "battery_replacement_year": 11,
     "cost_constant_replacement_year": 10,
     "om_cost_fraction_of_installed_cost": 0.01,
     "can_grid_charge": false

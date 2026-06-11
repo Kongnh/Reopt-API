@@ -13,5 +13,6 @@
   "owner_discount_rate_fraction": 0.1,
   "debt_fraction": 0.7,
   "debt_interest_rate_fraction": 0.085,
-  "debt_term_years": 10
+  "debt_term_years": 10,
+  "battery_replacement_year": 11
 }
