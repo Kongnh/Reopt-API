@@ -1,12 +1,21 @@
 # Codex Session Handoff
 
-Last updated: 2026-06-11
+Last updated: 2026-06-12
 
 ## Current State
 
 - Repository: `C:\Users\kongn\Pictures\CodeProject\Reopt API\REopt_API`
-- Branch: `master` (`[ahead 13]` of `origin/master` after this handoff commit);
-  latest implementation commit `13e25cd6`.
+- Branch: `master` (`[ahead 14]` of `origin/master`);
+  latest commit `da554098`.
+- **2026-06-12 CEBA DPPA training deck design approved:** the new deck is
+  procurement-first, technically balanced, and lightly connected to prior
+  workshop sessions. The approved Buyer Decision Journey design is committed
+  in `docs/superpowers/specs/2026-06-12-ceba-dppa-training-deck-design.md`
+  (`da554098`). The executable artifact-tool build plan is in
+  `docs/superpowers/plans/2026-06-12-ceba-dppa-training-deck-implementation.md`.
+  Presenter: Cong Nguyen, Vietnam Clean Energy Manager, Allotrope Partners.
+  Final target:
+  `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`.
 - **2026-06-11 CD7 alignment pass (committed, 112 tests green):** settlement
   aligned to the official NSMO CD7 simulation deck — k is price-only
   (CFMP = FMP × k; `Q_adj = Q_re_meter / Kpp`, k removed from the volume
@@ -98,11 +107,13 @@ Last updated: 2026-06-11
 
 ## Active Product Direction
 
-Pricing alone cannot produce a balanced case_6 deal under the current 1.20x
-minimum DSCR threshold. The next commercial study should keep the buyer-positive
-`1,300 VND/kWh` range and test financing structures that raise DSCR: lower
-leverage / DSCR-sized debt, a debt-service reserve, or debt sculpting. Treat
-case_5 replacement-reserve and financing redesign as a separate study.
+Build and verify the approved CEBA Buyer Decision Journey deck using the
+artifact-tool presentation workflow. Treat the latest 2026-06-11 Case 5/6 and
+lower-strike results as authoritative repository evidence, verify
+time-sensitive regulatory claims against primary sources, and preserve the
+existing `outputs/ceba_training/` PPTX and Python script as the prior version.
+After deck delivery, resume the case_6 financing sensitivity around the
+buyer-positive `1,300 VND/kWh` terms.
 
 ## Design Questions Resolved
 
@@ -139,14 +150,17 @@ lens, 70% debt:
 
 ## Resume Here Next Session
 
-1. Design and run a case_6 financing sensitivity around the buyer-positive
-   `1,300 VND/kWh` terms: lower leverage / DSCR-sized debt, debt-service
-   reserve, or debt sculpting.
-2. Add an FX sensitivity before using 25-year USD-facing metrics in an
+1. Execute
+   `docs/superpowers/plans/2026-06-12-ceba-dppa-training-deck-implementation.md`
+   using subagent-driven development or inline execution.
+2. Deliver
+   `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`;
+   preserve the existing deck and `build_deck.py`.
+3. Then design and run a case_6 financing sensitivity around the buyer-positive
+   `1,300 VND/kWh` terms.
+4. Add an FX sensitivity before using 25-year USD-facing metrics in an
    investor-facing deliverable.
-3. Redesign/regenerate the CEBA deck before reuse; its case_3 bankability
-   narrative is stale.
-4. Push the committed work when ready (`master` is ahead of `origin/master`).
+5. Push the committed work when ready (`master` is ahead of `origin/master`).
 
 ## Todo
 
@@ -170,7 +184,8 @@ lens, 70% debt:
 - [x] (2026-06-11) Redesign vietnam report into consultant-style workbook (Executive Summary / Buyer Analysis / Developer Returns) + add offline `rebuild_report` CLI.
 - [x] (2026-06-11) Regenerate case_5/case_6 workbooks and rerun both 36-scenario sweeps with the corrected model; reconciliations pass; stale workbooks deleted.
 - [x] Regenerate case_1..4 workbooks with the corrected model (`rebuild_report`) and refresh `clean_metrics.json`.
-- [ ] Redesign/regenerate the CEBA deck before reuse; the existing PPTX has a stale case_3 bankability claim.
+- [ ] Build and verify the approved CEBA DPPA Buyer Decision Journey deck; the
+  design is committed and the implementation plan is ready.
 - [x] Commit the 2026-06-11 audit + workbook redesign + regenerated artifacts.
 - [x] Run the case_6 lower-strike sensitivity (1,200-1,400 VND/kWh); 0/20 balanced because buyer-positive terms fail lender DSCR.
 - [x] Resolve depreciation and k assumptions; keep fixed FX flagged for sensitivity.

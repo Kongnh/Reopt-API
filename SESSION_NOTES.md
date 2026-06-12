@@ -1,3 +1,40 @@
+# 2026-06-12 - CEBA DPPA Buyer Decision Journey Deck Design
+
+- User requested a new CEBA Procurement Academy training deck for factory-owner
+  representatives in global-brand supply chains on "Understanding Vietnam's
+  DPPA Mechanisms and Pricing Considerations."
+- Reviewed the attached content plan, existing
+  `outputs/ceba_training/build_deck.py`, current repo handoff, and latest Case
+  5/6 negotiation evidence.
+- Approved design decisions:
+  - Primary outcome: procurement readiness.
+  - Technical depth: balanced, with selected formulas and one worked settlement
+    example.
+  - Reuse posture: standalone with light callbacks to earlier sessions.
+  - Narrative direction: Buyer Decision Journey.
+  - Visual direction: white mechanism slides, navy evidence slides, recurring
+    buyer-question rails, CEBA teal/navy/amber/green palette.
+  - Presenter: Cong Nguyen, Vietnam Clean Energy Manager, Allotrope Partners.
+- Wrote and committed the approved design:
+  `docs/superpowers/specs/2026-06-12-ceba-dppa-training-deck-design.md`
+  (`da554098`).
+- Wrote the implementation plan:
+  `docs/superpowers/plans/2026-06-12-ceba-dppa-training-deck-implementation.md`.
+  The plan uses the artifact-tool presentation workflow, a verified source/data
+  ledger, 24 main slides plus 6 backup slides, full render/layout/numerical QA,
+  and final delivery at
+  `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`.
+- Source audit note: latest 2026-06-11 repository evidence supersedes several
+  old-draft statements. The new deck must use Case 5 equity IRR 16.9% / min
+  DSCR 1.14x / buyer lifetime -9.3%, Case 6 equity IRR 26.9% / min DSCR 1.50x
+  / buyer -14.4%, and the lower-strike closest buyer-positive term at 1,300
+  VND/kWh and 70% volume with buyer lifetime +0.46%, seller equity IRR 17.85%,
+  and min DSCR 1.143x. Zero of 56 tested Case 6 scenarios are balanced.
+- Verification:
+  - `git diff --check` passed for the design and implementation-plan files.
+  - Implementation plan placeholder scan returned no failures.
+- No deck implementation was started in this planning session.
+
 # 2026-06-11 (final) - Stabilization Commits + Case_6 Lower-Strike Boundary
 
 - Aligned `ESCO_CONTRACT_MODEL_DESIGN.md` and `CODEX_SESSION.md` with the
