@@ -5,17 +5,18 @@ Last updated: 2026-06-12
 ## Current State
 
 - Repository: `C:\Users\kongn\Pictures\CodeProject\Reopt API\REopt_API`
-- Branch: `master` (`[ahead 14]` of `origin/master`);
-  latest commit `da554098`.
-- **2026-06-12 CEBA DPPA training deck design approved:** the new deck is
-  procurement-first, technically balanced, and lightly connected to prior
-  workshop sessions. The approved Buyer Decision Journey design is committed
-  in `docs/superpowers/specs/2026-06-12-ceba-dppa-training-deck-design.md`
-  (`da554098`). The executable artifact-tool build plan is in
-  `docs/superpowers/plans/2026-06-12-ceba-dppa-training-deck-implementation.md`.
-  Presenter: Cong Nguyen, Vietnam Clean Energy Manager, Allotrope Partners.
-  Final target:
+- Branch: `master` (`[ahead 16]` of `origin/master`).
+- **2026-06-12 CEBA DPPA Buyer Decision Journey deck delivered:**
   `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`.
+  The editable artifact-tool deck contains 24 main training slides plus 6
+  backup slides, with speaker notes on all 30 slides. Presenter: Cong Nguyen,
+  Vietnam Clean Energy Manager, Allotrope Partners. Source basis is current
+  through `2026-06-12`; numerical Kpp, 360 VND/kWh service fee, and
+  163.3 VND/kWh balancing examples remain explicitly labeled as
+  training/model assumptions rather than confirmed current regulated values.
+  Verification: data ledger passed; final layout QA `0 errors, 0 warnings`;
+  PPTX package has 30 slides, 30 notes slides, 0 empty files, and no media
+  dependencies. Final QA score: `40/45`, with no dimension below 4.
 - **2026-06-11 CD7 alignment pass (committed, 112 tests green):** settlement
   aligned to the official NSMO CD7 simulation deck — k is price-only
   (CFMP = FMP × k; `Q_adj = Q_re_meter / Kpp`, k removed from the volume
@@ -107,13 +108,10 @@ Last updated: 2026-06-12
 
 ## Active Product Direction
 
-Build and verify the approved CEBA Buyer Decision Journey deck using the
-artifact-tool presentation workflow. Treat the latest 2026-06-11 Case 5/6 and
-lower-strike results as authoritative repository evidence, verify
-time-sensitive regulatory claims against primary sources, and preserve the
-existing `outputs/ceba_training/` PPTX and Python script as the prior version.
-After deck delivery, resume the case_6 financing sensitivity around the
-buyer-positive `1,300 VND/kWh` terms.
+Resume the case_6 financing sensitivity around the buyer-positive
+`1,300 VND/kWh` / 70% volume terms. Preserve the delivered CEBA deck and the
+prior `outputs/ceba_training/CEBA_DPPA_Mechanisms_Pricing.pptx` /
+`build_deck.py`.
 
 ## Design Questions Resolved
 
@@ -150,17 +148,11 @@ lens, 70% debt:
 
 ## Resume Here Next Session
 
-1. Execute
-   `docs/superpowers/plans/2026-06-12-ceba-dppa-training-deck-implementation.md`
-   using subagent-driven development or inline execution.
-2. Deliver
-   `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`;
-   preserve the existing deck and `build_deck.py`.
-3. Then design and run a case_6 financing sensitivity around the buyer-positive
+1. Design and run a case_6 financing sensitivity around the buyer-positive
    `1,300 VND/kWh` terms.
-4. Add an FX sensitivity before using 25-year USD-facing metrics in an
+2. Add an FX sensitivity before using 25-year USD-facing metrics in an
    investor-facing deliverable.
-5. Push the committed work when ready (`master` is ahead of `origin/master`).
+3. Push the committed work when ready (`master` is ahead of `origin/master`).
 
 ## Todo
 
@@ -184,8 +176,9 @@ lens, 70% debt:
 - [x] (2026-06-11) Redesign vietnam report into consultant-style workbook (Executive Summary / Buyer Analysis / Developer Returns) + add offline `rebuild_report` CLI.
 - [x] (2026-06-11) Regenerate case_5/case_6 workbooks and rerun both 36-scenario sweeps with the corrected model; reconciliations pass; stale workbooks deleted.
 - [x] Regenerate case_1..4 workbooks with the corrected model (`rebuild_report`) and refresh `clean_metrics.json`.
-- [ ] Build and verify the approved CEBA DPPA Buyer Decision Journey deck; the
-  design is committed and the implementation plan is ready.
+- [x] Build and verify the approved CEBA DPPA Buyer Decision Journey deck;
+  delivered `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`
+  with 30 slides, speaker notes, and final QA passing.
 - [x] Commit the 2026-06-11 audit + workbook redesign + regenerated artifacts.
 - [x] Run the case_6 lower-strike sensitivity (1,200-1,400 VND/kWh); 0/20 balanced because buyer-positive terms fail lender DSCR.
 - [x] Resolve depreciation and k assumptions; keep fixed FX flagged for sensitivity.

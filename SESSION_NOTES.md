@@ -1128,6 +1128,49 @@ At the end of every working session, append or update the latest section here wi
 - Updated `proforma_vietnam/ESCO_CONTRACT_MODEL_NOTES.md` to point to the finalized design.
 - Next recommended work: write focused cash-flow tests for ESCO energy revenue, demand savings split, grid-charging disabled base case, and optional grid-arbitrage settlement before implementing `proforma_vietnam/cash_flow.py`.
 
+## 2026-06-12 - CEBA DPPA Buyer Decision Journey Deck Delivery
+
+- Built and delivered
+  `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026.pptx`.
+- Deck structure: 30 editable artifact-tool slides comprising a 24-slide,
+  45-minute main training story and 6 backup slides.
+- Presenter line: Cong Nguyen, Vietnam Clean Energy Manager, Allotrope
+  Partners.
+- Narrative: factory-buyer decision journey from EVN BAU baseline through
+  DPPA bill mechanics, offer testing, buyer/seller/lender gates, Factory A
+  Case 5/6 evidence, and term-sheet negotiation questions.
+- Preserved the prior deck and script:
+  `outputs/ceba_training/CEBA_DPPA_Mechanisms_Pricing.pptx` and
+  `outputs/ceba_training/build_deck.py`.
+- Current-source basis:
+  - Decree 57/2025/ND-CP and primary-source status checked through 2026-06-12.
+  - Current EVN manufacturing tariff and current applied TOU status separated
+    from the published-but-not-yet-applied Decision 963 time bands.
+  - Numerical Kpp, 360 VND/kWh service fee, and 163.3 VND/kWh balancing
+    examples are explicitly labeled as NSMO training/model assumptions, not
+    confirmed current regulated values.
+- Factory A evidence used:
+  - Case 5: equity IRR 16.9%, minimum DSCR 1.14x, buyer lifetime -9.3%.
+  - Case 6: equity IRR 26.9%, minimum DSCR 1.50x, buyer lifetime -14.4%.
+  - Closest buyer-positive Case 6 test: 1,300 VND/kWh at 70% volume; buyer
+    lifetime +0.46%, seller equity IRR 17.85%, minimum DSCR 1.143x.
+  - Zero of 56 tested Case 6 scenarios passed buyer, seller, and lender gates
+    together; the deck does not generalize this to all Vietnam DPPAs.
+- Verification:
+  - `node qa/data-ledger-check.mjs`: `data ledger checks passed`.
+  - Full final layout QA: 30 files, `0 error(s), 0 warning(s)`.
+  - Final-export contact sheet inspected at thumbnail size; slides 22, 25, and
+    30 inspected full-size.
+  - QA scorecard: 40/45, with no dimension below 4.
+  - PPTX package: 30 slide XML parts, 30 notes-slide parts, 0 empty files,
+    0 media dependencies, 142,614 bytes.
+- Fresh delegated final-section review attempts were blocked by the subagent
+  usage limit. Earlier section reviews passed; the final section was reviewed
+  locally.
+- Next direction: run a financing sensitivity around the buyer-positive
+  Case 6 `1,300 VND/kWh` / 70% volume terms, including FX sensitivity before
+  investor-facing use.
+
 ## 2026-05-23 - Phase 2 Vietnam Tax Model Start
 
 - Started Phase 2 Vietnam pro forma work in a new standalone `proforma_vietnam/` package.
