@@ -1,3 +1,21 @@
+# 2026-06-12 - CEBA DPPA Detailed Facilitator Narrative
+
+- Created
+  `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026_Slide_Narrative.md`.
+- Reconstructed the exact final-deck sequence from the delivered PPTX's
+  on-slide text and embedded speaker notes, then expanded each slide into a
+  facilitator-ready narrative.
+- The guide includes:
+  - overall facilitation approach and caveat discipline,
+  - 24 main-slide objectives, detailed talk tracks, buyer prompts/actions, and
+    transitions,
+  - 6 backup-slide use cases and detailed explanations,
+  - final presenter reminders on modeled evidence and training assumptions.
+- Validation: 30 slide headings total, comprising 24 main slides and 6 backup
+  slides; 821 lines; `git diff --check` passed.
+- Two existing PowerPoint lock files were visible in `outputs/ceba_training/`
+  and were left untouched.
+
 # 2026-06-12 - CEBA DPPA Buyer Decision Journey Deck Design
 
 - User requested a new CEBA Procurement Academy training deck for factory-owner

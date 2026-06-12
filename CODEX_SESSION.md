@@ -17,6 +17,11 @@ Last updated: 2026-06-12
   Verification: data ledger passed; final layout QA `0 errors, 0 warnings`;
   PPTX package has 30 slides, 30 notes slides, 0 empty files, and no media
   dependencies. Final QA score: `40/45`, with no dimension below 4.
+- **2026-06-12 detailed facilitator narrative delivered:**
+  `outputs/ceba_training/CEBA_DPPA_Buyer_Decision_Journey_2026_Slide_Narrative.md`.
+  The Markdown guide covers all 30 slides with objectives, detailed talk
+  tracks, buyer prompts/actions, caveats, and transitions. Validation confirmed
+  24 main-slide and 6 backup-slide narrative sections.
 - **2026-06-11 CD7 alignment pass (committed, 112 tests green):** settlement
   aligned to the official NSMO CD7 simulation deck — k is price-only
   (CFMP = FMP × k; `Q_adj = Q_re_meter / Kpp`, k removed from the volume
