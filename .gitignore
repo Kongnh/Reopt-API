@@ -129,3 +129,7 @@ julia_src/Dockerfile.xpress
 docker-compose.xpress.yml
 julia_src/solver_setup.sh
 compare_run_*.json
+
+# Regenerable tooling artifacts (knowledge graph, brainstorm/skill scratch)
+graphify-out/
+.superpowers/
