@@ -1,3 +1,131 @@
+# 2026-06-24 (later) - E2E Re-run of Factory A case_1..6 (post schema refactor)
+
+- User goal: archive the prior run's artifacts for the six Factory A cases, then
+  re-run case_1..6 end-to-end against REopt (Docker now available), validating the
+  schema-refactor outputs as a confirmation gate.
+- **Archive.** Moved each case's generated artifacts (`payload.json`,
+  `assumptions.json`, `results.json`, `vietnam_report_*.xlsx`) into
+  `outputs/vietnam_case/factory_a/_archive/pre_rerun_2026-06-24/<case>/` with a
+  `MANIFEST.txt`. Left each `case.json` input in place (it drives the re-run), so
+  no stale workbooks remain to confuse reconciliation.
+- **Stack.** `docker compose up -d` brought up redis/db/celery/django/julia. Django
+  reachable (HTTP 405 on `/v3/job/health/` = GET not allowed, server up); Julia
+  healthy (HTTP 200, already solving). Ran each case via
+  `REOPT_API_URL=http://localhost:8000/v3 .venv/Scripts/python.exe -m
+  proforma_vietnam.run_case --case <case.json>`.
+- **Result.** All 6 returned status `optimal`, one fresh workbook each (no
+  duplicates). New run UUIDs: case_1 `3dd5bf1f-fa51-4f1e-aa64-d24ae11a1820`,
+  case_2 `554ee85a-6f3c-4077-8dcb-0145406d4e6e`, case_3
+  `b33f4a1f-9de5-4228-ba55-4db9578de73a`, case_4
+  `36f36f61-c28e-4c8a-bc9d-66f21300c28e`, case_5
+  `c73574b2-1170-4611-a6c8-8a012bd1f50d`, case_6
+  `5b999b24-d8c1-4d91-aa2e-1ea0a973af38`.
+- **Reconciliation finding — REopt sizing not bit-reproducible vs June baseline.**
+  Verified new vs archived `payload.json`: cases 1-4 byte-identical; cases 5-6
+  differ only in `ElectricStorage.battery_replacement_year` 10→11 (current
+  `case.json` edited Jun 11, after the Jun-10 baseline payload — expected, not a
+  re-run artifact). Despite identical payloads, cases 1/2/3/5 re-solved to slightly
+  larger PV+BESS (e.g. case_1 BESS 8,640 vs 8,250 kWh, +4.7%); constrained cases 4
+  (PV-only) and 6 (fixed BESS) matched exactly. Conclusion: drift is in the REopt
+  solver/Julia-package layer, not the proforma — the schema refactor stays
+  byte-identical given the same `results.json`. Headline economics moved only
+  marginally; the one material change is **case_1 payback 9.9 → 11.6 yr** (larger,
+  costlier battery). Also surfaced **case_2 min DSCR 1.01x** (thin lender margin;
+  prior baseline showed "—").
+- Refreshed the Honest Economics table, retained-UUID list, and todos in
+  `CODEX_SESSION.md` to these runs (June baseline now noted as archived).
+- Checks run: per-case `results.json` `status == optimal`; new-vs-archived payload
+  diff; new-vs-archived REopt sizing; new-vs-documented headline metrics (IRR/NPV/
+  min DSCR/payback) pulled from each workbook's Developer Returns sheet.
+- Blockers/assumptions: REopt re-solve is not bit-reproducible against the June
+  container — flag if a third party expects identical sizing; likely needs a REopt
+  Julia package version pin. The 2026-06-24 schema refactor is still uncommitted;
+  `master` still unpushed.
+- Open next: model-audit pass + third-party-ready Excel (CODEX_SESSION Active
+  Direction steps 2-3); decide whether to commit the schema refactor; push `master`.
+
+# 2026-06-24 - Proforma Schema Refactor (SAM-style, declarative presentation)
+
+- User goal: study SAM's financial-model module (sibling repo, added to the same
+  workspace) and apply its architecture to harden the Vietnam financial model in
+  ReoptAPI, opening it to a third financing structure (direct ownership).
+- Plan-mode discovery corrected a wrong premise from an earlier plan: there are
+  **no** parallel/Julia Vietnam implementations. `proforma_vietnam/` is the one
+  live engine; `reoptjl/src/vietnam/` is only the EVN tariff layer. So this was a
+  single-engine refactor, not a consolidation.
+- Key SAM lesson applied: compute stays imperative (like an SSC module); only the
+  presentation is declarative (like SAM's `cfline()`/`metric()`), and the
+  financing type is the primary dispatch key (like `cashflow{'Single Owner'}`).
+  Approved deliverable: implement-now refactor covering structure registry +
+  declarative schema + externalized defaults + metrics separation + schema-driven
+  Excel; scoped open for `direct_ownership`.
+
+## Changes (6 phases, each gated on a green suite; no financial numbers changed)
+
+1. **`proforma_vietnam/structures.py`** (new): `ESCO`/`DPPA`/`DIRECT_OWNERSHIP`
+   constants (last is a placeholder, no compute wired) + `resolve_structure()`.
+   `cash_flow.py` now computes `structure` once and the two `dppa_settlement is
+   not None` branches became `structure == DPPA` / `!= DPPA` (behaviour-identical).
+2. **`proforma_vietnam/proforma_schema.py`** (new): `RowSpec` registry
+   (`PROFORMA_ROWS`) declaring each line-item once (label, currency, applies_to);
+   ordered per-sheet "views" (`CASH_FLOW_VIEW`, `TAX_SCHEDULE_VIEW`,
+   `DEBT_SERVICE_VIEW`, `DPPA_ANNUAL_VIEW`, `SUMMARY_VIEW`,
+   `DEVELOPER_FINANCIAL_VIEW`); `columns(view, structure)` filters by `applies_to`
+   so DPPA-only lines auto-hide under ESCO; `number_format()` relocated verbatim
+   from `xlsx_builder._number_format_for`.
+3. **`xlsx_builder.py`**: deleted 7 duplicated column constants (`CASH_FLOW_COLUMNS`,
+   `DPPA_CASH_FLOW_EXTRA_COLUMNS`, `TAX_SCHEDULE_COLUMNS`, `DEBT_SERVICE_COLUMNS`,
+   `DEVELOPER_FINANCIAL_ROWS`, `DPPA_ANNUAL_COLUMNS`, `SUMMARY_ROWS`); those sheets
+   now call `schema.columns(...)` at render time using a `structure` derived from
+   the dppa_config. `_write_summary_sheet` gained a `rows` param. Bespoke sheets
+   (Executive Summary / Buyer Analysis / Developer Returns / Year 1 BAU vs DPPA)
+   and REopt-report sheets are intentionally left outside the schema. `report_data.py`
+   needed no change (it forwards a summary dict, not column lists).
+4. **`tests/test_proforma_schema.py`** (new, 5 tests): every schema-presented key
+   (per structure) must exist in the compute output, so a label/key rename now
+   fails CI instead of silently resolving to a blank cell; plus structure-filter
+   tests.
+5. **`defaults/vietnam_defaults.json`** (+ `defaults/__init__.py`, new): versioned
+   VN financial + tax constants (escalation, debt, CIT schedule, depreciation
+   years). `cash_flow.py` `DEFAULT_*` and `tax_model.py` `CIT_*`/depreciation
+   constants now read from there; regulatory provenance kept inline in comments.
+   Mirrors SAM `deploy/runtime/defaults/*.json`.
+6. **`proforma_vietnam/SCHEMA.md`** (new): documents the architecture and how to
+   add a line-item (one `RowSpec` + a view entry) or a new financing structure.
+
+## Verification
+
+- Baseline before changes (after installing `openpyxl` into `.venv`): 112 OK.
+- After: **117 OK** = the 112 pre-existing tests + 5 new `test_proforma_schema`
+  tests. Ran the full suite after each phase; all green. ResourceWarnings
+  (HTTPError) are from network-mocked tests, harmless.
+- Parity proof: a script confirmed `schema.columns(...)` reproduces every deleted
+  xlsx constant exactly (ESCO 15 / DPPA 18 cash-flow cols, tax/debt/summary/dev/
+  dppa-annual), and `number_format` matches the old heuristic on sampled keys.
+- Single-source-of-truth proof: adding one `RowSpec` + one view key (ephemeral,
+  not committed) made the line appear in both `columns()` and `xlsx_builder`'s
+  Cash Flow sheet with no presentation-file edits — previously a >=3-place change.
+- `py_compile` clean on all touched modules; no leftover references to the
+  deleted constants.
+
+## Environment / blockers
+
+- ReoptAPI `.venv` (`.venv/Scripts/python.exe`, Python 3.14) has no `pytest`; the
+  suite is `unittest`. Installed `openpyxl==3.1.5` into `.venv` to run the xlsx
+  tests (was previously missing). Docker/Django not used (pure post-processing).
+- No commit made. SAM sibling repo was read-only reference (not modified); its
+  graphify graph is for SAM, so no `graphify update` run here.
+
+## Out of scope / follow-up
+
+- Wire real `direct_ownership` compute (only the placeholder + `applies_to`
+  headroom exist now).
+- Confirm with the project owner whether `_add_usd_aliases` (USD == VND
+  numerically, no FX applied in `cash_flow.py`) is intended or a missing FX step
+  — left untouched because changing it would move the numbers.
+- Move `reoptjl/src/vietnam/evn_rates.py` tariff tables to the same
+  versioned-defaults pattern.
+
 # 2026-06-12 - CEBA DPPA Detailed Facilitator Narrative
 
 - Created

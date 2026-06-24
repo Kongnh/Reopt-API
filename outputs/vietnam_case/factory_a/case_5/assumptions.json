@@ -14,6 +14,7 @@
   "debt_fraction": 0.7,
   "debt_interest_rate_fraction": 0.085,
   "debt_term_years": 10,
+  "battery_replacement_year": 11,
   "dppa": {
     "type": "grid_dppa_cfd",
     "cfd_strike_per_kwh_vnd": 2000.0,
@@ -26311,6 +26312,5 @@
       1772.43596,
       1699.184045
     ]
-  },
-  "battery_replacement_year": 11
+  }
 }

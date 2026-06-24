@@ -1,0 +1,18 @@
+{
+  "case_name": "Factory A Vietnam ESCO E2E - Solar Only (no BESS)",
+  "country": "Vietnam",
+  "tariff_year": 2025,
+  "voltage_level": "22-110kV",
+  "tou_schedule": "decision_963",
+  "exchange_rate_vnd_per_usd": 25000,
+  "evn_energy_escalation_rate": 0.04,
+  "evn_capacity_escalation_rate": 0.04,
+  "esco_energy_discount_fraction": 0.9,
+  "demand_savings_esco_share": 0.8,
+  "grid_charging_enabled": false,
+  "owner_discount_rate_fraction": 0.1,
+  "debt_fraction": 0.7,
+  "debt_interest_rate_fraction": 0.085,
+  "debt_term_years": 10,
+  "battery_replacement_year": 11
+}

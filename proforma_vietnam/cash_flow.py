@@ -1,3 +1,5 @@
+from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
+from proforma_vietnam.structures import DPPA, resolve_structure
 from proforma_vietnam.tax_model import (
     BESS_DEPRECIATION_YEARS,
     PV_DEPRECIATION_YEARS,
@@ -7,14 +9,15 @@ from proforma_vietnam.tax_model import (
 )
 
 
-DEFAULT_PROJECT_YEARS = 25
-DEFAULT_EVN_ENERGY_ESCALATION_RATE = 0.04
-DEFAULT_EVN_CAPACITY_ESCALATION_RATE = 0.04
-DEFAULT_ESCO_DEMAND_SAVINGS_SHARE = 0.80
-DEFAULT_ESCO_GRID_ARBITRAGE_SHARE = 1.00
-DEFAULT_DEBT_FRACTION = 0.70
-DEFAULT_DEBT_INTEREST_RATE = 0.085
-DEFAULT_DEBT_TERM_YEARS = 10
+# Values sourced from defaults/vietnam_defaults.json (versioned).
+DEFAULT_PROJECT_YEARS = FINANCIAL_DEFAULTS["project_years"]
+DEFAULT_EVN_ENERGY_ESCALATION_RATE = FINANCIAL_DEFAULTS["evn_energy_escalation_rate"]
+DEFAULT_EVN_CAPACITY_ESCALATION_RATE = FINANCIAL_DEFAULTS["evn_capacity_escalation_rate"]
+DEFAULT_ESCO_DEMAND_SAVINGS_SHARE = FINANCIAL_DEFAULTS["esco_demand_savings_share"]
+DEFAULT_ESCO_GRID_ARBITRAGE_SHARE = FINANCIAL_DEFAULTS["esco_grid_arbitrage_share"]
+DEFAULT_DEBT_FRACTION = FINANCIAL_DEFAULTS["debt_fraction"]
+DEFAULT_DEBT_INTEREST_RATE = FINANCIAL_DEFAULTS["debt_interest_rate"]
+DEFAULT_DEBT_TERM_YEARS = FINANCIAL_DEFAULTS["debt_term_years"]
 
 
 def calculate_vietnam_esco_cash_flow(
@@ -49,6 +52,7 @@ def calculate_vietnam_esco_cash_flow(
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
 
+    structure = resolve_structure(dppa_settlement)
     replacement_costs_by_year = replacement_costs_by_year or []
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
     debt_principal_vnd = total_capex_vnd * debt_fraction
@@ -88,7 +92,7 @@ def calculate_vietnam_esco_cash_flow(
         else 0
     )
 
-    if dppa_settlement is not None:
+    if structure == DPPA:
         # Under DPPA the customer pays the regulated chain (C_DN/C_DPPA/C_CL/C_BL)
         # plus the bilateral CfD. The discount-to-EVN ESCO energy line is replaced
         # by the generator's FMP + CfD revenue. Co-located BESS forces grid
@@ -175,7 +179,7 @@ def calculate_vietnam_esco_cash_flow(
             + base_served_retail_value_vnd * (1 - degradation_multiplier)
         ) * energy_multiplier
         bau_evn_bill_year_vnd = bau_evn_bill_vnd * energy_multiplier
-        if dppa_settlement is None:
+        if structure != DPPA:
             offtaker_post_project_cost_vnd = (
                 optimized_evn_bill_year_vnd
                 + row["esco_energy_revenue_vnd"]

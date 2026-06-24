@@ -1,0 +1,537 @@
+=== PAGE 1 ===
+BỘ CÔNG THƯƠNG
+CỤC ĐIỀU TIẾT ĐIỆN LỰC
+CLICK TO EDIT MASTER TITLE STYLE
+Click to edit Master subtitle style
+9/2/2025 1
+CỤC ĐIỆN LỰC
+TRUNG TÂM THÔNG TIN NĂNG LƯỢNG VÀ PHÁT TRIỂN THỊ TRƯỜNG ĐIỆN LỰC
+CÁC VÍ 
+DỤ, MÔ PHỎNG 
+VỀ CƠ CHẾ 
+DPPA
+Trình bày: NSMO
+TP.HCM, ngày 05/9/2025
+
+=== PAGE 2 ===
+2
+Các giả định chung và nguyên tắc tính toán
+Căn cứ Nghị định 57/2025/NĐ-CP, các thông số tính toán được giả định như sau: 
+Ký hiệu Đơn vị Giá trị Ý nghĩa
+k 1,026 Hệ số điều chỉnh
+Cdppa_dv VNĐ/kWh 360 Chi phí dịch vụ hệ thống điện
+Pcl VNĐ/kWh 163,3 Phí bù trừ chênh lệch
+Kpp 1,008 Hệ số quy đổi tổn thất ở cấp điện áp 110 kV
+P1 VNĐ/kWh 2.204 Giá bán lẻ điện bình quân
+
+=== PAGE 3 ===
+3
+Công thức tính chi phí cho khách hàng tham gia DPPA
+Ký hiệu Đơn vị Ý nghĩa
+C_EVN VNĐ Chi phí khách hàng trả cho EVN
+C_DN VNĐ Chi phí điện năng thị trường
+Qkhhc kWh Sản lượng điện tái tạo khách hàng thực nhận 
+FMP VNĐ/kWh Giá thị trường điện (SMP trung bình tháng tại điểm giao nhận)
+C_dppa VNĐ Phí dịch vụ hợp đồng DPPA
+C_cl VNĐ Phí bù chênh lệch
+C_bl VNĐ Chi phí mua điện bổ sung 
+QKH kWh Tổng điện năng khách hàng tiêu thụ
+C_CfD VNĐ Phần chi phí trong hợp đồng CfD giữa khách hàng và nhà máy
+Pc VNĐ/kWh Giá hợp đồng DPPA
+Qc kWh Sản lượng hợp đồng thoả thuận
+C_KH VNĐ Tổng chi phí của khách hàng tham gia DPPA
+
+=== PAGE 4 ===
+4
+Công thức tính chi phí cho khách hàng tham gia DPPA
+C_KH
+Qkhhc × FMP × k × Kpp = C_DN                                                                          
++
+Qkhhc × Cdppa_dv = C_dppa
++
+Qkhhc × Pcl = C_cl
++
+(QKH - Qkhhc) × P1 = C_bl
+C_CfD+ = C_EVN
+=
+(Pc - FMP) × Qc
+=
+
+=== PAGE 5 ===
+5
+Doanh thu của nhà máy điện khi tham gia DPPA
+• Doanh thu thị trường là C_ttđ = Qm × FMP
+Với Qm là sản lượng nhà máy phát lên lưới (kWh). 
+Nhà máy bán toàn bộ điện lên thị trường giao ngay và nhận thanh toán từ EVN theo giá thị trường.
+• Doanh thu hợp đồng CfD là C_cfd = Qc × (Pc - FMP)
+Nhà máy thu (hoặc trả) phần chênh lệch giá hợp đồng so với giá thị trường trên lượng điện Qc.
+• Tổng doanh thu nhà máy là C_ttđ + C_cfd
+
+=== PAGE 6 ===
+6
+VÍ DỤ 1
+KỊCH BẢN CƠ BẢN
+SẢN LƯỢNG TIÊU THỤ BẰNG SẢN LƯỢNG DPPA
+
+
+=== PAGE 7 ===
+7
+VÍ DỤ 1. Kịch bản sản lượng tiêu thụ bằng sản lượng DPPA
+50 MW 
+Qkhhc= 6.000 MWh/tháng
+CfD
+Qc = 6.000 MWh/tháng
+Pc = 1.300 đ/kWh
+FMP = 1.200 đ/kWh
+Điện mặt trời
+Khu Công nghiệp
+QKH = 6.000 MWh/tháng
+Phần chênh lệch QKH - Qkhhc = 0 Khách hàng không cần mua điện bổ sung từ EVN 
+• Chi phí trả cho EVN (C_EVN):
+✓Chi phí điện năng thị trường
+C_DN = 6.000.000 kWh * 1.200 đ/kWh * 1,026 * 1,008 = 7.446.297.600 VNĐ.
+✓Phí dịch vụ hệ thống 
+C_dppa = 6.000.000 kWh * 360 đ/kWh = 2.160.000.000 VNĐ.
+✓Phí bù trừ chênh lệch 
+C_cl = 6.000.000 kWh * 163,30 đ/kWh = 979.800.000 VNĐ.
+✓Mua điện bổ sung 
+C_bl = (QKH - Qkhhc)* P1 = 0 kWh* 2.204 đ/kWh = 0 VNĐ.
+➢Tổng chi phí EVN thu 
+C_EVN = 7.446.297.600 + 2.160.000.000 + 979.800.000 + 0 = 10.586.097.600 VNĐ.
+
+=== PAGE 8 ===
+8
+VÍ DỤ 1. Kịch bản sản lượng tiêu thụ bằng sản lượng DPPA
+50 MW 
+Qkhhc= 6.000 MWh/tháng
+CfD
+Qc = 6.000 MWh/tháng
+Pc = 1.300 đ/kWh
+FMP = 1.200 đ/kWh
+Điện mặt trời
+Khu Công nghiệp
+QKH = 6.000 MWh/tháng
+• Chi phí hợp đồng CfD:
+C_CfD = (Pc - FMP)*Qc = (1.300 - 1.200) đ/kWh * 6.000.000 kWh = 600.000.000 VNĐ
+• Tổng chi phí khách hàng (C_KH):
+C_KH = C_EVN + C_CfD = 10.586.097.600 + 600.000.000 = 11.186.097.600 VNĐ
+DOANH THU NHÀ MÁY ĐIỆN
+✓Doanh thu từ thị trường C_ttđ: 
+Nhà máy phát Qm bằng 6.048.000 kWh do tổn thất 0,8% (K_pp=1,008). 
+C_ttđ = 6.048.000 kWh * 1.200 đ/kWh = 7.257.600.000 VNĐ.
+✓Doanh thu từ hợp đồng CfD
+C_cfd = Qc* (Pc - FMP) = 6.000.000 kWh * (1.300 - 1.200) = 600.000.000 VNĐ.
+Tổng doanh thu nhà máylà 7.257.600.000 + 600.000.000 = 7.857.600.000VNĐ
+
+=== PAGE 9 ===
+9
+VÍ DỤ 1. Kịch bản sản lượng tiêu thụ bằng sản lượng DPPA
+Khách hàng EVN
+Nhà máy điện
+10,586 tỷ VNĐ = 7,446 tỷ tiền điện năng thị trường
++ 2,160 tỷ phí dịch vụ
++ 0,980 tỷ phí chênh lệch
+
+
+=== PAGE 10 ===
+10
+VÍ DỤ 2
+KỊCH BẢN ĐIỀU CHỈNH
+TIÊU THỤ THỰC TẾ VƯỢT SẢN LƯỢNG HỢP ĐỒNG
+
+
+=== PAGE 11 ===
+11
+VÍ DỤ 2. Kịch bản tiêu thụ thực tế vượt sản lượng hợp đồng
+30 MW 
+Qkhhc= 8.000 MWh/tháng
+CfD
+Qc = 8.000 MWh/tháng
+Pc = 1.500 đ/kWh
+FMP = 1.600 đ/kWh
+Điện gió
+Khách hàng lớn
+QKH = 9.000 MWh/tháng
+Phần chênh lệch QKH - Qkhhc = 1000 MWh Khách hàng phải mua điện bổ sung từ EVN 
+• Chi phí trả cho EVN (C_EVN):
+✓Chi phí điện năng thị trường
+C_DN = 8.000.000 kWh * 1.600 đ/kWh * 1,026 * 1,008 = 13.237.862.400 VNĐ.
+✓Phí dịch vụ hệ thống 
+C_dppa = 8.000.000 kWh * 360 đ/kWh = 2.880.000.000 VNĐ.
+✓Phí bù trừ chênh lệch 
+C_cl = 8.000.000 kWh * 163,30 đ/kWh = 1.306.400.000 VNĐ.
+✓Mua điện bổ sung 
+C_bl = (QKH - Qkhhc)* P1 = 1.000.000 kWh* 2.204 đ/kWh = 2.204.000.000 VNĐ.
+➢Tổng chi phí EVN thu 
+C_EVN = 13.237.862.400 + 2.880.000.000 + 1.306.400.000 + 2.204.000.000 = 19.628.262.400VNĐ.
+
+=== PAGE 12 ===
+12
+VÍ DỤ 2. Kịch bản tiêu thụ thực tế vượt sản lượng hợp đồng
+30 MW 
+Qkhhc= 8.000 MWh/tháng
+CfD
+Qc = 8.000 MWh/tháng
+Pc = 1.500 đ/kWh
+FMP = 1.600 đ/kWh
+Điện gió
+Khách hàng lớn
+QKH = 9.000 MWh/tháng
+• Chi phí hợp đồng CfD:
+C_CfD = (Pc - FMP)*Qc = (1.500 - 1.600) đ/kWh * 8.000.000 kWh =-800.000.000VNĐ.
+• Tổng chi phí khách hàng (C_KH):
+C_KH = C_EVN + C_CfD = 19.628.262.400 + (-800.000.000) = 18.828.262.400 VNĐ
+DOANH THU NHÀ MÁY ĐIỆN
+✓Doanh thu từ thị trường C_ttđ: Nhà máy phát đủ 8.000 MWh (sau tổn thất 
+~8.064.000 kWh tại máy phát)
+C_ttđ = 8.064.000 kWh * 1.600 đ/kWh = 12.902.400.000 VNĐ.
+✓Doanh thu từ hợp đồng CfD
+C_cfd = Qc* (Pc - FMP) = 8.000.000 kWh * (1.500 - 1.600) = –800.000.000 VNĐ
+➢Tổng doanh thu nhà máylà 12.902.400.000 + (–800.000.000) = 12.102.400.000VNĐ
+
+=== PAGE 13 ===
+13
+VÍ DỤ 2. Kịch bản tiêu thụ thực tế vượt sản lượng hợp đồng
+Khách hàng EVN
+Nhà máy điện
+19,628 tỷ VNĐ = 13,238 tỷ tiền điện năng thị trường
++ 2,880 tỷ phí dịch vụ
++ 1,306 tỷ phí chênh lệch
++ 2,204 tỷ phí mua điện bổ sung
+
+
+=== PAGE 14 ===
+14
+VÍ DỤ 3
+KỊCH BẢN NÂNG CAO
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ 
+TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+
+
+=== PAGE 15 ===
+15
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+Qkhhc= 20.000 MWh/tháng
+60%
+Qc,A = 12.000 MWh/tháng
+Pc = 1.300 đ/kWh
+Điện gió (100 MW)
+Công ty A
+ Công ty B
+CfD
+40%
+Qc,B = 8.000 MWh/tháng
+Pc = 1.300 đ/kWh
+CfD
+Phần chênh lệch 
+QKH - Qkhhc = 0
+Khách hàng không cần mua điện 
+bổ sung từ EVN 
+Tổng sản lượng hợp đồng phân bổ cho các 
+khách hàng bằng đúng sản lượng nhà máy
+❑Trường hợp 1: Giá thị trường cao hơn giá hợp đồng
+Giả định SMP = 1.500 đ/kWh, cao hơn giá DPPA 1.300 đ/kWh.
+❑Trường hợp 2: Giá thị trường thấp hơn giá hợp đồng
+Giả định giá thị trường bình quân giảm còn 1.000 đ/kWh, thấp hơn giá hợp đồng 1.300 đ/kWh.
+
+=== PAGE 16 ===
+16
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+❑Trường hợp 1: Giá thị trường cao hơn giá hợp đồng
+Khách hàng A (Qc,A = 12.000 MWh)
+✓Chi phí điện năng thị trường 
+12.000.000 * 1.500 * 1,026 * 1,008 = 18.615.744.000 VNĐ.
+✓Phí dịch vụ hệ thống
+12.000.000 * 360 = 4.320.000.000 VNĐ.
+✓Phí bù trừ chênh lệch
+12.000.000 * 163,30 = 1.959.600.000 VNĐ.
+✓Mua điện bổ sung: giả sử A chỉ tiêu thụ đúng 12.000 MWh 
+DPPA (không mua thêm, C_bl,A = 0)
+✓Tổng EVN thu từ A
+C_EVN,A = 18.615.744.000 + 4.320.000.000 + 1.959.600.000
+= 24.895.344.000 VNĐ
+Khách hàng B (Qc,B = 8.000 MWh)
+✓Chi phí điện năng thị trường
+8.000.000 * 1.500 * 1,026 * 1,008 = 12.410.496.000 VNĐ.
+✓Phí dịch vụ hệ thống
+8.000.000* 360 = 2.880.000.000 VNĐ.
+✓Phí bù trừ chênh lệch
+8.000.000* 163,30 = 1.306.400.000 VNĐ.
+✓Mua điện bổ sung: giả sử B cũng chỉ dùng đúng 8.000 MWh 
+DPPA (không mua thêm, C_bl,B = 0)
+✓Tổng EVN thu từ B
+C_EVN,B = 12.410.496.000 + 2.880.000.000 + 1.306.400.000 
+= 16.596.896.000 VNĐ.
+
+=== PAGE 17 ===
+17
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+❑Trường hợp 1: Giá thị trường cao hơn giá hợp đồng
+Khách hàng A (Qc,A = 12.000 MWh)
+✓Chi phí CfD cho A
+(1.300 - 1.500) * 12.000.000 = –2.400.000.000 VNĐ.
+(Âm 2,4 tỷ: nhà máy trả A 2,4 tỷ do giá thị trường cao hơn giá hợp đồng)
+➢Tổng chi phí A trả
+C_KH,A= 24.895.344.000+ (–2.400.000.000)
+= 22.495.344.000VNĐ
+Khách hàng B (Qc,B = 8.000 MWh)
+✓Chi phí CfD cho B
+(1.300 - 1.500)* 8.000.000 = –1.600.000.000 VNĐ.
+(Âm 1,6 tỷ: nhà máy trả B 1,6 tỷ)
+➢Tổng chi phí B trả
+C_KH,B= 16.596.896.000+ (–1.600.000.000)
+= 14.996.896.000VNĐ.
+Tổng chi phí hai khách hàng: A + B = 37.492.240.000 VNĐ (ứng với 20.000 MWh tiêu thụ).
+Trungbình mỗi kWh khách hàng trả ~1.874 đ/kWh (thấp hơn khá nhiều so với giá bán lẻ bình quân 2.204 đ/kWh do hưởng lợi từ giá thị trường cao).
+Doanh thu nhà máy điện: Nhà máy phát 20.000 MWh (tương đương ~20.160.000 kWh tại máy phát trước tổn thất).
+✓Doanh thu thị trường: 20.160.000 * 1.500 = 30.240.000.000 VNĐ (EVN trả nhà máy).
+✓Doanh thu CfD: (1.300 - 1.500)* 20.000.000 = –4.000.000.000 VNĐ 
+(nhà máy trả lại khách tổng 4 tỷ; trong đó 2,4 tỷ cho A và 1,6 tỷ cho B).
+➢Tổng doanh thu nhà máy: 30.240.000.000 + (–4.000.000.000) = 26.240.000.000 VNĐ.
+
+=== PAGE 18 ===
+18
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+❑Trường hợp 1: Giá thị trường cao hơn giá hợp đồng
+Khách hàng A
+EVNNhà máy điện 30,240 tỷ VNĐ trên thị trường giao ngay
+Khách hàng B
+
+=== PAGE 19 ===
+19
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+❑Trường hợp 2: Giá thị trường thấp hơn giá hợp đồng
+Khách hàng A (Qc,A = 12.000 MWh)
+✓Chi phí điện năng thị trường 
+12.000.000 * 1.000 * 1,026 * 1,008 = 12.410.496.000 VNĐ.
+✓Phí dịch vụ hệ thống
+12.000.000 * 360 = 4.320.000.000 VNĐ.
+✓Phí bù trừ chênh lệch
+12.000.000 * 163,30 = 1.959.600.000 VNĐ.
+✓Mua điện bổ sung: giả sử A chỉ tiêu thụ đúng 12.000 MWh 
+DPPA (không mua thêm, C_bl,A = 0)
+✓Tổng EVN thu từ A
+C_EVN,A = 12.410.496.000 + 4.320.000.000 + 1.959.600.000
+= 18.690.096.000 VNĐ
+Khách hàng B (Qc,B = 8.000 MWh)
+✓Chi phí điện năng thị trường
+8.000.000 * 1.000 * 1,026 * 1,008 = 8.273.664.000 VNĐ.
+✓Phí dịch vụ hệ thống
+8.000.000* 360 = 2.880.000.000 VNĐ.
+✓Phí bù trừ chênh lệch
+8.000.000* 163,30 = 1.306.400.000 VNĐ.
+✓Mua điện bổ sung: giả sử B cũng chỉ dùng đúng 8.000 MWh 
+DPPA (không mua thêm, C_bl,B = 0)
+✓Tổng EVN thu từ B
+C_EVN,B = 8.273.664.000 + 2.880.000.000 + 1.306.400.000
+= 12.460.064.000 VNĐ.
+
+=== PAGE 20 ===
+20
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+❑Trường hợp 2: Giá thị trường thấp hơn giá hợp đồng
+Khách hàng A (Qc,A = 12.000 MWh)
+✓Chi phí CfD cho A
+(1.300 - 1.000) * 12.000.000 = +3.600.000.000 VNĐ
+(Dương 3,6 tỷ: khách hàng trả thêm 3,6 tỷ cho nhà máy)
+➢Tổng chi phí A trả
+C_KH,A= 18.690.096.000+ 3.600.000.000
+= 22.290.096.000VNĐ
+Khách hàng B (Qc,B = 8.000 MWh)
+✓Chi phí CfD cho B
+(1.300 - 1.000)* 8.000.000 = +2.400.000.000 VNĐ
+(Khách hàng B trả thêm 2,4 tỷ)
+➢Tổng chi phí B trả
+C_KH,B= 12.460.064.000+ 2.400.000.000
+= 14.860.064.000VNĐ.
+Tổng chi phí hai khách hàng: A + B = 37.150.160.000 VNĐ (ứng với 20.000 MWh tiêu thụ).
+TrungbìnhmỗikWhkháchhàngtrả~1.857 đ/kWh.
+Doanh thu nhà máy điện: Nhà máy phát 20.000 MWh (tương đương ~20.160.000 kWh tại máy phát trước tổn thất).
+✓Doanh thu thị trường: 20.160.000 * 1.000 = 20.160.000.000 VNĐ (EVN trả nhà máy).
+✓Doanh thu CfD: (1.300 - 1.000)* 20.000.000 = +6.000.000.000 VNĐ
+(nhà máy thu thêm 6 tỷ từ khách hàng; 3,6 tỷ từ A và 2,4 tỷ từ B).
+➢Tổng doanh thu nhà máy: 20.160.000.000 + 6.000.000.000 = 26.160.000.000 VNĐ
+
+=== PAGE 21 ===
+21
+VÍ DỤ 3. KỊCH BẢN NÂNG CAO 
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, GIÁ THỊ TRƯỜNG BIẾN ĐỘNG CAO/THẤP SO VỚI GIÁ HỢP ĐỒNG
+❑Trường hợp 2: Giá thị trường thấp hơn giá hợp đồng
+Khách hàng A
+EVNNhà máy điện 20,160 tỷ VNĐ trên thị trường giao ngay
+Khách hàng B
+
+=== PAGE 22 ===
+22
+VÍ DỤ 4
+MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, 
+MỘT KHÁCH HÀNG SỬ DỤNG KHÔNG HẾT SẢN LƯỢNG 
+ĐƯỢC PHÂN BỔ
+
+
+=== PAGE 23 ===
+23
+VÍ DỤ 4. MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, MỘT KHÁCH HÀNG SỬ 
+DỤNG KHÔNG HẾT SẢN LƯỢNG ĐƯỢC PHÂN BỔ
+Qkhhc= 1.000 kWh 
+60%
+Pc = 1.300 đ/kWh
+Khách hàng A
+ Khách hàng B
+CfD
+40%
+Pc = 1.300 đ/kWh
+CfD
+Theo thỏa thuận, tối đa A nhận 600 kWh, B nhận 400 kWh.
+Tuy nhiên thực tế, khách hàng A chỉ tiêu thụ 500 kWh (ít hơn mức 600 kWh được phân bổ), còn khách hàng B
+tiêu thụ đủ 400 kWh.
+Như vậy có 100 kWh dư thừa từ phần của A mà B không hấp thụ, nhà máy phải bán phần dư này cho EVN
+(ngoài hợp đồng DPPA).
+Giả sử giá hợp đồng chung Pc = 1.300 đ/kWh và giá thị trường SMP = 1.200 đ/kWh. 
+
+=== PAGE 24 ===
+24
+VÍ DỤ 4. MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, MỘT KHÁCH HÀNG SỬ 
+DỤNG KHÔNG HẾT SẢN LƯỢNG ĐƯỢC PHÂN BỔ
+Khách hàng A (tiêu thụ 500 kWh trên 600 kWh phân bổ)
+✓Chi phí điện năng thị trường 
+500* 1.200* 1,026* 1,008 = 620.525 VNĐ.
+✓Phí dịch vụ hệ thống
+500 * 360 = 180.000 VNĐ.
+✓Phí bù trừ chênh lệch
+500 * 163,30 = 81.650 VNĐ.
+✓Mua điện bổ sung: A không dùng hết phần được phân bổ 
+nên không mua thêm (A dùng ít hơn, C_bl,A=0)
+✓Tổng EVN thu từ A
+C_EVN,A = 620.525 + 180.000 + 81.650 = 882.175 VNĐ
+Khách hàng B (tiêu thụ 400 kWh, đủ phần phân bổ)
+✓Chi phí điện năng thị trường
+400 * 1.200 * 1,026 * 1,008 = 496.420 VNĐ.
+✓Phí dịch vụ hệ thống
+400 * 360 = 144.000 VNĐ.
+✓Phí bù trừ chênh lệch
+400 * 163,30 = 65.320 VNĐ.
+✓Mua điện bổ sung: B dùng đúng 400 kWh tái tạo, không mua 
+thêm (C_bl,B=0)
+✓Tổng EVN thu từ B
+C_EVN,B = 496.420 + 144.000 + 65.320 = 705.740 VNĐ.
+
+=== PAGE 25 ===
+25
+VÍ DỤ 4. MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, MỘT KHÁCH HÀNG SỬ 
+DỤNG KHÔNG HẾT SẢN LƯỢNG ĐƯỢC PHÂN BỔ
+Khách hàng A (tiêu thụ 500 kWh trên 600 kWh phân bổ)
+✓Chi phí CfD cho A
+(1.300 - 1.200) * 500 = +50.000 VNĐ.
+(A trả thêm 50 nghìn cho nhà máy)
+➢Tổng chi phí A trả
+C_KH,A = 882.175 + 50.000 = 932.175 VNĐ
+Khách hàng B (tiêu thụ 400 kWh, đủ phần phân bổ)
+✓Chi phí CfD cho B
+(1.300 - 1.200)* 400 = +40.000 VNĐ.
+(B trả thêm 40 nghìn)
+➢Tổng chi phí B trả
+C_KH,B = 705.740 + 40.000 = 745.740 VNĐ.
+Khách hàng A không sử dụng 100 kWh đã phân bổ, EVN mua 100 kWh này theo giá thị trường 1.200 đ/kWh
+Doanh thu nhà máy điện: Nhà máy phát tổng cộng 1.000 kWh, trong đó 900 kWh bán cho A và B theo cơ chế DPPA, 100 kWh còn 
+lại bán tự do.
+✓Doanh thu thị trường: 1.000 * 1.200 = 1.200.000 VNĐ (EVN trả nhà máy cho toàn bộ 1.000 kWh).
+Trong đó: 900 kWh thuộc DPPA tương ứng 1.080.000 VNĐ, và 100 kWh dư tương ứng 120.000 VNĐ.
+✓Doanh thu CfD chỉ tính trên 900 kWh đã giao dịch DPPA:
+(1.300 - 1.200)* 900 = +90.000 VNĐ 
+(nhà máy thu thêm 90 nghìn từ A và B, tương ứng 50k từ A + 40k từ B).
+➢Tổng doanh thu nhà máy: 1.200.000 + 90.000 = 1.290.000 VNĐ.
+
+=== PAGE 26 ===
+26
+VÍ DỤ 4. MỘT NHÀ MÁY BÁN CHO NHIỀU KHÁCH HÀNG, MỘT KHÁCH HÀNG SỬ 
+DỤNG KHÔNG HẾT SẢN LƯỢNG ĐƯỢC PHÂN BỔ
+Khách hàng A
+EVNNhà máy điện 1,200 triệu VNĐ trên thị trường giao ngay
+Khách hàng B
+
+=== PAGE 27 ===
+27
+VÍ DỤ 5
+MỘT KHÁCH HÀNG LỚN MUA ĐIỆN TỪ NHIỀU NHÀ MÁY 
+(MỖI NHÀ MÁY CÓ GIÁ HỢP ĐỒNG KHÁC NHAU)
+
+
+=== PAGE 28 ===
+28
+VÍ DỤ 5. MỘT KHÁCH HÀNG LỚN MUA ĐIỆN TỪ NHIỀU NHÀ MÁY 
+(MỖI NHÀ MÁY CÓ GIÁ HỢP ĐỒNG KHÁC NHAU)
+Qkhhc= 600.000 kWh 
+Pc,Y = 1.700 đ/kWh
+Khách hàng C
+CfD
+Pc,X = 1.500 đ/kWh
+CfDĐiện gió Y
+ Điện mặt trời X
+Qkhhc= 300.000 kWh QKH= 1.000.000 kWh 
+Giá bán lẻ EVN trung bình khoảng 1.800 đ/kWh. Khách hàng C nhận 900.000 kWh điện tái tạo qua DPPA (600k từ X, 
+300k từ Y)và phải mua thêm 100.000 kWh từ EVN (điện lưới thông thường) để đủ nhu cầu.
+Giả sử giá thị trường điện trung bình tháng đó SMP = 1.600 đ/kWh (cùng áp dụng cho cả hai nhà máy). 
+Khi đó, so sánh giá nhà máy X có Pc,X=1.500 thấp hơn SMP, nhà máy Y có Pc,Y=1.700 cao hơn SMP. Điều này dẫn
+đến nhà máy X phải trả chênh lệch cho khách hàng C, còn khách hàng C phải trả chênh lệch cho nhà máy Y.
+
+=== PAGE 29 ===
+29
+VÍ DỤ 5. MỘT KHÁCH HÀNG LỚN MUA ĐIỆN TỪ NHIỀU NHÀ MÁY 
+(MỖI NHÀ MÁY CÓ GIÁ HỢP ĐỒNG KHÁC NHAU)
+Chi phí trả EVN (cho 900.000 kWh tái tạo + 100.000 kWh bổ sung):
+✓Chi phí điện năng thị trường = 900.000 * 1.600 * 1,026 * 1,008 = 1.489.259.520 VNĐ.
+✓Phí dịch vụ DPPA: 900.000 * 360 = 324.000.000 VNĐ.
+✓Phí bù chênh lệch: 900.000 * 163,30 = 146.970.000 VNĐ.
+✓Mua điện bổ sung: (1.000.000 - 900.000) * 1.800 = 180.000.000 VNĐ (mua 100.000 kWh từ EVN với giá ~1.800 đ/kWh)
+➢Tổng chi phí EVN thu:
+C_EVN = 1.489.259.520 + 324.000.000 + 146.970.000 + 180.000.000 = 2.140.229.520 VNĐ.
+Chi phí hợp đồng CfD (tính riêng cho từng nhà máy)
+✓Với nhà máy X: (P_cX - SMP) * Q_cX = (1.500 - 1.600) * 600.000 = –60.000.000 VNĐ.
+✓Với nhà máy Y: (P_cY - SMP)* Q_cY = (1.700 - 1.600)* 300.000 = +30.000.000 VNĐ.
+✓Tổng chi phí CfD (thuần): –60.000.000 + 30.000.000 = –30.000.000 VNĐ.
+❑Tổng chi phí khách hàng C: C_KH = C_ EVN + C_CfD = 2.140.229.520 + (–30.000.000) = 2.110.229.520 VNĐ
+
+=== PAGE 30 ===
+30
+VÍ DỤ 5. MỘT KHÁCH HÀNG LỚN MUA ĐIỆN TỪ NHIỀU NHÀ MÁY 
+(MỖI NHÀ MÁY CÓ GIÁ HỢP ĐỒNG KHÁC NHAU)
+Doanh thu nhà máy X:
+✓Doanh thu thị trường:
+Nhà máy X phát 600.000 kWh đến C (~604.800 kWh tại máy phát với Kpp), nhận 604.800 * 1.600 = 967.680.000
+VNĐ từ EVN.
+✓Thanh toán CfD: (1.500 - 1.600) * 600.000 = –60.000.000 VNĐ (X trả C 60 triệu).
+➢Tổng doanh thu X: 967.680.000 + (-60.000.000) = 907.680.000 VNĐ.
+Doanh thu nhà máy Y:
+✓Doanh thu thị trường:
+Nhà máy Y phát 300.000 kWh đến C (~302.400 kWh tại máy phát), nhận 302.400 * 1.600 = 483.840.000 VNĐ từ 
+EVN.
+✓Thanh toán CfD: (1.700 - 1.600) * 300.000 = +30.000.000 VNĐ (Y nhận thêm 30 triệu từ C).
+➢Tổng doanh thu Y: 483.840.000 + 30.000.000 = 513.840.000 VNĐ.
+
+=== PAGE 31 ===
+31
+VÍ DỤ 5. MỘT KHÁCH HÀNG LỚN MUA ĐIỆN TỪ NHIỀU NHÀ MÁY 
+(MỖI NHÀ MÁY CÓ GIÁ HỢP ĐỒNG KHÁC NHAU)
+Nhà máy X
+EVNKhách hàng C 2,140 tỷ VNĐ (900 MWh điện tái tạo qua EVN + 100 MWh điện thường)
+Nhà máy Y
+
+=== PAGE 32 ===
+32
+Eavced@gmail.com
+https://www.facebook.com/MangLuoi
+TietKiemDien
+46 Ngô Quyền, Cửa Nam, Hà Nội
+MẠNG LƯỚI TIẾT KIỆM ĐIỆN VIỆT NAM
+VIETNAM ELECTRICITY SAVING NETWORK - VESN
+THANK YOU
+Eavced@gmail.com
+46 Ngô Quyền, Cửa Nam, Hà Nội
+024.32000032

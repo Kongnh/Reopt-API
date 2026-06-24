@@ -1,0 +1,32 @@
+Archive created 2026-06-24 — artifacts from runs prior to schema-refactor E2E re-run
+
+=== case_1 ===
+  moved payload.json
+  moved assumptions.json
+  moved results.json
+  moved vietnam_report_a778fae4-17ca-46c3-96bc-76101422574e.xlsx
+=== case_2 ===
+  moved payload.json
+  moved assumptions.json
+  moved results.json
+  moved vietnam_report_f16c98f3-2be2-4426-be44-909150f01072.xlsx
+=== case_3 ===
+  moved payload.json
+  moved assumptions.json
+  moved results.json
+  moved vietnam_report_47969b6e-2578-41f9-bd9d-645b68cc0150.xlsx
+=== case_4 ===
+  moved payload.json
+  moved assumptions.json
+  moved results.json
+  moved vietnam_report_b950e884-3950-4e44-80b6-47576d69f457.xlsx
+=== case_5 ===
+  moved payload.json
+  moved assumptions.json
+  moved results.json
+  moved vietnam_report_ea6e1964-f331-45e4-94e7-1e712e45464c.xlsx
+=== case_6 ===
+  moved payload.json
+  moved assumptions.json
+  moved results.json
+  moved vietnam_report_96571e84-2d04-401b-8135-e0c9766ad445.xlsx

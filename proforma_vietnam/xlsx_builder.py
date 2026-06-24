@@ -4,42 +4,14 @@ from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.styles import Alignment, Font, PatternFill
 
+from proforma_vietnam import proforma_schema as schema
+from proforma_vietnam.structures import DPPA, ESCO
 
-SUMMARY_ROWS = [
-    ("Total Capex (USD)", "total_capex_usd"),
-    ("Debt Principal (USD)", "debt_principal_usd"),
-    ("Equity Investment (USD)", "equity_investment_usd"),
-    ("Project IRR", "project_irr_fraction"),
-    ("Equity IRR", "equity_irr_fraction"),
-    ("NPV (USD)", "npv_usd"),
-    ("Average DSCR", "average_dscr"),
-    ("Simple Payback (Years)", "simple_payback_years"),
-    ("ROI", "roi_fraction"),
-]
-
-CASH_FLOW_COLUMNS = [
-    ("Year", "year"),
-    ("ESCO Energy Revenue (USD)", "esco_energy_revenue_usd"),
-    ("ESCO Demand Revenue (USD)", "esco_demand_revenue_usd"),
-    ("ESCO Grid Arbitrage Revenue (USD)", "esco_grid_arbitrage_revenue_usd"),
-    ("ESCO Revenue (USD)", "esco_revenue_usd"),
-    ("O&M (USD)", "annual_om_usd"),
-    ("Replacement Cost (USD)", "replacement_cost_usd"),
-    ("Depreciation (USD)", "depreciation_usd"),
-    ("CIT (USD)", "cit_usd"),
-    ("Cash Available For Debt Service (USD)", "cash_available_for_debt_service_usd"),
-    ("Debt Service (USD)", "debt_service_usd"),
-    ("Equity Cash Flow (USD)", "equity_cash_flow_usd"),
-    ("Offtaker Savings (USD)", "offtaker_savings_usd"),
-    ("Offtaker Savings Fraction", "offtaker_savings_fraction"),
-    ("DSCR", "dscr"),
-]
-
-DPPA_CASH_FLOW_EXTRA_COLUMNS = [
-    ("Generator Revenue (USD)", "generator_revenue_usd"),
-    ("CfD Net (USD)", "cfd_net_usd"),
-    ("DPPA Offtaker Cost (USD)", "dppa_offtaker_cost_usd"),
-]
+# Proforma line-item columns (Cash Flow, Tax, Debt, DPPA Annual) and the
+# Summary / Developer Financials metric rows are derived from proforma_schema at
+# render time, filtered by structure. The remaining constants below describe
+# DPPA settlement breakouts and REopt-derived report data, which are not
+# proforma line-items.
 
 DPPA_CONFIG_ROWS = [
     ("DPPA Type", "type"),
@@ -80,17 +52,6 @@ DPPA_MONTHLY_COLUMNS = [
     ("Customer Total (VND)", "customer_total_vnd"),
 ]
 
-DPPA_ANNUAL_COLUMNS = [
-    ("Year", "year"),
-    ("C_DN (USD)", "c_dn_usd"),
-    ("C_DPPA (USD)", "c_dppa_usd"),
-    ("C_CL (USD)", "c_cl_usd"),
-    ("C_BL (USD)", "c_bl_usd"),
-    ("CfD Net (USD)", "cfd_net_usd"),
-    ("Generator Revenue (USD)", "generator_revenue_usd"),
-    ("DPPA Offtaker Cost (USD)", "dppa_offtaker_cost_usd"),
-]
-
 # Year-1 BAU vs DPPA comparison sheet. Each row pulls from the year-1 cash-flow
 # row + assumptions; ("section", None, None) renders as a section header.
 BAU_VS_DPPA_ROWS = [
@@ -122,20 +83,6 @@ BAU_VS_DPPA_ROWS = [
     ("Q_adj (loss-adjusted customer-side)", "q_adj_kwh", "flow"),
     ("Q_Khc (matched consumption, settled)", "q_khc_kwh", "flow"),
     ("EVN retail shortfall", "shortfall_kwh", "flow"),
-]
-
-TAX_SCHEDULE_COLUMNS = [
-    ("Year", "year"),
-    ("Depreciation (USD)", "depreciation_usd"),
-    ("CIT (USD)", "cit_usd"),
-]
-
-DEBT_SERVICE_COLUMNS = [
-    ("Year", "year"),
-    ("Interest (USD)", "interest_usd"),
-    ("Principal (USD)", "principal_usd"),
-    ("Debt Service (USD)", "debt_service_usd"),
-    ("Ending Debt Balance (USD)", "ending_debt_balance_usd"),
 ]
 
 SYSTEM_SIZING_ROWS = [
@@ -175,15 +122,6 @@ LOAD_DURATION_COLUMNS = [
     ("Rank", "rank"),
     ("Load (kW)", "load_kw"),
     ("Net Load (kW)", "net_load_kw"),
-]
-
-DEVELOPER_FINANCIAL_ROWS = [
-    ("Project IRR", "project_irr_fraction"),
-    ("Equity IRR", "equity_irr_fraction"),
-    ("NPV (USD)", "npv_usd"),
-    ("Average DSCR", "average_dscr"),
-    ("Simple Payback (Years)", "simple_payback_years"),
-    ("ROI", "roi_fraction"),
 ]
 
 NAVY = "1F3864"
@@ -232,11 +170,8 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     report_data = report_data or {}
     assumptions = assumptions or {}
     dppa_config = _active_dppa_config(assumptions)
-    cash_flow_columns = (
-        CASH_FLOW_COLUMNS + DPPA_CASH_FLOW_EXTRA_COLUMNS
-        if dppa_config is not None
-        else CASH_FLOW_COLUMNS
-    )
+    structure = DPPA if dppa_config is not None else ESCO
+    cash_flow_columns = schema.columns(schema.CASH_FLOW_VIEW, structure)
 
     workbook = Workbook()
     executive_sheet = workbook.active
@@ -252,7 +187,11 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     )
 
     summary_sheet = workbook.create_sheet("Summary")
-    _write_summary_sheet(summary_sheet, cash_flow_result.get("summary", {}))
+    _write_summary_sheet(
+        summary_sheet,
+        schema.columns(schema.SUMMARY_VIEW, structure),
+        cash_flow_result.get("summary", {}),
+    )
     _write_key_value_sheet(
         workbook.create_sheet("System Sizing"),
         SYSTEM_SIZING_ROWS,
@@ -288,17 +227,17 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     )
     _write_table_sheet(
         workbook.create_sheet("Tax Schedule"),
-        TAX_SCHEDULE_COLUMNS,
+        schema.columns(schema.TAX_SCHEDULE_VIEW, structure),
         cash_flow_result.get("annual_cash_flows", []),
     )
     _write_table_sheet(
         workbook.create_sheet("Debt Service"),
-        DEBT_SERVICE_COLUMNS,
+        schema.columns(schema.DEBT_SERVICE_VIEW, structure),
         cash_flow_result.get("annual_cash_flows", []),
     )
     _write_key_value_sheet(
         workbook.create_sheet("Developer Financials"),
-        DEVELOPER_FINANCIAL_ROWS,
+        schema.columns(schema.DEVELOPER_FINANCIAL_VIEW, structure),
         report_data.get("developer_financial_performance", cash_flow_result.get("summary", {})),
         chart_title="Developer Financial Performance",
     )
@@ -322,7 +261,7 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         )
         _write_table_sheet(
             workbook.create_sheet("DPPA Annual Summary"),
-            DPPA_ANNUAL_COLUMNS,
+            schema.columns(schema.DPPA_ANNUAL_VIEW, structure),
             cash_flow_result.get("annual_cash_flows", []),
         )
         _write_bau_vs_dppa_sheet(
@@ -788,8 +727,8 @@ def _active_dppa_config(assumptions):
     return dppa
 
 
-def _write_summary_sheet(worksheet, summary):
-    for row_index, (label, key) in enumerate(SUMMARY_ROWS, start=1):
+def _write_summary_sheet(worksheet, rows, summary):
+    for row_index, (label, key) in enumerate(rows, start=1):
         worksheet.cell(row=row_index, column=1, value=label)
         value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(summary, key))
         number_format = _number_format_for(key)
@@ -801,17 +740,7 @@ def _write_summary_sheet(worksheet, summary):
 
 
 def _number_format_for(key):
-    if key is None:
-        return None
-    if key == "dscr" or "dscr" in key:
-        return FORMAT_RATIO
-    if key.endswith("_years") or key == "year":
-        return None
-    if key.endswith(("_fraction", "_rate")):
-        return FORMAT_PERCENT
-    if key.endswith(("_usd", "_vnd", "_kwh", "_kw")):
-        return FORMAT_AMOUNT
-    return None
+    return schema.number_format(key)
 
 
 def _write_key_value_sheet(worksheet, rows, values, chart_title=None):

@@ -1,20 +1,24 @@
-CIT_STANDARD_RATE = 0.20
-CIT_HOLIDAY_YEARS = 4
-CIT_REDUCED_RATE_YEARS = 9
-CIT_REDUCED_RATE_FRACTION = 0.50
+from proforma_vietnam.defaults import TAX_DEFAULTS
+
+# Values sourced from defaults/vietnam_defaults.json (versioned); regulatory
+# provenance kept inline below.
+CIT_STANDARD_RATE = TAX_DEFAULTS["cit_standard_rate"]
+CIT_HOLIDAY_YEARS = TAX_DEFAULTS["cit_holiday_years"]
+CIT_REDUCED_RATE_YEARS = TAX_DEFAULTS["cit_reduced_rate_years"]
+CIT_REDUCED_RATE_FRACTION = TAX_DEFAULTS["cit_reduced_rate_fraction"]
 # Vietnam CIT law: losses may be carried forward for at most 5 consecutive
 # years following the loss year (Circular 78/2014 Art. 9).
-CIT_LOSS_CARRYFORWARD_YEARS = 5
+CIT_LOSS_CARRYFORWARD_YEARS = TAX_DEFAULTS["cit_loss_carryforward_years"]
 # Circular 78/2014 Art. 18: the exemption/reduction period counts from the
 # first year with taxable income; if there is none within the first 3 years,
 # the clock starts in year 4 (index 3).
-CIT_INCENTIVE_START_CAP_INDEX = 3
+CIT_INCENTIVE_START_CAP_INDEX = TAX_DEFAULTS["cit_incentive_start_cap_index"]
 # Circular 45/2013/TT-BTC: power generating equipment may be depreciated
 # straight-line over 7-20 years; 20 is this model's explicit default.
-PV_DEPRECIATION_YEARS = 20
-PV_DEPRECIATION_YEARS_MIN = 7
-PV_DEPRECIATION_YEARS_MAX = 20
-BESS_DEPRECIATION_YEARS = 8
+PV_DEPRECIATION_YEARS = TAX_DEFAULTS["pv_depreciation_years"]
+PV_DEPRECIATION_YEARS_MIN = TAX_DEFAULTS["pv_depreciation_years_min"]
+PV_DEPRECIATION_YEARS_MAX = TAX_DEFAULTS["pv_depreciation_years_max"]
+BESS_DEPRECIATION_YEARS = TAX_DEFAULTS["bess_depreciation_years"]
 
 
 def validate_pv_depreciation_years(years):
