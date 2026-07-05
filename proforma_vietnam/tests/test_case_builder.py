@@ -227,6 +227,67 @@ class VietnamCaseBuilderTests(TestCase):
 
         self.assertEqual(len(case["payload"]["ElectricTariff"]["monthly_demand_rates"]), 12)
 
+    def test_two_component_eligibility_true_for_large_load_at_eligible_voltage(self):
+        # 500 kW constant load -> 4,380,000 kWh/year -> 365,000 kWh/month average,
+        # well above the 200,000 kWh/month pilot threshold; 22-110kV is an
+        # eligible voltage tier.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {
+                    "year": 2025,
+                    "voltage_level": "22-110kV",
+                    "two_component_pilot_enabled": True,
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        assumptions = case["assumptions"]
+        self.assertEqual(assumptions["two_component_avg_monthly_kwh"], 365000.0)
+        self.assertTrue(assumptions["two_component_eligible"])
+
+    def test_two_component_eligibility_false_for_small_load(self):
+        # 100 kW constant load -> 876,000 kWh/year -> 73,000 kWh/month average,
+        # below the 200,000 kWh/month pilot threshold.
+        load_csv_path = _write_load_csv([100.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {
+                    "year": 2025,
+                    "voltage_level": "22-110kV",
+                    "two_component_pilot_enabled": True,
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        assumptions = case["assumptions"]
+        self.assertEqual(assumptions["two_component_avg_monthly_kwh"], 73000.0)
+        self.assertFalse(assumptions["two_component_eligible"])
+
+    def test_two_component_eligibility_keys_absent_when_toggle_off(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        assumptions = case["assumptions"]
+        self.assertNotIn("two_component_avg_monthly_kwh", assumptions)
+        self.assertNotIn("two_component_eligible", assumptions)
+
     def test_keeps_usd_report_assumptions_in_usd_with_exchange_rate(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

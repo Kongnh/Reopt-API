@@ -152,7 +152,7 @@ class VietnamEvnTariffTests(TestCase):
         jan_6_2025_10am_index = jan_6_2025_10am * 24 + 10
 
         self.assertEqual(tariff["rate_vintage_year"], 2025)
-        self.assertIn("paper simulation from 2025-10", tariff["rate_vintage_source"])
+        self.assertIn("official pilot billing from 2026-07", tariff["rate_vintage_source"])
         self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_10am_index], 2189)
         self.assertEqual(tariff["monthly_demand_rates"], [240050] * 12)
 

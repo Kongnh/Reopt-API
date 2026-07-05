@@ -169,6 +169,17 @@ demand_charge_savings[year] =
   demand_charge_savings[year_1] * (1 + evn_capacity_escalation_rate)^(year - 1)
 ```
 
+### Two-Component Tariff Decomposition
+
+Under a two-component (Cp/Ca) BAU tariff, the two payment streams above stay
+cleanly separated: the ESCO energy-discount peg (`esco_energy_price`) applies
+to the Ca energy component only, since `evn_energy_rate[h]` is the resolved
+Ca rate; Cp capacity-charge savings flow entirely through the Demand-Charge
+Savings split, driven by REopt's `year_one_demand_cost` before/after values.
+As of 2026-07 the two-component tariff is in official pilot billing (not a
+paper simulation) for selected production customers; it remains an opt-in
+scenario toggle in this model.
+
 ### Grid-Charging Arbitrage
 
 Grid charging is disabled in the base case.

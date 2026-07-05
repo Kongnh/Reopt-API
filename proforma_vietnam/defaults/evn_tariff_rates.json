@@ -31,7 +31,7 @@
   },
   "two_component": {
     "2025": {
-      "source": "EVN two-component pilot tariff, paper simulation from 2025-10",
+      "source": "EVN two-component pilot tariff, EVNNPC ref. 7646/BCT-ĐL (2025-10-09); official pilot billing from 2026-07 for selected ≥200,000 kWh/month ≥22kV customers",
       "currency": "vnd",
       "rates": {
         "110kv_and_above": {

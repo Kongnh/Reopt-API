@@ -33,6 +33,13 @@ DEFAULT_EXCHANGE_RATE_VND_PER_USD = FINANCIAL_DEFAULTS["exchange_rate_vnd_per_us
 DPPA_VOLTAGE_ELIGIBLE_GRID_CFD = {"110kv_and_above", "22_to_110kv"}
 DEFAULT_FMP_SERIES_PATH = "DPPA DOC/fmp_cfmp_vn.json"
 
+# Two-component tariff pilot eligibility (MOIT phased rollout; official pilot
+# billing from 2026-07 for selected production customers). Selection is
+# administrative, so these thresholds only drive a disclosure, never a hard
+# error. See vietnam_market_context.md's "2-Component Tariff" section.
+TWO_COMPONENT_ELIGIBLE_AVG_MONTHLY_KWH = 200000
+TWO_COMPONENT_ELIGIBLE_VOLTAGE_TIERS = {"110kv_and_above", "22_to_110kv"}
+
 FINANCIAL_PAYLOAD_KEYS = [
     "analysis_years",
     "owner_discount_rate_fraction",
@@ -133,6 +140,7 @@ def build_vietnam_case(case_config):
             dppa_inputs,
             rate_vintage_year,
             rate_vintage_source,
+            loads_kw,
         ),
     }
 
@@ -288,7 +296,7 @@ def _resolve_fmp_path(fmp_path):
 
 
 def _assumptions(case_config, financial, technologies, esco_contract, tariff_config, dppa_inputs,
-                  rate_vintage_year=None, rate_vintage_source=None):
+                  rate_vintage_year=None, rate_vintage_source=None, loads_kw=None):
     if esco_contract.get("esco_energy_discount_fraction") is None:
         raise ValueError("esco_contract.esco_energy_discount_fraction is required.")
 
@@ -336,6 +344,18 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         dppa_vintage_year, dppa_vintage = dppa_regulatory_for_year(tariff_config["year"])
         assumptions["dppa_regulatory_vintage_year"] = dppa_vintage_year
         assumptions["dppa_regulatory_source"] = dppa_vintage["source"]
+    if tariff_config.get("two_component_pilot_enabled"):
+        # Disclose the pilot's official eligibility signal (MOIT: production
+        # customers averaging >=200,000 kWh/month at >=22kV). Selection into
+        # the pilot is administrative, so ineligibility is disclosed, not
+        # raised as an error.
+        avg_monthly_kwh = round(sum(loads_kw) / 12, 1)
+        voltage_key = _normalize_voltage_level(tariff_config["voltage_level"])
+        assumptions["two_component_avg_monthly_kwh"] = avg_monthly_kwh
+        assumptions["two_component_eligible"] = (
+            avg_monthly_kwh >= TWO_COMPONENT_ELIGIBLE_AVG_MONTHLY_KWH
+            and voltage_key in TWO_COMPONENT_ELIGIBLE_VOLTAGE_TIERS
+        )
     return assumptions
 
 
