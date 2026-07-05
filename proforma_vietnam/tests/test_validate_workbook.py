@@ -15,6 +15,7 @@ from proforma_vietnam.tests.test_audit_sheets import (
     ESCO_ASSUMPTIONS,
     _dppa_result,
     _esco_result,
+    _esco_surplus_result,
 )
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
@@ -98,6 +99,20 @@ class ExcelRecalcValidationTests(unittest.TestCase):
         self.assertGreaterEqual(result["pass_count"], 1)
         self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
         self.assertTrue(result["file"].endswith("esco.xlsx"))
+
+    def test_surplus_export_esco_fixture_workbook_passes(self):
+        # Decree 243/2026 surplus-export line must tie out in Excel: the live
+        # surplus revenue formula has to reproduce the engine's number so the
+        # per-year CFADS/equity/CIT checks stay PASS.
+        workbook = build_vietnam_esco_workbook(
+            _esco_surplus_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "esco_surplus.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
 
     def test_dppa_fixture_workbook_passes(self):
         cash_flow_result, dppa_inputs = _dppa_result()

@@ -168,6 +168,7 @@ def cash_flow_overrides_from_assumptions(assumptions):
         "demand_savings_esco_share": "esco_demand_savings_share",
         "grid_charging_enabled": "grid_charging_enabled",
         "dppa": "dppa_inputs",
+        "surplus_export": "surplus_export",
     }
     return {
         target: assumptions[source]

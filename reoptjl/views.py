@@ -502,6 +502,17 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         assumptions["dppa"] = dppa_inputs
         cash_flow_overrides["dppa_inputs"] = dppa_inputs
 
+    raw_surplus_config = request.GET.get("surplus_config") or request.POST.get("surplus_config")
+    if raw_surplus_config is not None:
+        try:
+            surplus_inputs = json.loads(raw_surplus_config)
+        except (ValueError, TypeError):
+            raise ValueError("surplus_config must be a valid JSON document.")
+        if not isinstance(surplus_inputs, dict):
+            raise ValueError("surplus_config must encode a JSON object.")
+        assumptions["surplus_export"] = surplus_inputs
+        cash_flow_overrides["surplus_export"] = surplus_inputs
+
     return assumptions, cash_flow_overrides
 
 

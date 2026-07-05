@@ -646,6 +646,122 @@ class VietnamCaseBuilderTests(TestCase):
 
         self.assertIn("dppa.type", str(context.exception))
 
+    def test_surplus_export_block_absent_when_not_configured(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertNotIn("surplus_export", case["assumptions"])
+
+    def test_surplus_export_block_round_trips_into_assumptions(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "surplus_export": {
+                    "enabled": True,
+                    "region": "south",
+                    "cap_fraction": 0.5,
+                    "price_escalation_rate": 0.03,
+                },
+            }
+        )
+
+        surplus = case["assumptions"]["surplus_export"]
+        self.assertEqual(surplus["enabled"], True)
+        self.assertEqual(surplus["region"], "south")
+        self.assertEqual(surplus["cap_fraction"], 0.5)
+        self.assertEqual(surplus["price_escalation_rate"], 0.03)
+
+    def test_surplus_export_rejects_unknown_keys(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "surplus_export": {"enabled": True, "region": "south", "bogus": 1},
+                }
+            )
+
+        self.assertIn("bogus", str(context.exception))
+
+    def test_surplus_export_rejects_unknown_region(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "surplus_export": {"enabled": True, "region": "east"},
+                }
+            )
+
+        self.assertIn("region", str(context.exception).lower())
+
+    def test_surplus_export_requires_region_or_price_when_enabled(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError):
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "surplus_export": {"enabled": True},
+                }
+            )
+
+    def test_surplus_export_rejects_non_positive_price_and_cap(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        for bad in ({"enabled": True, "price_vnd_per_kwh": 0.0},
+                    {"enabled": True, "region": "south", "cap_fraction": -0.1}):
+            with self.assertRaises(ValueError):
+                build_vietnam_case(
+                    {
+                        "site": {"latitude": 10.8231, "longitude": 106.6297},
+                        "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                        "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                        "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                        "surplus_export": bad,
+                    }
+                )
+
+    def test_surplus_export_disabled_block_skips_region_validation(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        # A disabled block is carried through untouched for round-tripping.
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "surplus_export": {"enabled": False},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["surplus_export"], {"enabled": False})
+
     def test_requires_esco_energy_discount_for_report_download(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

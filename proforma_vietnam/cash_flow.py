@@ -61,11 +61,33 @@ def calculate_vietnam_esco_cash_flow(
     dppa_settlement=None,
     exchange_rate_vnd_per_usd=None,
     cit_regime=None,
+    surplus_export_kwh_year1=None,
+    surplus_export_price_usd_per_kwh=0.0,
+    surplus_price_escalation_rate=None,
+    surplus_cap_fraction=None,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
 
     structure = resolve_structure(dppa_settlement)
+
+    # Decree 243/2026 rooftop surplus-export revenue (ESCO only). Primitives are
+    # pre-resolved by esco_pro_forma (year-1 sold kWh already capped, USD price).
+    # None means disabled — the surplus keys and derivation block are omitted so
+    # existing cases stay byte-for-byte unchanged.
+    surplus_enabled = surplus_export_kwh_year1 is not None
+    if surplus_enabled:
+        if structure == DPPA:
+            # Under DPPA the export energy is already monetized at FMP; booking a
+            # surplus line too would double-count it.
+            raise ValueError(
+                "surplus export cannot be combined with a DPPA settlement "
+                "(export energy is already monetized at FMP)."
+            )
+        if surplus_price_escalation_rate is None:
+            # The reference price re-sets to the prior-year market average
+            # annually; EVN energy escalation is the documented proxy for drift.
+            surplus_price_escalation_rate = evn_energy_escalation_rate
     cit_regime = _resolve_cit_regime(cit_regime, structure)
     replacement_costs_by_year = replacement_costs_by_year or []
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
@@ -137,10 +159,25 @@ def calculate_vietnam_esco_cash_flow(
         if dppa_year is not None:
             esco_energy_revenue_vnd = dppa_year["generator_revenue_vnd"]
 
+        # Surplus volume degrades with PV output; the cap is recomputed on the
+        # degraded output upstream, so the year-1 sold kWh degrades in lockstep.
+        # The price escalates independently (annual market re-set proxy).
+        surplus_export_kwh = 0.0
+        surplus_export_revenue_vnd = 0.0
+        if surplus_enabled:
+            surplus_export_kwh = surplus_export_kwh_year1 * degradation_multiplier
+            surplus_price_multiplier = (1 + surplus_price_escalation_rate) ** year_index
+            surplus_export_revenue_vnd = (
+                surplus_export_kwh
+                * surplus_export_price_usd_per_kwh
+                * surplus_price_multiplier
+            )
+
         esco_revenue_vnd = (
             esco_energy_revenue_vnd
             + esco_demand_revenue_vnd
             + esco_grid_arbitrage_revenue_vnd
+            + surplus_export_revenue_vnd
         )
         interest_vnd = debt_schedule[year_index]["interest_vnd"]
         taxable_income_vnd = (
@@ -164,6 +201,9 @@ def calculate_vietnam_esco_cash_flow(
             "depreciation_vnd": depreciation_by_year[year_index],
             "interest_vnd": interest_vnd,
         }
+        if surplus_enabled:
+            row["surplus_export_kwh"] = surplus_export_kwh
+            row["surplus_export_revenue_vnd"] = surplus_export_revenue_vnd
         if dppa_year is not None:
             row.update(dppa_year)
         preliminary_rows.append(row)
@@ -339,6 +379,16 @@ def calculate_vietnam_esco_cash_flow(
     if preferential_rate is not None:
         derivation["cit"]["preferential_rate"] = preferential_rate
         derivation["cit"]["preferential_years"] = preferential_years
+    if surplus_enabled:
+        # Self-describing surplus config so the audit sheet can rebuild the
+        # revenue row from named cells (year-1 sold kWh, USD price, escalation,
+        # cap disclosure).
+        derivation["surplus_export"] = {
+            "sold_kwh_year1": surplus_export_kwh_year1,
+            "price_usd_per_kwh": surplus_export_price_usd_per_kwh,
+            "price_escalation_rate": surplus_price_escalation_rate,
+            "cap_fraction": surplus_cap_fraction,
+        }
     if dppa_settlement is not None:
         year_one = dppa_settlement["year_one"]
         derivation["dppa_year_one_usd"] = {

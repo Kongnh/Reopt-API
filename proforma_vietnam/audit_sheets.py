@@ -298,6 +298,30 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
             entry("FMP / CFMP price series", dppa.get("fmp_series_path"),
                   source="case.json dppa.fmp_series_path (8760-hour VND/kWh)")
 
+    surplus = d.get("surplus_export")
+    if surplus:
+        # Decree 243/2026 rooftop surplus-export (ESCO only). Gated on the engine
+        # derivation so disabled cases carry no surplus names or rows.
+        section("Surplus Export (Decree 243/2026)")
+        entry("Year-1 surplus sold to EVN", surplus.get("sold_kwh_year1"),
+              unit="kWh/yr",
+              source="min(PV grid export + curtailed, cap × PV output)",
+              name="SURPLUS_KWH_Y1", fmt=FMT_AMOUNT)
+        entry("Surplus export price", surplus.get("price_usd_per_kwh"),
+              unit="USD/kWh",
+              source="Decree 243 market price, capped at Decision 988 regional "
+                     "ceiling, at contract FX",
+              name="SURPLUS_PRICE", fmt="#,##0.00000")
+        entry("Surplus price escalation", surplus.get("price_escalation_rate"),
+              unit="per year",
+              source="case.json surplus_export.price_escalation_rate "
+                     "(default: EVN energy escalation)",
+              name="SURPLUS_ESC", fmt=FMT_PERCENT)
+        entry("Surplus export cap", surplus.get("cap_fraction"),
+              unit="of PV output",
+              source="Decree 243/2026 (50%; >50% negotiable to 2030)",
+              name="SURPLUS_CAP", fmt=FMT_PERCENT)
+
     section("Financing")
     entry("Debt fraction", get("debt_fraction"), unit="of total capex",
           source="vietnam_defaults.json / case.json financial.debt_fraction",
@@ -676,10 +700,26 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         r_arb_rev = w.line(
             "arb_rev", "Grid arbitrage revenue", "USD",
             formula=lambda y, c: f"=BASE_GRID_ARB*{c}{r_fac_energy}")
-        r_revenue = w.line(
-            "revenue", "Total developer revenue", "USD",
-            formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}",
-            bold=True)
+        surplus = d.get("surplus_export")
+        if surplus:
+            # Volume degrades with PV output (r_fac_deg); the price escalates
+            # independently (annual market re-set proxy). Matches the engine's
+            # surplus_export_revenue exactly so the tie-out holds.
+            r_surplus = w.line(
+                "surplus_rev", "Surplus export revenue (Decree 243)", "USD",
+                formula=lambda y, c:
+                    f"=SURPLUS_KWH_Y1*{c}{r_fac_deg}*SURPLUS_PRICE"
+                    f"*(1+SURPLUS_ESC)^({year_ref(c)}-1)")
+            r_revenue = w.line(
+                "revenue", "Total developer revenue", "USD",
+                formula=lambda y, c:
+                    f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}+{c}{r_surplus}",
+                bold=True)
+        else:
+            r_revenue = w.line(
+                "revenue", "Total developer revenue", "USD",
+                formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}",
+                bold=True)
     w.skip()
 
     # --- operating costs ----------------------------------------------------

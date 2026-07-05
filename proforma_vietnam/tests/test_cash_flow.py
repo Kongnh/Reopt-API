@@ -572,6 +572,184 @@ class CitRegimeTests(TestCase):
         self.assertEqual(cit["preferential_years"], 15)
 
 
+class SurplusExportTests(TestCase):
+    """Decree 243/2026 rooftop surplus-export revenue line (ESCO only).
+
+    cash_flow receives pre-resolved primitives (year-1 sold kWh, USD price,
+    escalation rate); the cap and price resolution live in esco_pro_forma.
+    """
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[],
+            evn_energy_rates_vnd_per_kwh=[],
+            bau_evn_bill_vnd=1000000,
+            optimized_evn_bill_vnd=700000,
+            bau_demand_charge_vnd=0,
+            optimized_demand_charge_vnd=0,
+            pv_capex_vnd=0,
+            bess_capex_vnd=0,
+            annual_om_vnd=0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            debt_fraction=0,
+            project_years=2,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_disabled_surplus_export_leaves_outputs_byte_identical(self):
+        base = self._run()
+        # Passing the sentinel explicitly must be indistinguishable from omitting it.
+        disabled = self._run(surplus_export_kwh_year1=None)
+
+        self.assertEqual(base["annual_cash_flows"], disabled["annual_cash_flows"])
+        self.assertEqual(base["summary"], disabled["summary"])
+        self.assertEqual(base["derivation"], disabled["derivation"])
+        # No surplus keys or derivation block leak when disabled.
+        self.assertNotIn("surplus_export_kwh", base["annual_cash_flows"][0])
+        self.assertNotIn("surplus_export_revenue_vnd", base["annual_cash_flows"][0])
+        self.assertNotIn("surplus_export", base["derivation"])
+
+    def test_surplus_revenue_added_to_esco_revenue_when_enabled(self):
+        result = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+        )
+
+        row = result["annual_cash_flows"][0]
+        self.assertEqual(row["surplus_export_kwh"], 1000)
+        self.assertEqual(row["surplus_export_revenue_vnd"], 2000.0)
+        # Surplus revenue accrues to the developer's ESCO revenue aggregate.
+        self.assertEqual(row["esco_revenue_vnd"], 2000.0)
+
+    def test_surplus_export_does_not_contaminate_offtaker_cost(self):
+        without = self._run()
+        with_surplus = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+        )
+
+        # Surplus goes to EVN, not the factory: offtaker cost/savings unchanged.
+        self.assertEqual(
+            with_surplus["annual_cash_flows"][0]["offtaker_post_project_cost_vnd"],
+            without["annual_cash_flows"][0]["offtaker_post_project_cost_vnd"],
+        )
+        self.assertEqual(
+            with_surplus["annual_cash_flows"][0]["offtaker_savings_vnd"],
+            without["annual_cash_flows"][0]["offtaker_savings_vnd"],
+        )
+
+    def test_surplus_volume_degrades_with_pv_degradation(self):
+        result = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+            pv_degradation_rate=0.01,
+        )
+
+        rows = result["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["surplus_export_kwh"], 1000.0)
+        self.assertAlmostEqual(rows[1]["surplus_export_kwh"], 990.0)
+        self.assertAlmostEqual(rows[1]["surplus_export_revenue_vnd"], 990.0 * 2.0)
+
+    def test_surplus_price_escalates_at_given_rate(self):
+        result = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+            surplus_price_escalation_rate=0.04,
+        )
+
+        rows = result["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["surplus_export_revenue_vnd"], 2000.0)
+        self.assertAlmostEqual(rows[1]["surplus_export_revenue_vnd"], 2000.0 * 1.04)
+
+    def test_surplus_price_escalation_defaults_to_evn_energy_escalation(self):
+        result = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+            evn_energy_escalation_rate=0.04,
+        )
+
+        rows = result["annual_cash_flows"]
+        self.assertAlmostEqual(rows[1]["surplus_export_revenue_vnd"], 2000.0 * 1.04)
+
+    def test_surplus_revenue_flows_to_equity_cash_flow_and_cit(self):
+        without = self._run(
+            project_years=25,
+            pv_capex_vnd=2000000,
+            annual_om_vnd=100000,
+        )
+        with_surplus = self._run(
+            project_years=25,
+            pv_capex_vnd=2000000,
+            annual_om_vnd=100000,
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2000.0,
+        )
+
+        # Extra developer revenue lifts CFADS, equity cash flow and, once out of
+        # the holiday, CIT — proving surplus feeds the taxable base.
+        base_row = without["annual_cash_flows"][14]
+        surplus_row = with_surplus["annual_cash_flows"][14]
+        self.assertGreater(
+            surplus_row["cash_available_for_debt_service_vnd"],
+            base_row["cash_available_for_debt_service_vnd"],
+        )
+        self.assertGreater(
+            surplus_row["equity_cash_flow_vnd"], base_row["equity_cash_flow_vnd"]
+        )
+        self.assertGreater(surplus_row["cit_vnd"], base_row["cit_vnd"])
+
+    def test_surplus_export_rejected_under_dppa(self):
+        with self.assertRaises(ValueError):
+            self._run(
+                surplus_export_kwh_year1=1000,
+                surplus_export_price_usd_per_kwh=2.0,
+                dppa_settlement={
+                    "type": "grid_dppa_cfd",
+                    "esco_energy_revenue_vnd": 0.0,
+                    "year_one": {
+                        "c_dn_vnd": 100.0,
+                        "c_dppa_vnd": 25.0,
+                        "c_cl_vnd": 10.0,
+                        "c_bl_vnd": 40.0,
+                        "cfd_strike_revenue_vnd": 0.0,
+                        "cfd_fmp_offset_vnd": 0.0,
+                        "generator_fmp_revenue_vnd": 200.0,
+                    },
+                    "escalation": {"fee_escalation_rate": 0.0, "cfd_strike_escalation_rate": 0.0},
+                    "hourly_breakout": [],
+                    "monthly_breakout": [],
+                },
+            )
+
+    def test_derivation_carries_surplus_block_when_enabled(self):
+        result = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+            surplus_price_escalation_rate=0.03,
+            surplus_cap_fraction=0.5,
+        )
+
+        surplus = result["derivation"]["surplus_export"]
+        self.assertEqual(surplus["sold_kwh_year1"], 1000)
+        self.assertEqual(surplus["price_usd_per_kwh"], 2.0)
+        self.assertEqual(surplus["price_escalation_rate"], 0.03)
+        self.assertEqual(surplus["cap_fraction"], 0.5)
+
+    def test_surplus_revenue_restated_to_vnd_with_exchange_rate(self):
+        result = self._run(
+            surplus_export_kwh_year1=1000,
+            surplus_export_price_usd_per_kwh=2.0,
+            exchange_rate_vnd_per_usd=25000,
+        )
+
+        row = result["annual_cash_flows"][0]
+        # _usd holds the computed (model-currency) value, _vnd is restated at FX.
+        self.assertEqual(row["surplus_export_revenue_usd"], 2000.0)
+        self.assertEqual(row["surplus_export_revenue_vnd"], 2000.0 * 25000)
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):

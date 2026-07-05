@@ -82,6 +82,15 @@ def _dppa_result():
     ), dppa_inputs
 
 
+def _esco_surplus_result():
+    return _esco_result(
+        surplus_export_kwh_year1=500000.0,
+        surplus_export_price_usd_per_kwh=0.04,
+        surplus_price_escalation_rate=0.04,
+        surplus_cap_fraction=0.5,
+    )
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -200,6 +209,50 @@ class ProFormaAuditSheetTests(TestCase):
         self.assertIn("CfD net settlement (to generator)", labels)
         self.assertIn("C_BL retail shortfall (incl. degradation repurchase)", labels)
         self.assertNotIn("ESCO energy revenue (discount-to-EVN)", labels)
+
+
+class SurplusExportAuditTests(TestCase):
+
+    def test_disabled_surplus_leaves_no_named_cells_or_rows(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("SURPLUS_KWH_Y1", "SURPLUS_PRICE", "SURPLUS_ESC", "SURPLUS_CAP"):
+            self.assertNotIn(name, workbook.defined_names, name)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = [
+            sheet.cell(row=row, column=1).value for row in range(1, sheet.max_row + 1)
+        ]
+        self.assertNotIn("Surplus export revenue (Decree 243)", labels)
+
+    def test_enabled_surplus_defines_named_cells(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_surplus_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+
+        for name in ("SURPLUS_KWH_Y1", "SURPLUS_PRICE", "SURPLUS_ESC", "SURPLUS_CAP"):
+            self.assertIn(name, workbook.defined_names, name)
+
+    def test_enabled_surplus_adds_live_formula_revenue_row(self):
+        result = _esco_surplus_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        labels = {
+            sheet.cell(row=row, column=1).value: row
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value
+        }
+        surplus_row = labels["Surplus export revenue (Decree 243)"]
+        year1_formula = sheet.cell(row=surplus_row, column=4).value
+        self.assertIn("SURPLUS_KWH_Y1", year1_formula)
+        self.assertIn("SURPLUS_PRICE", year1_formula)
+        self.assertIn("SURPLUS_ESC", year1_formula)
+
+        # The total developer revenue row must fold in the surplus line so it
+        # propagates to EBITDA/CFADS/tax. Year-1 formulas reference column D.
+        revenue_row = labels["Total developer revenue"]
+        revenue_formula = sheet.cell(row=revenue_row, column=4).value
+        self.assertIn(f"D{surplus_row}", revenue_formula)
 
 
 class CitRegimeAuditTests(TestCase):

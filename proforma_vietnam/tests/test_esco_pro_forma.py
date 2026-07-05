@@ -270,6 +270,177 @@ class VietnamEscoProFormaAdapterTests(TestCase):
         )
 
 
+class VietnamSurplusExportAdapterTests(TestCase):
+    """Decree 243/2026 surplus-export extraction, cap and price resolution."""
+
+    def _results_with_surplus(self):
+        # PV: 1000 to load, 400 to grid, 200 curtailed, 400 to storage per hour
+        # over 2 hours -> total output 2000/h; surplus (grid + curtailed) 600/h.
+        results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        results["outputs"]["PV"] = {
+            "size_kw": 100,
+            "installed_cost_per_kw": 1000,
+            "electric_to_load_series_kw": [1000, 1000],
+            "electric_to_grid_series_kw": [400, 400],
+            "electric_curtailed_series_kw": [200, 200],
+            "electric_to_storage_series_kw": [400, 400],
+        }
+        return results
+
+    def test_surplus_not_extracted_when_config_absent(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+        )
+        self.assertNotIn("surplus_export_kwh", result["annual_cash_flows"][0])
+        self.assertNotIn("surplus_export", result["derivation"])
+
+    def test_surplus_not_extracted_when_disabled(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": False, "region": "south"},
+        )
+        self.assertNotIn("surplus_export_kwh", result["annual_cash_flows"][0])
+
+    def test_surplus_cap_does_not_bind_below_fifty_percent(self):
+        # Surplus 1200 kWh vs 50% of 4000 total output = 2000 cap -> uncapped.
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": True, "region": "south"},
+        )
+        self.assertAlmostEqual(
+            result["derivation"]["surplus_export"]["sold_kwh_year1"], 1200.0
+        )
+
+    def test_surplus_cap_binds_at_fifty_percent_of_output(self):
+        # Make surplus exceed the 50% cap: grid 900 + curtailed 900 per hour ->
+        # surplus 3600; total output = 1000(load)+900+900 = 2800/h -> 5600 total;
+        # cap = 0.5 * 5600 = 2800 < 3600 surplus -> sold capped to 2800.
+        results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        results["outputs"]["PV"] = {
+            "size_kw": 100,
+            "installed_cost_per_kw": 1000,
+            "electric_to_load_series_kw": [1000, 1000],
+            "electric_to_grid_series_kw": [900, 900],
+            "electric_curtailed_series_kw": [900, 900],
+        }
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results,
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": True, "region": "south"},
+        )
+        self.assertAlmostEqual(
+            result["derivation"]["surplus_export"]["sold_kwh_year1"], 2800.0
+        )
+
+    def test_custom_cap_fraction_is_applied(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": True, "region": "south", "cap_fraction": 0.25},
+        )
+        # cap = 0.25 * 4000 = 1000 < surplus 1200 -> sold capped to 1000.
+        self.assertAlmostEqual(
+            result["derivation"]["surplus_export"]["sold_kwh_year1"], 1000.0
+        )
+
+    def test_price_resolved_from_region_default_and_converted_to_usd(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": True, "region": "south"},
+        )
+        # South ceiling 1012.0 VND/kWh < prior-year avg 1426.6 -> price 1012.0 VND.
+        self.assertAlmostEqual(
+            result["derivation"]["surplus_export"]["price_usd_per_kwh"],
+            1012.0 / 25000,
+        )
+
+    def test_explicit_price_overrides_region_default(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": True, "price_vnd_per_kwh": 1300.0},
+        )
+        self.assertAlmostEqual(
+            result["derivation"]["surplus_export"]["price_usd_per_kwh"],
+            1300.0 / 25000,
+        )
+
+    def test_region_required_when_price_not_explicit(self):
+        with self.assertRaises(ValueError):
+            calculate_esco_pro_forma_from_reopt_results(
+                self._results_with_surplus(),
+                esco_energy_discount_fraction=0.9,
+                project_years=1,
+                exchange_rate_vnd_per_usd=25000,
+                surplus_export={"enabled": True},
+            )
+
+    def test_surplus_revenue_appears_in_annual_rows(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results_with_surplus(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            surplus_export={"enabled": True, "region": "south"},
+        )
+        row = result["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["surplus_export_kwh"], 1200.0)
+        self.assertAlmostEqual(
+            row["surplus_export_revenue_usd"], 1200.0 * (1012.0 / 25000)
+        )
+
+    def test_enabled_surplus_rejected_under_dppa(self):
+        results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        results["outputs"]["ElectricLoad"] = {"load_series_kw": [10, 10]}
+        results["outputs"]["PV"] = {
+            "size_kw": 100,
+            "installed_cost_per_kw": 1000,
+            "electric_to_load_series_kw": [6, 6],
+            "electric_to_grid_series_kw": [1, 1],
+            "electric_curtailed_series_kw": [0, 0],
+        }
+        dppa_inputs = {
+            "type": "grid_dppa_cfd",
+            "fmp_series_vnd_per_kwh": [1500.0, 1500.0],
+            "cfd_strike_per_kwh_vnd": 1700.0,
+            "cfd_contract_volume_kwh_per_hour": 1.0,
+            "transmission_loss_factor_k": 1.026,
+            "distribution_loss_factor_kpp": 1.027263,
+            "allocation_fraction_delta": 1.0,
+            "c_dppa_service_fee_vnd_per_kwh": 360.0,
+            "c_cl_settlement_adder_vnd_per_kwh": 163.0,
+            "cfd_strike_escalation_rate": 0.0,
+            "fee_escalation_rate": 0.0,
+        }
+        with self.assertRaises(ValueError):
+            calculate_esco_pro_forma_from_reopt_results(
+                results,
+                esco_energy_discount_fraction=0.9,
+                project_years=1,
+                exchange_rate_vnd_per_usd=25000,
+                dppa_inputs=dppa_inputs,
+                surplus_export={"enabled": True, "region": "south"},
+            )
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

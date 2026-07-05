@@ -6,6 +6,9 @@ from proforma_vietnam.structures import DPPA, ESCO
 
 
 def _esco_result():
+    # Surplus export enabled so the ESCO-scoped surplus lines the schema now
+    # presents (surplus_export_kwh / surplus_export_revenue) exist in the
+    # compute output the single-source-of-truth test checks against.
     return calculate_vietnam_esco_cash_flow(
         project_served_pv_kwh=[1000, 1000],
         evn_energy_rates_vnd_per_kwh=[2000, 2000],
@@ -19,6 +22,8 @@ def _esco_result():
         esco_energy_discount_fraction=0.9,
         debt_fraction=0.7,
         project_years=2,
+        surplus_export_kwh_year1=5_000,
+        surplus_export_price_usd_per_kwh=1_000,
     )
 
 
@@ -114,3 +119,13 @@ class StructureFilteringTests(TestCase):
         dppa_keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DPPA)}
         self.assertIn("generator_revenue_usd", dppa_keys)
         self.assertIn("dppa_offtaker_cost_usd", dppa_keys)
+
+    def test_surplus_export_lines_appear_under_esco_only(self):
+        esco_keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, ESCO)}
+        self.assertIn("surplus_export_kwh", esco_keys)
+        self.assertIn("surplus_export_revenue_usd", esco_keys)
+
+    def test_surplus_export_lines_are_hidden_under_dppa(self):
+        dppa_keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DPPA)}
+        self.assertNotIn("surplus_export_kwh", dppa_keys)
+        self.assertNotIn("surplus_export_revenue_usd", dppa_keys)

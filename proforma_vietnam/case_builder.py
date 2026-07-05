@@ -2,7 +2,11 @@ import csv
 from pathlib import Path
 
 from proforma_vietnam import pvwatts_client
-from proforma_vietnam.defaults import FINANCIAL_DEFAULTS, dppa_regulatory_for_year
+from proforma_vietnam.defaults import (
+    FINANCIAL_DEFAULTS,
+    SURPLUS_EXPORT_DEFAULTS,
+    dppa_regulatory_for_year,
+)
 from proforma_vietnam.dppa_settlement import (
     DEFAULT_ALLOCATION_FRACTION_DELTA,
     DEFAULT_CFD_STRIKE_ESCALATION_RATE,
@@ -32,6 +36,12 @@ DEFAULT_EXCHANGE_RATE_VND_PER_USD = FINANCIAL_DEFAULTS["exchange_rate_vnd_per_us
 
 DPPA_VOLTAGE_ELIGIBLE_GRID_CFD = {"110kv_and_above", "22_to_110kv"}
 DEFAULT_FMP_SERIES_PATH = "DPPA DOC/fmp_cfmp_vn.json"
+
+# Decree 243/2026 rooftop surplus-export block (ESCO only). Optional; when a
+# case carries it, esco_pro_forma monetizes the surplus at report time.
+SURPLUS_EXPORT_ALLOWED_KEYS = {
+    "enabled", "price_vnd_per_kwh", "region", "cap_fraction", "price_escalation_rate",
+}
 
 # Two-component tariff pilot eligibility (MOIT phased rollout; official pilot
 # billing from 2026-07 for selected production customers). Selection is
@@ -90,6 +100,7 @@ def build_vietnam_case(case_config):
     esco_contract = case_config.get("esco_contract", {})
     voltage_key = _normalize_voltage_level(tariff_config["voltage_level"])
     dppa_inputs = _dppa_inputs(case_config.get("dppa"), voltage_key, tariff_config)
+    surplus_export = _surplus_export_config(case_config.get("surplus_export"))
 
     year = load_config.get("year") or tariff_config.get("year")
     loads_kw = _read_8760_load_csv(load_config["path"])
@@ -141,6 +152,7 @@ def build_vietnam_case(case_config):
             rate_vintage_year,
             rate_vintage_source,
             loads_kw,
+            surplus_export,
         ),
     }
 
@@ -295,6 +307,45 @@ def _dppa_inputs(dppa_config, voltage_key, tariff_config):
     }
 
 
+def _surplus_export_config(surplus_config):
+    """Validate the optional Decree 243/2026 surplus-export block.
+
+    Unknown keys are rejected; when enabled, a region (validated against the
+    Decision 988 regional ceilings) or an explicit VND/kWh price is required,
+    and price/cap must be positive. A disabled block is carried through as-is so
+    rebuild_report round-trips it. Returns the block (or None when absent).
+    """
+    if not surplus_config:
+        return None
+    unknown = set(surplus_config) - SURPLUS_EXPORT_ALLOWED_KEYS
+    if unknown:
+        raise ValueError(
+            "Unknown surplus_export keys: {}.".format(sorted(unknown))
+        )
+    if not surplus_config.get("enabled"):
+        return dict(surplus_config)
+
+    price = surplus_config.get("price_vnd_per_kwh")
+    region = surplus_config.get("region")
+    if price is None and not region:
+        raise ValueError(
+            "surplus_export requires 'region' or 'price_vnd_per_kwh' when enabled."
+        )
+    ceilings = SURPLUS_EXPORT_DEFAULTS["price_ceiling_vnd_per_kwh_by_region"]
+    if region is not None and str(region).lower() not in ceilings:
+        raise ValueError(
+            "Unknown surplus_export region '{}'; expected one of {}.".format(
+                region, sorted(ceilings)
+            )
+        )
+    if price is not None and price <= 0:
+        raise ValueError("surplus_export.price_vnd_per_kwh must be positive.")
+    cap = surplus_config.get("cap_fraction")
+    if cap is not None and cap <= 0:
+        raise ValueError("surplus_export.cap_fraction must be positive.")
+    return dict(surplus_config)
+
+
 def _resolve_fmp_path(fmp_path):
     path = Path(fmp_path)
     if path.is_absolute():
@@ -304,7 +355,8 @@ def _resolve_fmp_path(fmp_path):
 
 
 def _assumptions(case_config, financial, technologies, esco_contract, tariff_config, dppa_inputs,
-                  rate_vintage_year=None, rate_vintage_source=None, loads_kw=None):
+                  rate_vintage_year=None, rate_vintage_source=None, loads_kw=None,
+                  surplus_export=None):
     if esco_contract.get("esco_energy_discount_fraction") is None:
         raise ValueError("esco_contract.esco_energy_discount_fraction is required.")
 
@@ -343,6 +395,10 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         for key, value in assumptions.items()
         if value is not None
     }
+    if surplus_export is not None:
+        # ESCO-only revenue line; carried verbatim so rebuild_report round-trips
+        # it into the esco_pro_forma surplus_export config.
+        assumptions["surplus_export"] = surplus_export
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         assumptions["dppa"] = dppa_inputs
         # Disclose which DPPA regulatory vintage (loss factors, fee adders)

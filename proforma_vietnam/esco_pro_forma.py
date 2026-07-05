@@ -1,4 +1,8 @@
 from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
+from proforma_vietnam.defaults import (
+    SURPLUS_EXPORT_DEFAULTS,
+    surplus_export_price_vnd_per_kwh,
+)
 from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_NONE,
@@ -18,6 +22,7 @@ def calculate_esco_pro_forma_from_reopt_results(
         tariff_money_values_currency,
     )
     dppa_inputs = cash_flow_overrides.pop("dppa_inputs", None)
+    surplus_export = cash_flow_overrides.pop("surplus_export", None)
     battery_replacement_year = cash_flow_overrides.pop("battery_replacement_year", None)
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
@@ -137,12 +142,69 @@ def calculate_esco_pro_forma_from_reopt_results(
             )
         cash_flow_inputs["dppa_settlement"] = dppa_settlement
 
+    if surplus_export is not None and surplus_export.get("enabled"):
+        _apply_surplus_export(
+            cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd
+        )
+
     # The inputs above are normalized to USD; passing the FX rate through lets
     # the cash flow restate every _vnd key at the fixed contract rate instead
     # of aliasing USD values under VND labels.
     cash_flow_inputs.setdefault("exchange_rate_vnd_per_usd", exchange_rate_vnd_per_usd)
 
     return calculate_vietnam_esco_cash_flow(**cash_flow_inputs)
+
+
+def _apply_surplus_export(cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd):
+    """Resolve Decree 243/2026 surplus-export primitives into the cash flow.
+
+    Surplus = PV grid export + would-be-curtailed energy (the ESCO sells it to
+    EVN, mirroring the DPPA branch's pv_to_grid_effective treatment). The sold
+    quantity is capped at ``cap_fraction`` of total PV output; the price is the
+    explicit VND/kWh or the region's Decree 243 ceiling-capped market price,
+    converted to the model currency at the contract FX.
+    """
+    if "dppa_settlement" in cash_flow_inputs:
+        # Under DPPA the export energy is already monetized at FMP; a surplus
+        # line would double-count it.
+        raise ValueError(
+            "surplus export cannot be combined with a DPPA settlement "
+            "(export energy is already monetized at FMP)."
+        )
+
+    pv_to_load = _sum_series([pv.get("electric_to_load_series_kw", []) for pv in pv_outputs])
+    pv_to_grid = _sum_series([pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs])
+    pv_to_storage = _sum_series([pv.get("electric_to_storage_series_kw", []) for pv in pv_outputs])
+    pv_curtailed = _sum_series([pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs])
+
+    surplus_kwh = sum(pv_to_grid) + sum(pv_curtailed)
+    annual_pv_output_kwh = (
+        sum(pv_to_load) + sum(pv_to_grid) + sum(pv_to_storage) + sum(pv_curtailed)
+    )
+
+    cap_fraction = surplus_export.get("cap_fraction")
+    if cap_fraction is None:
+        cap_fraction = SURPLUS_EXPORT_DEFAULTS["cap_fraction_of_output"]
+    sold_kwh = min(surplus_kwh, cap_fraction * annual_pv_output_kwh)
+
+    price_vnd = surplus_export.get("price_vnd_per_kwh")
+    if price_vnd is None:
+        region = surplus_export.get("region")
+        if not region:
+            raise ValueError(
+                "surplus_export requires 'region' when 'price_vnd_per_kwh' is not given."
+            )
+        price_vnd = surplus_export_price_vnd_per_kwh(region)
+    # The price is a VND/kWh regulatory quantity; the cash flow runs in the
+    # contract-FX model currency, so convert like every other VND money input.
+    price_usd = (
+        price_vnd / exchange_rate_vnd_per_usd if exchange_rate_vnd_per_usd else price_vnd
+    )
+
+    cash_flow_inputs["surplus_export_kwh_year1"] = sold_kwh
+    cash_flow_inputs["surplus_export_price_usd_per_kwh"] = price_usd
+    cash_flow_inputs["surplus_price_escalation_rate"] = surplus_export.get("price_escalation_rate")
+    cash_flow_inputs["surplus_cap_fraction"] = cap_fraction
 
 
 def _convert_dppa_year_one_to_cash_flow_currency(dppa_settlement, exchange_rate_vnd_per_usd):

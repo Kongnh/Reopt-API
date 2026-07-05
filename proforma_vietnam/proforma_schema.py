@@ -16,7 +16,7 @@ formats are never repeated, only referenced.
 
 from dataclasses import dataclass, field
 
-from proforma_vietnam.structures import ALL_STRUCTURES, DPPA
+from proforma_vietnam.structures import ALL_STRUCTURES, DPPA, ESCO
 
 
 @dataclass(frozen=True)
@@ -36,6 +36,10 @@ _ROWS = [
     RowSpec("esco_energy_revenue", "ESCO Energy Revenue"),
     RowSpec("esco_demand_revenue", "ESCO Demand Revenue"),
     RowSpec("esco_grid_arbitrage_revenue", "ESCO Grid Arbitrage Revenue"),
+    # Decree 243/2026 rooftop surplus-export (ESCO only; under DPPA the export
+    # energy is already monetized at FMP).
+    RowSpec("surplus_export_kwh", "Surplus Export (kWh)", currency=False, applies_to=(ESCO,)),
+    RowSpec("surplus_export_revenue", "Surplus Export Revenue", applies_to=(ESCO,)),
     RowSpec("esco_revenue", "ESCO Revenue"),
     RowSpec("annual_om", "O&M"),
     RowSpec("replacement_cost", "Replacement Cost"),
@@ -82,6 +86,9 @@ CASH_FLOW_VIEW = [
     "esco_energy_revenue",
     "esco_demand_revenue",
     "esco_grid_arbitrage_revenue",
+    # ESCO-only surplus-export lines (hidden under DPPA):
+    "surplus_export_kwh",
+    "surplus_export_revenue",
     "esco_revenue",
     "annual_om",
     "replacement_cost",
