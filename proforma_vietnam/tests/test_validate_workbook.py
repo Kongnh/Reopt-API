@@ -21,6 +21,7 @@ from proforma_vietnam.tests.test_audit_sheets import (
     _esco_result,
     _esco_surplus_result,
     _physical_result,
+    _usd_debt_result,
 )
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
@@ -157,6 +158,21 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _construction_result(), assumptions=ESCO_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "construction_grace.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_usd_debt_fixture_workbook_passes(self):
+        # USD-denominated debt: the FX Sensitivity sheet's live min-DSCR column
+        # must reproduce the engine's decomposition ((CFADS_t/(1+d)^t)/DS_t) so
+        # the DSCR-vs-depreciation status stays PASS, and the base-case pro forma
+        # tie-out (identical to VND at the resolved rate) must stay PASS.
+        workbook = build_vietnam_esco_workbook(
+            _usd_debt_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "usd_debt.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)

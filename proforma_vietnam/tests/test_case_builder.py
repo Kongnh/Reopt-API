@@ -966,6 +966,27 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(overrides["construction_months"], 12)
         self.assertEqual(overrides["principal_grace_years"], 2)
 
+    def test_debt_currency_round_trips_like_the_other_financing_scalars(self):
+        # debt_currency travels the same allowlisted path as debt fraction /
+        # rate / term: into assumptions (never the REopt payload) and back out
+        # through the rebuild override mapping.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "financial": {"debt_currency": "USD"},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["debt_currency"], "USD")
+        self.assertNotIn("debt_currency", case["payload"]["Financial"])
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["debt_currency"], "USD")
+
     def test_direct_ownership_carries_options_into_assumptions(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

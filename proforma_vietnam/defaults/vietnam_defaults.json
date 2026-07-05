@@ -10,6 +10,7 @@
     "esco_grid_arbitrage_share": 1.00,
     "debt_fraction": 0.70,
     "debt_interest_rate": 0.085,
+    "usd_debt_interest_rate": 0.05,
     "debt_term_years": 10
   },
   "tax": {

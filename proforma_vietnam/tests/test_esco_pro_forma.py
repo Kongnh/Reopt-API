@@ -689,6 +689,33 @@ class ConstructionFinancingAdapterTests(TestCase):
         self.assertNotIn("construction", result["derivation"])
 
 
+class UsdDebtAdapterTests(TestCase):
+    """debt_currency rides the shared financing-override path straight through
+    to the cash flow, and defaults to VND (no derivation label)."""
+
+    def test_usd_debt_currency_flows_to_cash_flow_and_resolves_default_rate(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            debt_currency="USD",
+        )
+
+        self.assertEqual(result["derivation"]["debt_currency"], "USD")
+        self.assertAlmostEqual(
+            result["derivation"]["debt_interest_rate_fraction"], 0.05
+        )
+
+    def test_defaults_leave_derivation_without_debt_currency_label(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+        )
+
+        self.assertNotIn("debt_currency", result["derivation"])
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

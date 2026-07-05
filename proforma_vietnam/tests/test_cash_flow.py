@@ -1288,6 +1288,121 @@ class ConstructionAndGraceTests(TestCase):
         self.assertAlmostEqual(result["summary"]["cod_debt_balance_usd"], 729750.0)
 
 
+class UsdDebtTests(TestCase):
+    """USD-denominated debt option (default VND). The base case is mechanically
+    identical to VND debt except the interest-rate default; the FX exposure is
+    surfaced only on the FX-sensitivity block (see UsdDebtFxSensitivityTests).
+    """
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100000.0],
+            evn_energy_rates_vnd_per_kwh=[2.0],
+            bau_evn_bill_vnd=400000.0,
+            optimized_evn_bill_vnd=200000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=700000.0,
+            bess_capex_vnd=300000.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.70,
+            debt_term_years=10,
+            project_years=25,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_equal_rate_usd_and_vnd_produce_identical_base_case(self):
+        # Contract FX held flat: with an explicit identical rate the two
+        # currencies must run the debt schedule / IDC / DSCR / tax deduction
+        # byte-for-byte the same. Only the derivation carries the currency label.
+        vnd = self._run(debt_currency="VND", debt_interest_rate_fraction=0.07)
+        usd = self._run(debt_currency="USD", debt_interest_rate_fraction=0.07)
+
+        self.assertEqual(vnd["annual_cash_flows"], usd["annual_cash_flows"])
+        self.assertEqual(vnd["summary"], usd["summary"])
+        # The only base-case difference is the disclosed currency label.
+        self.assertNotIn("debt_currency", vnd["derivation"])
+        self.assertEqual(usd["derivation"]["debt_currency"], "USD")
+
+    def test_equal_rate_equivalence_holds_with_construction_and_grace(self):
+        # Task 4a interaction: IDC + grace run in USD exactly as in VND when the
+        # rate is pinned equal.
+        common = dict(
+            debt_interest_rate_fraction=0.07,
+            construction_months=12,
+            principal_grace_years=2,
+        )
+        vnd = self._run(debt_currency="VND", **common)
+        usd = self._run(debt_currency="USD", **common)
+
+        self.assertEqual(vnd["annual_cash_flows"], usd["annual_cash_flows"])
+        self.assertEqual(vnd["summary"], usd["summary"])
+
+    def test_usd_default_rate_resolves_to_versioned_default(self):
+        from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
+
+        usd = self._run(debt_currency="USD")
+        vnd = self._run(debt_currency="VND")
+
+        self.assertEqual(
+            usd["derivation"]["debt_interest_rate_fraction"],
+            FINANCIAL_DEFAULTS["usd_debt_interest_rate"],
+        )
+        self.assertEqual(
+            usd["derivation"]["debt_interest_rate_fraction"], 0.05
+        )
+        # VND is untouched at the existing 8.5% default.
+        self.assertEqual(
+            vnd["derivation"]["debt_interest_rate_fraction"],
+            FINANCIAL_DEFAULTS["debt_interest_rate"],
+        )
+
+    def test_explicit_rate_override_wins_regardless_of_currency(self):
+        usd = self._run(debt_currency="USD", debt_interest_rate_fraction=0.061)
+        vnd = self._run(debt_currency="VND", debt_interest_rate_fraction=0.061)
+
+        self.assertEqual(usd["derivation"]["debt_interest_rate_fraction"], 0.061)
+        self.assertEqual(vnd["derivation"]["debt_interest_rate_fraction"], 0.061)
+
+    def test_usd_idc_uses_resolved_usd_rate(self):
+        # Task 4a interaction: with the default USD rate (5%) the IDC rolls into
+        # the COD balance at that rate. capex 1,000,000 × 0.7 debt × 0.05 × 1yr /2.
+        usd = self._run(debt_currency="USD", construction_months=12)
+
+        construction = usd["derivation"]["construction"]
+        self.assertAlmostEqual(construction["idc_usd"], 700000.0 * 0.05 * 0.5)
+        self.assertAlmostEqual(
+            construction["cod_debt_balance_usd"], 700000.0 + 17500.0
+        )
+        # Grace pattern intact at the USD rate on the rolled-up balance.
+        usd_grace = self._run(
+            debt_currency="USD", construction_months=12, principal_grace_years=2
+        )
+        rows = usd_grace["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["principal_vnd"], 0.0)
+        self.assertAlmostEqual(rows[0]["interest_vnd"], 717500.0 * 0.05)
+        self.assertAlmostEqual(rows[1]["ending_debt_balance_vnd"], 717500.0)
+
+    def test_validation_rejects_unknown_or_non_str_currency(self):
+        for bad in ("EUR", "usd", "vnd", "", 5, None, True):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self._run(debt_currency=bad)
+
+    def test_default_currency_leaves_outputs_byte_identical(self):
+        base = self._run()
+        explicit = self._run(debt_currency="VND")
+
+        self.assertEqual(base["annual_cash_flows"], explicit["annual_cash_flows"])
+        self.assertEqual(base["summary"], explicit["summary"])
+        self.assertEqual(base["derivation"], explicit["derivation"])
+        # No currency key leaks on the default VND path.
+        self.assertNotIn("debt_currency", base["derivation"])
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):
@@ -1322,3 +1437,145 @@ class FxSensitivityTests(TestCase):
         self.assertEqual(irrs, sorted(irrs, reverse=True))
         npvs = [row["npv_usd"] for row in table]
         self.assertEqual(npvs, sorted(npvs, reverse=True))
+
+
+def _synthetic_fx_result(debt_currency):
+    """Two-year fixture with hand-chosen CFADS / debt service per year so the
+    FX decomposition and min-DSCR are verifiable by hand."""
+    rows = [
+        {
+            "cash_available_for_debt_service_usd": 60.0,
+            "debt_service_usd": 40.0,
+            "equity_cash_flow_usd": 20.0,
+            "dscr": 1.5,
+        },
+        {
+            "cash_available_for_debt_service_usd": 88.0,
+            "debt_service_usd": 40.0,
+            "equity_cash_flow_usd": 48.0,
+            "dscr": 2.2,
+        },
+    ]
+    derivation = {"owner_discount_rate_fraction": 0.10}
+    if debt_currency is not None:
+        derivation["debt_currency"] = debt_currency
+    return {
+        "annual_cash_flows": rows,
+        "summary": {"equity_investment_usd": 100.0},
+        "derivation": derivation,
+    }
+
+
+class UsdDebtFxSensitivityTests(TestCase):
+    """USD-debt FX exposure: revenue is VND-denominated and deflates by (1+d)^t,
+    but USD debt service is fixed, so DSCR erodes with depreciation. VND debt
+    keeps the whole-flow deflation and a depreciation-invariant DSCR.
+    """
+
+    def _engine(self, debt_currency, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100000],
+            evn_energy_rates_vnd_per_kwh=[0.10],
+            bau_evn_bill_vnd=20000,
+            optimized_evn_bill_vnd=12000,
+            bau_demand_charge_vnd=4000,
+            optimized_demand_charge_vnd=2000,
+            pv_capex_vnd=50000,
+            bess_capex_vnd=20000,
+            annual_om_vnd=1000,
+            esco_energy_discount_fraction=0.9,
+            debt_interest_rate_fraction=0.05,
+            project_years=25,
+            debt_currency=debt_currency,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_zero_depreciation_row_equals_base_case_for_both_currencies(self):
+        from proforma_vietnam.cash_flow import _irr, _npv, calculate_fx_sensitivity
+
+        for currency in ("VND", "USD", None):
+            result = _synthetic_fx_result(currency)
+            table = calculate_fx_sensitivity(result, vnd_depreciation_rates=(0.0,))
+            base = [-100.0, 20.0, 48.0]
+
+            self.assertEqual(table[0]["vnd_depreciation_rate"], 0.0)
+            self.assertAlmostEqual(table[0]["equity_irr_fraction"], _irr(base))
+            self.assertAlmostEqual(table[0]["npv_usd"], _npv(0.10, base))
+            # d=0 min DSCR is the base minimum for both currencies.
+            self.assertAlmostEqual(table[0]["min_dscr"], 1.5)
+
+    def test_usd_decomposition_and_min_dscr_hand_computed(self):
+        from proforma_vietnam.cash_flow import _irr, _npv, calculate_fx_sensitivity
+
+        result = _synthetic_fx_result("USD")
+        table = calculate_fx_sensitivity(result, vnd_depreciation_rates=(0.0, 0.10))
+
+        # USD debt service is fixed; VND revenue (CFADS) deflates by (1+d)^t.
+        expected = [-100.0, 60.0 / 1.1 - 40.0, 88.0 / 1.21 - 40.0]
+        self.assertAlmostEqual(table[1]["equity_irr_fraction"], _irr(expected))
+        self.assertAlmostEqual(table[1]["npv_usd"], _npv(0.10, expected))
+        # min DSCR = min over debt years of (CFADS_t/(1+d)^t)/debt_service_t.
+        self.assertAlmostEqual(
+            table[1]["min_dscr"],
+            min((60.0 / 1.1) / 40.0, (88.0 / 1.21) / 40.0),
+        )
+
+    def test_vnd_decomposition_and_constant_min_dscr(self):
+        from proforma_vietnam.cash_flow import _irr, _npv, calculate_fx_sensitivity
+
+        result = _synthetic_fx_result("VND")
+        table = calculate_fx_sensitivity(result, vnd_depreciation_rates=(0.0, 0.10))
+
+        # VND debt: the whole equity flow deflates (legacy behaviour).
+        expected = [-100.0, 20.0 / 1.1, 48.0 / 1.21]
+        self.assertAlmostEqual(table[1]["equity_irr_fraction"], _irr(expected))
+        self.assertAlmostEqual(table[1]["npv_usd"], _npv(0.10, expected))
+        # DSCR is FX-neutral for VND debt: constant across depreciation.
+        self.assertAlmostEqual(table[0]["min_dscr"], 1.5)
+        self.assertAlmostEqual(table[1]["min_dscr"], 1.5)
+
+    def test_absent_currency_defaults_to_vnd_behaviour(self):
+        from proforma_vietnam.cash_flow import calculate_fx_sensitivity
+
+        legacy = calculate_fx_sensitivity(_synthetic_fx_result(None))
+        vnd = calculate_fx_sensitivity(_synthetic_fx_result("VND"))
+
+        self.assertEqual(
+            [row["equity_irr_fraction"] for row in legacy],
+            [row["equity_irr_fraction"] for row in vnd],
+        )
+        self.assertEqual(
+            [row["npv_usd"] for row in legacy],
+            [row["npv_usd"] for row in vnd],
+        )
+
+    def test_usd_debt_irr_and_min_dscr_strictly_decrease_with_depreciation(self):
+        from proforma_vietnam.cash_flow import calculate_fx_sensitivity
+
+        table = calculate_fx_sensitivity(self._engine("USD"))
+        irrs = [row["equity_irr_fraction"] for row in table]
+        dscrs = [row["min_dscr"] for row in table]
+
+        self.assertEqual(irrs, sorted(irrs, reverse=True))
+        self.assertTrue(all(a > b for a, b in zip(irrs, irrs[1:])))
+        self.assertEqual(dscrs, sorted(dscrs, reverse=True))
+        self.assertTrue(all(a > b for a, b in zip(dscrs, dscrs[1:])))
+
+    def test_vnd_debt_min_dscr_constant_and_irr_matches_legacy(self):
+        from proforma_vietnam.cash_flow import _irr, calculate_fx_sensitivity
+
+        result = self._engine("VND")
+        table = calculate_fx_sensitivity(result)
+        # min DSCR is depreciation-invariant for VND debt.
+        dscrs = [row["min_dscr"] for row in table]
+        self.assertTrue(all(abs(d - dscrs[0]) < 1e-12 for d in dscrs))
+        # IRR trajectory reproduces the pre-4b whole-flow deflation exactly:
+        # adjusted_t = equity_cf_t / (1+d)^t for every year (regression).
+        equity = [-result["summary"]["equity_investment_usd"]] + [
+            row["equity_cash_flow_usd"] for row in result["annual_cash_flows"]
+        ]
+        for row in table:
+            d = row["vnd_depreciation_rate"]
+            expected = [cf / (1 + d) ** i for i, cf in enumerate(equity)]
+            self.assertAlmostEqual(row["equity_irr_fraction"], _irr(expected))

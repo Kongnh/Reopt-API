@@ -149,6 +149,14 @@ def _construction_result():
     return _esco_result(construction_months=12, principal_grace_years=2)
 
 
+def _usd_debt_result():
+    # USD-denominated debt on the ESCO base: the base case is mechanically
+    # identical to VND except the default 5% rate, so the audit sheet exercises
+    # the gated DEBT_CURRENCY cell and the FX-Sensitivity DSCR-vs-depreciation
+    # column (fixed USD debt service against deflating VND revenue).
+    return _esco_result(debt_currency="USD")
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -620,6 +628,90 @@ class FxSensitivitySheetTests(TestCase):
             self.assertAlmostEqual(
                 sheet.cell(row=row, column=5).value, scenario["npv_usd"]
             )
+
+
+class UsdDebtAuditTests(TestCase):
+
+    def _header_labels(self, sheet, header_row):
+        return [
+            sheet.cell(row=header_row, column=col).value
+            for col in range(1, sheet.max_column + 1)
+        ]
+
+    def test_vnd_default_defines_no_debt_currency_cell_or_dscr_column(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        self.assertNotIn("DEBT_CURRENCY", workbook.defined_names)
+        fx = workbook["FX Sensitivity"]
+        headers = self._header_labels(fx, 4)
+        self.assertNotIn("Min DSCR (USD)", headers)
+        self.assertNotIn("Min DSCR (engine)", headers)
+        # Legacy note preserved bit-for-bit (DSCR unchanged claim intact).
+        self.assertIn("DSCR is unchanged", fx.cell(row=2, column=1).value)
+
+    def test_usd_debt_defines_currency_cell(self):
+        workbook = build_vietnam_esco_workbook(_usd_debt_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        self.assertIn("DEBT_CURRENCY", workbook.defined_names)
+
+    def test_usd_debt_surfaces_resolved_rate_in_debt_rate_cell(self):
+        result = _usd_debt_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+        rate_row = next(
+            row for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=2).value == "Debt interest rate"
+        )
+        # The existing DEBT_RATE cell already carries the engine-resolved 5% USD
+        # rate — no separate resolved-rate cell is needed.
+        self.assertAlmostEqual(sheet.cell(row=rate_row, column=3).value, 0.05)
+
+    def test_usd_debt_fx_sheet_has_live_min_dscr_column(self):
+        result = _usd_debt_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        fx = workbook["FX Sensitivity"]
+        engine = calculate_fx_sensitivity(result)
+
+        headers = self._header_labels(fx, 4)
+        self.assertIn("Min DSCR (USD)", headers)
+        self.assertIn("Min DSCR (engine)", headers)
+        min_dscr_col = headers.index("Min DSCR (USD)") + 1
+        engine_col = headers.index("Min DSCR (engine)") + 1
+        for index, scenario in enumerate(engine):
+            row = 5 + index
+            self.assertTrue(
+                str(fx.cell(row=row, column=min_dscr_col).value).startswith("=MIN(")
+            )
+            self.assertAlmostEqual(
+                fx.cell(row=row, column=engine_col).value, scenario["min_dscr"]
+            )
+
+    def test_usd_debt_model_basis_discloses_conventions(self):
+        workbook = build_vietnam_esco_workbook(_usd_debt_result(), assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Model Basis"]
+        text = "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+
+        self.assertIn("USD", text)
+        # The three disclosed conventions: fixed USD debt service under FX drift,
+        # CIT not recomputed, and no VAS FX revaluation on outstanding principal.
+        self.assertIn("revaluation", text.lower())
+
+    def test_vnd_default_model_basis_omits_usd_debt_disclosures(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Model Basis"]
+        text = "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+
+        self.assertNotIn("revaluation", text.lower())
 
 
 class CoverSheetTests(TestCase):

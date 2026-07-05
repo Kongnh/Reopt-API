@@ -366,6 +366,15 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     entry("Debt interest rate", get("debt_interest_rate_fraction"), unit="per year",
           source="vietnam_defaults.json / case.json financial.debt_interest_rate_fraction",
           name="DEBT_RATE", fmt=FMT_PERCENT)
+    if d.get("debt_currency") == "USD":
+        # USD-denominated debt (default is VND). Gated on the engine derivation
+        # so VND cases carry no currency name and stay byte-identical. The
+        # resolved rate is already surfaced by the DEBT_RATE cell above; this
+        # only labels the currency the FX Sensitivity sheet treats as FX-fixed.
+        entry("Debt currency", d.get("debt_currency"), unit="",
+              source="case.json financial.debt_currency (default VND; USD debt "
+                     "service is FX-fixed — see FX Sensitivity)",
+              name="DEBT_CURRENCY")
     entry("Debt term", get("debt_term_years"), unit="years",
           source="vietnam_defaults.json / case.json financial.debt_term_years",
           name="DEBT_TERM_YEARS", fmt="0")
@@ -1259,6 +1268,8 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         "years": years,
         "year_row": r_year,
         "equity_cf_row": r_eq,
+        "cfads_row": r_cfads,
+        "debt_service_row": r_ds,
         "status_cells": status_cells,
         "status_range": status_range,
     }
@@ -1277,29 +1288,54 @@ def _minimum_dscr(annual_rows):
 # ---------------------------------------------------------------------------
 
 def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
-    """USD equity returns under annual VND depreciation — live formulas."""
+    """USD equity returns under annual VND depreciation — live formulas.
+
+    For USD-denominated debt (gated on the engine derivation) the debt service
+    is FX-fixed while VND revenue deflates, so the equity helper reproduces the
+    engine's decomposition (CFADS_t/(1+d)^t − debt_service_t) and a DSCR-vs-
+    depreciation column is added. VND-debt (default) workbooks are unchanged.
+    """
+    derivation = cash_flow_result.get("derivation", {})
+    is_usd_debt = derivation.get("debt_currency") == "USD"
     engine_rows = calculate_fx_sensitivity(cash_flow_result)
+    show_dscr = is_usd_debt and any(
+        row["min_dscr"] is not None for row in engine_rows
+    )
     years = proforma_refs["years"]
     eq_row = proforma_refs["equity_cf_row"]
+    cfads_row = proforma_refs["cfads_row"]
+    ds_row = proforma_refs["debt_service_row"]
     sheet_ref = f"'{proforma_refs['sheet']}'"
 
     worksheet.sheet_view.showGridLines = False
-    worksheet.merge_cells("A1:F1")
+    worksheet.merge_cells("A1:H1" if show_dscr else "A1:F1")
     title = worksheet.cell(row=1, column=1, value="FX Sensitivity — VND depreciation vs USD returns")
     title.fill = TITLE_FILL
     title.font = TITLE_FONT
     worksheet.row_dimensions[1].height = 24
-    worksheet.cell(
-        row=2, column=1,
-        value="Cash flows are VND-denominated (EVN tariff / DPPA settlement) but reported in USD "
-              "at the fixed contract rate. Each scenario deflates the year-t USD equity cash flow "
-              "by (1+d)^t. Debt is assumed VND-denominated, so DSCR is unchanged. The rate cells "
-              "are editable; engine columns validate the default scenarios.",
-    ).font = NOTE_FONT
+    if is_usd_debt:
+        note = (
+            "Cash flows are VND-denominated (EVN tariff / DPPA settlement) but reported in USD at "
+            "the fixed contract rate. Debt is USD-denominated, so its service is FX-fixed while the "
+            "rest of the equity flow (CFADS) deflates by (1+d)^t: adjusted_t = CFADS_t/(1+d)^t − "
+            "debt_service_t, and DSCR erodes as (CFADS_t/(1+d)^t)/debt_service_t. CIT is not "
+            "recomputed under drift; FX revaluation of the USD principal is not modelled. The rate "
+            "cells are editable; engine columns validate the default scenarios."
+        )
+    else:
+        note = (
+            "Cash flows are VND-denominated (EVN tariff / DPPA settlement) but reported in USD "
+            "at the fixed contract rate. Each scenario deflates the year-t USD equity cash flow "
+            "by (1+d)^t. Debt is assumed VND-denominated, so DSCR is unchanged. The rate cells "
+            "are editable; engine columns validate the default scenarios."
+        )
+    worksheet.cell(row=2, column=1, value=note).font = NOTE_FONT
 
     header_row = 4
-    headers = ("VND depreciation (per year)", "Equity IRR (USD)", "Equity NPV (USD)",
-               "Equity IRR (engine)", "Equity NPV (engine)", "Status")
+    headers = ["VND depreciation (per year)", "Equity IRR (USD)", "Equity NPV (USD)",
+               "Equity IRR (engine)", "Equity NPV (engine)", "Status"]
+    if show_dscr:
+        headers += ["Min DSCR (USD)", "Min DSCR (engine)"]
     for column, header in enumerate(headers, start=1):
         cell = worksheet.cell(row=header_row, column=column, value=header)
         cell.font = HEADER_FONT
@@ -1318,6 +1354,15 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
         cell.font = BOLD_FONT
         cell.number_format = "0"
 
+    # Second helper block: FX-adjusted DSCR per debt year (USD debt only).
+    dscr_helper_start = year_header_row + len(engine_rows) + 2
+    if show_dscr:
+        worksheet.cell(
+            row=dscr_helper_start - 1, column=1,
+            value="Helper — FX-adjusted DSCR per debt year (USD): "
+                  "(CFADS_t/(1+d)^t) / debt_service_t",
+        ).font = NOTE_FONT
+
     status_cells = []
     for index, engine in enumerate(engine_rows):
         table_row = header_row + 1 + index
@@ -1329,13 +1374,20 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
         worksheet.cell(row=helper_row, column=1, value=f"=A{table_row}").number_format = FMT_PERCENT
         for year in range(0, years + 1):
             col = get_column_letter(2 + year)
-            worksheet.cell(
-                row=helper_row, column=2 + year,
-                value=(
-                    f"={sheet_ref}!{get_column_letter(3 + year)}{eq_row}"
+            proforma_col = get_column_letter(3 + year)
+            if is_usd_debt and year >= 1:
+                # USD debt service is FX-fixed; only VND CFADS deflates.
+                value = (
+                    f"=({sheet_ref}!{proforma_col}{cfads_row}"
+                    f"/(1+$A{table_row})^{col}${year_header_row})"
+                    f"-{sheet_ref}!{proforma_col}{ds_row}"
+                )
+            else:
+                value = (
+                    f"={sheet_ref}!{proforma_col}{eq_row}"
                     f"/(1+$A{table_row})^{col}${year_header_row}"
-                ),
-            ).number_format = FMT_AMOUNT
+                )
+            worksheet.cell(row=helper_row, column=2 + year, value=value).number_format = FMT_AMOUNT
         helper_range = f"B{helper_row}:{get_column_letter(2 + years)}{helper_row}"
         first_year_range = f"C{helper_row}:{get_column_letter(2 + years)}{helper_row}"
 
@@ -1352,14 +1404,49 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
         engine_npv = worksheet.cell(row=table_row, column=5, value=engine["npv_usd"])
         engine_npv.number_format = FMT_AMOUNT
         engine_npv.fill = INPUT_FILL
-        status = worksheet.cell(
-            row=table_row, column=6,
-            value=(
+
+        if show_dscr:
+            # Per-debt-year DSCR helper row: (CFADS_t/(1+d)^t)/debt_service_t,
+            # blank when debt service is 0 so MIN spans the debt term only.
+            dscr_helper_row = dscr_helper_start + index
+            worksheet.cell(
+                row=dscr_helper_row, column=1, value=f"=A{table_row}"
+            ).number_format = FMT_PERCENT
+            for year in range(1, years + 1):
+                col = get_column_letter(2 + year)
+                proforma_col = get_column_letter(3 + year)
+                worksheet.cell(
+                    row=dscr_helper_row, column=2 + year,
+                    value=(
+                        f"=IF({sheet_ref}!{proforma_col}{ds_row}>0,"
+                        f"({sheet_ref}!{proforma_col}{cfads_row}"
+                        f"/(1+$A{table_row})^{col}${year_header_row})"
+                        f"/{sheet_ref}!{proforma_col}{ds_row},\"\")"
+                    ),
+                ).number_format = FMT_RATIO
+            dscr_range = f"C{dscr_helper_row}:{get_column_letter(2 + years)}{dscr_helper_row}"
+            min_dscr_cell = worksheet.cell(
+                row=table_row, column=7, value=f"=MIN({dscr_range})"
+            )
+            min_dscr_cell.number_format = FMT_RATIO
+            engine_dscr = worksheet.cell(
+                row=table_row, column=8, value=engine["min_dscr"]
+            )
+            engine_dscr.number_format = FMT_RATIO
+            engine_dscr.fill = INPUT_FILL
+            status_formula = (
+                f"=IF(AND(ABS(B{table_row}-D{table_row})<={_fmt_num(TOL_RATE)},"
+                f"ABS(C{table_row}-E{table_row})<={_fmt_num(TOL_AMOUNT)},"
+                f"ABS(G{table_row}-H{table_row})<={_fmt_num(TOL_RATIO)}),"
+                f"\"PASS\",\"REVIEW\")"
+            )
+        else:
+            status_formula = (
                 f"=IF(AND(ABS(B{table_row}-D{table_row})<={_fmt_num(TOL_RATE)},"
                 f"ABS(C{table_row}-E{table_row})<={_fmt_num(TOL_AMOUNT)}),"
                 f"\"PASS\",\"REVIEW\")"
-            ),
-        )
+            )
+        status = worksheet.cell(row=table_row, column=6, value=status_formula)
         status.fill = CHECK_FILL
         status.font = BOLD_FONT
         status_cells.append(f"F{table_row}")
@@ -1375,6 +1462,9 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
     worksheet.column_dimensions["A"].width = 28
     for letter in ("B", "C", "D", "E", "F"):
         worksheet.column_dimensions[letter].width = 20
+    if show_dscr:
+        for letter in ("G", "H"):
+            worksheet.column_dimensions[letter].width = 20
 
     return {"sheet": worksheet.title, "status_range": status_range}
 
@@ -1507,6 +1597,27 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "above; multi-year construction equity phasing is not modelled."
         )
 
+    # USD-denominated debt disclosures, gated on the engine derivation so
+    # VND-debt (default) cases carry no USD-debt bullets and stay byte-identical.
+    usd_debt = derivation.get("debt_currency") == "USD"
+    usd_debt_register_bullets = []
+    if usd_debt:
+        debt_bullets.append(
+            "Debt currency: USD (international financing, ~5% default rate vs the 8.5% VND commercial-"
+            "bank rate). The base case holds the contract FX flat, so the debt schedule, IDC, DSCR "
+            "and interest tax deduction run in USD exactly as VND debt would — only the default rate "
+            "differs. The FX exposure is surfaced on the FX Sensitivity sheet: under VND depreciation "
+            "d, USD debt service is FX-fixed while VND revenue (CFADS) deflates by (1+d)^t, so "
+            "adjusted equity = CFADS_t/(1+d)^t − debt_service_t and DSCR erodes as "
+            "(CFADS_t/(1+d)^t)/debt_service_t (VND debt keeps a depreciation-invariant DSCR)."
+        )
+        usd_debt_register_bullets.append(
+            "USD-denominated debt FX exposure is quantified on the FX Sensitivity sheet as a "
+            "deflation overlay only: CIT is NOT recomputed under FX drift (including the interest "
+            "deduction of the USD loan), and VAS FX revaluation gains/losses on the outstanding USD "
+            "principal are not modelled."
+        )
+
     if derivation.get("cit", {}).get("regime") == "re_producer":
         cit_regime_text = (
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
@@ -1584,6 +1695,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
         ("5. Simplifications register (disclosed for audit)", [
             "Fixed FX over the analysis period — quantified on the FX Sensitivity sheet.",
             *construction_register_bullets,
+            *usd_debt_register_bullets,
             "Battery replacement is expensed in the replacement year, not capitalized and re-depreciated.",
             "VAT is out of scope (pass-through assumed for both parties).",
             "No working-capital, DSRA, or terminal/residual value is modelled.",

@@ -155,6 +155,7 @@ def cash_flow_overrides_from_assumptions(assumptions):
         "debt_fraction": "debt_fraction",
         "debt_interest_rate_fraction": "debt_interest_rate_fraction",
         "debt_term_years": "debt_term_years",
+        "debt_currency": "debt_currency",
         "construction_months": "construction_months",
         "principal_grace_years": "principal_grace_years",
         "annual_om_usd": "annual_om_vnd",

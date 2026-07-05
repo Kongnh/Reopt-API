@@ -34,6 +34,7 @@ DEFAULT_ESCO_DEMAND_SAVINGS_SHARE = FINANCIAL_DEFAULTS["esco_demand_savings_shar
 DEFAULT_ESCO_GRID_ARBITRAGE_SHARE = FINANCIAL_DEFAULTS["esco_grid_arbitrage_share"]
 DEFAULT_DEBT_FRACTION = FINANCIAL_DEFAULTS["debt_fraction"]
 DEFAULT_DEBT_INTEREST_RATE = FINANCIAL_DEFAULTS["debt_interest_rate"]
+DEFAULT_USD_DEBT_INTEREST_RATE = FINANCIAL_DEFAULTS["usd_debt_interest_rate"]
 DEFAULT_DEBT_TERM_YEARS = FINANCIAL_DEFAULTS["debt_term_years"]
 
 
@@ -60,8 +61,9 @@ def calculate_vietnam_esco_cash_flow(
     net_grid_arbitrage_value_vnd=0,
     esco_grid_arbitrage_share=DEFAULT_ESCO_GRID_ARBITRAGE_SHARE,
     debt_fraction=DEFAULT_DEBT_FRACTION,
-    debt_interest_rate_fraction=DEFAULT_DEBT_INTEREST_RATE,
+    debt_interest_rate_fraction=None,
     debt_term_years=DEFAULT_DEBT_TERM_YEARS,
+    debt_currency="VND",
     construction_months=0,
     principal_grace_years=0,
     project_years=DEFAULT_PROJECT_YEARS,
@@ -127,6 +129,17 @@ def calculate_vietnam_esco_cash_flow(
     _validate_construction_financing(
         construction_months, principal_grace_years, debt_term_years
     )
+    _validate_debt_currency(debt_currency)
+    # Debt-currency default rate: USD loans price off international financing
+    # (~5%/yr, vietnam_market_context.md) rather than the VND commercial-bank
+    # rate (8.5%). An explicit debt_interest_rate_fraction always wins; only the
+    # unspecified (None) default is currency-resolved, so existing VND callers
+    # are byte-for-byte unchanged.
+    if debt_interest_rate_fraction is None:
+        debt_interest_rate_fraction = (
+            DEFAULT_USD_DEBT_INTEREST_RATE if debt_currency == "USD"
+            else DEFAULT_DEBT_INTEREST_RATE
+        )
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
     debt_principal_vnd = total_capex_vnd * debt_fraction
     equity_investment_vnd = total_capex_vnd - debt_principal_vnd
@@ -495,6 +508,13 @@ def calculate_vietnam_esco_cash_flow(
     if preferential_rate is not None:
         derivation["cit"]["preferential_rate"] = preferential_rate
         derivation["cit"]["preferential_years"] = preferential_years
+    if debt_currency == "USD":
+        # USD-denominated debt: the debt schedule / IDC / DSCR / tax deduction
+        # all run in USD exactly as VND, so the base case is unchanged; the
+        # currency label lets the FX-sensitivity block and the audit sheet
+        # treat debt service as FX-fixed. Gated on USD so VND (default) cases
+        # carry no label and stay byte-for-byte unchanged.
+        derivation["debt_currency"] = debt_currency
     if construction_enabled:
         # Self-describing construction/grace financing so the audit sheet can
         # rebuild IDC, the COD balance and the grace debt schedule from named
@@ -564,30 +584,54 @@ def calculate_fx_sensitivity(
     """USD-reported equity returns under annual VND depreciation against USD.
 
     The proforma holds the contract FX rate flat for the full analysis period,
-    so its USD metrics assume zero FX drift. Project revenue is VND-denominated
-    (EVN tariff / DPPA settlement); if the VND depreciates at ``d`` per year,
-    the year-``t`` USD cash flow shrinks by ``(1 + d)^t``. Debt is assumed
-    VND-denominated (local ESCO financing), so DSCR is unaffected — only the
-    USD-reported equity return moves. NPV keeps the owner discount rate.
+    so its USD metrics assume zero FX drift. Under annual VND depreciation ``d``
+    the year-``t`` USD value of every VND-denominated flow shrinks by
+    ``(1 + d)^t``. Debt currency splits the two regimes:
+
+    * VND debt (default): debt service is VND-denominated too, so the whole
+      equity cash flow deflates by ``(1 + d)^t`` and DSCR is FX-neutral
+      (constant across ``d`` — the documented legacy behaviour).
+    * USD debt: only debt service is FX-fixed; the rest of the equity flow
+      (VND revenue net of VND O&M / replacement / CIT — i.e. CFADS) deflates:
+      ``adjusted_t = CFADS_t/(1+d)^t − debt_service_t`` and
+      ``dscr_t(d) = (CFADS_t/(1+d)^t)/debt_service_t`` — both erode with ``d``.
+
+    Each row carries ``min_dscr`` (minimum over the debt term, years with debt
+    service > 0). Simplifications (deflation overlay only): CIT is not recomputed
+    under drift — including the interest deduction of a USD loan — and VAS FX
+    revaluation of the outstanding USD principal is not modelled. NPV keeps the
+    owner discount rate. Year-0 equity outflow is unchanged in both regimes.
     """
     summary = cash_flow_result["summary"]
     derivation = cash_flow_result.get("derivation", {})
     discount_rate = derivation.get("owner_discount_rate_fraction", 0.10)
-    equity_cash_flows = [-summary["equity_investment_usd"]] + [
-        row["equity_cash_flow_usd"]
-        for row in cash_flow_result["annual_cash_flows"]
-    ]
+    usd_debt = derivation.get("debt_currency") == "USD"
+    annual = cash_flow_result["annual_cash_flows"]
+    equity_investment_usd = summary["equity_investment_usd"]
 
     rows = []
     for rate in vnd_depreciation_rates:
-        adjusted = [
-            cash_flow / ((1 + rate) ** year_index)
-            for year_index, cash_flow in enumerate(equity_cash_flows)
-        ]
+        adjusted = [-equity_investment_usd]
+        dscrs = []
+        for year_index, row in enumerate(annual, start=1):
+            deflator = (1 + rate) ** year_index
+            debt_service = row["debt_service_usd"]
+            cfads = row["cash_available_for_debt_service_usd"]
+            if usd_debt:
+                # USD debt service is FX-fixed; VND CFADS deflates.
+                adjusted.append(cfads / deflator - debt_service)
+                if debt_service:
+                    dscrs.append((cfads / deflator) / debt_service)
+            else:
+                # VND debt: the whole equity flow deflates; DSCR is FX-neutral.
+                adjusted.append(row["equity_cash_flow_usd"] / deflator)
+                if debt_service:
+                    dscrs.append(cfads / debt_service)
         rows.append({
             "vnd_depreciation_rate": rate,
             "equity_irr_fraction": _irr(adjusted),
             "npv_usd": _npv(discount_rate, adjusted),
+            "min_dscr": min(dscrs) if dscrs else None,
         })
     return rows
 
@@ -675,6 +719,14 @@ def _validate_construction_financing(construction_months, principal_grace_years,
         raise ValueError(
             "principal_grace_years must be less than debt_term_years "
             f"({debt_term_years}), got {principal_grace_years}."
+        )
+
+
+def _validate_debt_currency(debt_currency):
+    if debt_currency not in ("VND", "USD"):
+        raise ValueError(
+            "debt_currency must be 'VND' (default) or 'USD', got "
+            f"{debt_currency!r}."
         )
 
 
