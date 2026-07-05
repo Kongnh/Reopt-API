@@ -73,7 +73,8 @@ CURATED_ASSUMPTION_KEYS = {
     "battery_replacement_year", "annual_om_usd", "pv_capex_usd",
     "bess_capex_usd", "om_escalation_rate", "pv_degradation_rate",
     "pv_depreciation_years", "debt_fraction", "debt_interest_rate_fraction",
-    "debt_term_years", "owner_discount_rate_fraction", "analysis_years",
+    "debt_term_years", "construction_months", "principal_grace_years",
+    "owner_discount_rate_fraction", "analysis_years",
     "case_config", "dppa",
 }
 
@@ -374,15 +375,50 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     entry("Equity investment", None, unit="USD", source="Formula: total investment − debt",
           name="EQUITY_INVESTMENT", fmt=FMT_AMOUNT,
           formula="=TOTAL_CAPEX-DEBT_PRINCIPAL")
-    entry("Annual debt payment (level)", None, unit="USD/yr",
-          source="Standard annuity over the debt term",
-          name="DEBT_PAYMENT", fmt=FMT_AMOUNT,
-          formula=(
-              "=IF(OR(DEBT_PRINCIPAL<=0,DEBT_TERM_YEARS<=0),0,"
-              "IF(DEBT_RATE=0,DEBT_PRINCIPAL/DEBT_TERM_YEARS,"
-              "DEBT_PRINCIPAL*(DEBT_RATE*(1+DEBT_RATE)^DEBT_TERM_YEARS)"
-              "/((1+DEBT_RATE)^DEBT_TERM_YEARS-1)))"
-          ))
+    construction = d.get("construction")
+    if construction:
+        # Construction period + capitalized IDC + principal grace. Gated on the
+        # engine derivation so overnight-build cases carry no construction
+        # names or rows and stay byte-identical.
+        entry("Construction period", construction.get("construction_months"),
+              unit="months", source="case.json financial.construction_months",
+              name="CONSTRUCTION_MONTHS", fmt="0")
+        entry("Interest during construction (IDC)", None, unit="USD",
+              source="Formula: debt principal × rate × months/12 ÷ 2 (even "
+                     "drawdown, simple interest); capitalized per Circular 45",
+              name="IDC", fmt=FMT_AMOUNT,
+              formula="=DEBT_PRINCIPAL*DEBT_RATE*CONSTRUCTION_MONTHS/12/2")
+        entry("Debt balance at COD", None, unit="USD",
+              source="Formula: debt principal + IDC (IDC debt-funded, rolled up)",
+              name="COD_DEBT_BALANCE", fmt=FMT_AMOUNT,
+              formula="=DEBT_PRINCIPAL+IDC")
+        entry("Principal grace period", construction.get("principal_grace_years"),
+              unit="years",
+              source="case.json financial.principal_grace_years (interest-only; "
+                     "principal amortizes over term − grace)",
+              name="PRINCIPAL_GRACE_YEARS", fmt="0")
+        entry("Annual debt payment (level)", None, unit="USD/yr",
+              source="Annuity on the COD balance over (term − grace) years",
+              name="DEBT_PAYMENT", fmt=FMT_AMOUNT,
+              formula=(
+                  "=IF(OR(COD_DEBT_BALANCE<=0,"
+                  "DEBT_TERM_YEARS-PRINCIPAL_GRACE_YEARS<=0),0,"
+                  "IF(DEBT_RATE=0,"
+                  "COD_DEBT_BALANCE/(DEBT_TERM_YEARS-PRINCIPAL_GRACE_YEARS),"
+                  "COD_DEBT_BALANCE*(DEBT_RATE*(1+DEBT_RATE)"
+                  "^(DEBT_TERM_YEARS-PRINCIPAL_GRACE_YEARS))"
+                  "/((1+DEBT_RATE)^(DEBT_TERM_YEARS-PRINCIPAL_GRACE_YEARS)-1)))"
+              ))
+    else:
+        entry("Annual debt payment (level)", None, unit="USD/yr",
+              source="Standard annuity over the debt term",
+              name="DEBT_PAYMENT", fmt=FMT_AMOUNT,
+              formula=(
+                  "=IF(OR(DEBT_PRINCIPAL<=0,DEBT_TERM_YEARS<=0),0,"
+                  "IF(DEBT_RATE=0,DEBT_PRINCIPAL/DEBT_TERM_YEARS,"
+                  "DEBT_PRINCIPAL*(DEBT_RATE*(1+DEBT_RATE)^DEBT_TERM_YEARS)"
+                  "/((1+DEBT_RATE)^DEBT_TERM_YEARS-1)))"
+              ))
     entry("Owner discount rate", get("owner_discount_rate_fraction"), unit="per year",
           source="case.json financial.owner_discount_rate_fraction",
           name="DISC_RATE", fmt=FMT_PERCENT)
@@ -677,6 +713,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     is_physical = d["structure"] == PHYSICAL_DPPA
     is_direct = d["structure"] == DIRECT_OWNERSHIP
     assume_profitable_host = bool((d.get("direct_ownership") or {}).get("assume_profitable_host"))
+    construction = d.get("construction")
     w = _ProFormaWriter(worksheet, years)
 
     worksheet.sheet_view.showGridLines = False
@@ -839,18 +876,29 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     w.section("DEBT SCHEDULE (USD)")
     # Years >= 2 reference the closing-balance row, which is not written yet;
     # they are filled in right after r_close is known.
+    opening_balance_ref = "=COD_DEBT_BALANCE" if construction else "=DEBT_PRINCIPAL"
     r_open = w.line(
         "debt_open", "Opening debt balance", "USD",
-        formula=lambda y, c: "=DEBT_PRINCIPAL" if y == 1 else None)
+        formula=lambda y, c: opening_balance_ref if y == 1 else None)
     r_interest = w.line(
         "interest", "Interest", "USD",
         formula=lambda y, c:
             f"=IF({year_ref(c)}<=DEBT_TERM_YEARS,{c}{r_open}*DEBT_RATE,0)")
-    r_principal = w.line(
-        "principal", "Principal repayment", "USD",
-        formula=lambda y, c:
-            f"=IF({year_ref(c)}<=DEBT_TERM_YEARS,"
-            f"MIN(MAX(DEBT_PAYMENT-{c}{r_interest},0),{c}{r_open}),0)")
+    if construction:
+        # Principal grace: interest-only rows through year g, amortization
+        # starting year g+1 — reproduces the engine's grace debt schedule.
+        r_principal = w.line(
+            "principal", "Principal repayment", "USD",
+            formula=lambda y, c:
+                f"=IF(OR({year_ref(c)}<=PRINCIPAL_GRACE_YEARS,"
+                f"{year_ref(c)}>DEBT_TERM_YEARS),0,"
+                f"MIN(MAX(DEBT_PAYMENT-{c}{r_interest},0),{c}{r_open}))")
+    else:
+        r_principal = w.line(
+            "principal", "Principal repayment", "USD",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}<=DEBT_TERM_YEARS,"
+                f"MIN(MAX(DEBT_PAYMENT-{c}{r_interest},0),{c}{r_open}),0)")
     r_ds = w.line(
         "debt_service", "Debt service", "USD",
         formula=lambda y, c: f"={c}{r_interest}+{c}{r_principal}", bold=True)
@@ -867,14 +915,29 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
 
     # --- depreciation & tax --------------------------------------------------
     w.section("DEPRECIATION & VIETNAM CIT (USD)")
-    r_dep_pv = w.line(
-        "dep_pv", "PV depreciation (straight-line)", "USD",
-        formula=lambda y, c:
-            f"=IF({year_ref(c)}<=PV_DEP_YEARS,PV_CAPEX/PV_DEP_YEARS,0)")
-    r_dep_bess = w.line(
-        "dep_bess", "BESS depreciation (straight-line)", "USD",
-        formula=lambda y, c:
-            f"=IF({year_ref(c)}<=BESS_DEP_YEARS,BESS_CAPEX/BESS_DEP_YEARS,0)")
+    if construction:
+        # Capitalized IDC joins the depreciable base pro-rata by capex share
+        # (Circular 45 borrowing-cost capitalization) and rides each class's
+        # existing schedule — ties out to the engine's IDC-inclusive bases.
+        r_dep_pv = w.line(
+            "dep_pv", "PV depreciation (straight-line)", "USD",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}<=PV_DEP_YEARS,"
+                f"(PV_CAPEX+IDC*PV_CAPEX/(PV_CAPEX+BESS_CAPEX))/PV_DEP_YEARS,0)")
+        r_dep_bess = w.line(
+            "dep_bess", "BESS depreciation (straight-line)", "USD",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}<=BESS_DEP_YEARS,"
+                f"(BESS_CAPEX+IDC*BESS_CAPEX/(PV_CAPEX+BESS_CAPEX))/BESS_DEP_YEARS,0)")
+    else:
+        r_dep_pv = w.line(
+            "dep_pv", "PV depreciation (straight-line)", "USD",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}<=PV_DEP_YEARS,PV_CAPEX/PV_DEP_YEARS,0)")
+        r_dep_bess = w.line(
+            "dep_bess", "BESS depreciation (straight-line)", "USD",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}<=BESS_DEP_YEARS,BESS_CAPEX/BESS_DEP_YEARS,0)")
     r_dep = w.line(
         "dep", "Total depreciation", "USD",
         formula=lambda y, c: f"={c}{r_dep_pv}+{c}{r_dep_bess}")
@@ -1407,6 +1470,43 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
     )
     fx = derivation.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
 
+    # Construction/IDC/grace disclosures, gated on the engine derivation so
+    # overnight-build (default) cases stay byte-identical.
+    construction = derivation.get("construction")
+    debt_bullets = [
+        "Debt: level-payment annuity over the debt term (interest + principal split per the Debt "
+        "Schedule block).",
+    ]
+    construction_register_bullets = []
+    if construction:
+        months = construction.get("construction_months", 0)
+        grace = construction.get("principal_grace_years", 0)
+        debt_bullets.append(
+            f"Construction period ({months} months): all pre-COD flows are collapsed at the model's "
+            "year-0 point — operations years and the equity outflow timing are unchanged. This "
+            "collapsed-year-0 convention slightly flatters IRR for long construction periods "
+            "(disclosed simplification)."
+        )
+        debt_bullets.append(
+            "IDC = debt fraction × capex × debt rate × (months/12) ÷ 2 — even drawdown of the "
+            "debt-funded capex over construction, simple interest on the average balance (half the "
+            "final draw), no compounding. IDC is debt-funded (rolled up): the COD debt balance is "
+            "the drawn principal plus IDC; equity is unchanged. IDC is capitalized into the "
+            "depreciable base pro-rata across the asset classes by capex share (VAS / Circular 45 "
+            "borrowing-cost capitalization), not expensed."
+        )
+        if grace:
+            debt_bullets.append(
+                f"Principal grace: years 1-{grace} are interest-only on the full COD balance; "
+                "principal then amortizes over the remaining (term − grace) years as a level-payment "
+                "annuity. DSCR during grace reflects interest-only debt service."
+            )
+        construction_register_bullets.append(
+            "Construction period and capitalized IDC are modelled for this case (default is an "
+            "overnight build): pre-COD flows stay collapsed at year 0 with the closed-form IDC "
+            "above; multi-year construction equity phasing is not modelled."
+        )
+
     if derivation.get("cit", {}).get("regime") == "re_producer":
         cit_regime_text = (
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
@@ -1471,8 +1571,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "from EVN at retail (added to the buyer's residual bill / C_BL).",
             "O&M escalates at its own rate; battery replacement is booked in the configured year at REopt "
             "replacement unit costs.",
-            "Debt: level-payment annuity over the debt term (interest + principal split per the Debt "
-            "Schedule block).",
+            *debt_bullets,
             cit_regime_text if is_direct else (
                 cit_regime_text + " The 4-year exemption and 9-year 50%-reduction periods count from the "
                 "first profitable year, no later than year 4; the 50% reduction applies to the "
@@ -1484,6 +1583,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
         ]),
         ("5. Simplifications register (disclosed for audit)", [
             "Fixed FX over the analysis period — quantified on the FX Sensitivity sheet.",
+            *construction_register_bullets,
             "Battery replacement is expensed in the replacement year, not capitalized and re-depreciated.",
             "VAT is out of scope (pass-through assumed for both parties).",
             "No working-capital, DSRA, or terminal/residual value is modelled.",

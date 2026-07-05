@@ -15,6 +15,7 @@ from proforma_vietnam.tests.test_audit_sheets import (
     DIRECT_ASSUMPTIONS,
     ESCO_ASSUMPTIONS,
     PHYSICAL_ASSUMPTIONS,
+    _construction_result,
     _direct_result,
     _dppa_result,
     _esco_result,
@@ -141,6 +142,21 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _direct_result(), assumptions=DIRECT_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "direct_ownership.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_construction_grace_fixture_workbook_passes(self):
+        # Construction + grace financing: the live debt schedule must reproduce
+        # the interest-only grace rows on the rolled-up COD balance (principal
+        # starting year g+1) and the depreciation rows must carry the pro-rata
+        # IDC so the per-year CFADS/equity/CIT checks stay PASS.
+        workbook = build_vietnam_esco_workbook(
+            _construction_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "construction_grace.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)

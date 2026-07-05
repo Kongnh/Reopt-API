@@ -1101,6 +1101,193 @@ class DirectOwnershipTests(TestCase):
         self.assertAlmostEqual(row["bill_savings_revenue_vnd"], 40000.0 * 25000)
 
 
+class ConstructionAndGraceTests(TestCase):
+    """Construction period with capitalized IDC + principal grace (default OFF).
+
+    Shared financing machinery for every structure. Hand-computed fixture:
+    capex 1,000,000 (pv 700,000 + bess 300,000), 70% debt, 8.5%, 12 months →
+    IDC = 700,000 × 0.085 × (12/12) / 2 = 29,750; COD debt = 729,750; equity
+    unchanged at 300,000; depreciable base = 1,029,750 split pro-rata
+    (pv 720,825 / bess 308,925).
+    """
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100000.0],
+            evn_energy_rates_vnd_per_kwh=[2.0],
+            bau_evn_bill_vnd=400000.0,
+            optimized_evn_bill_vnd=200000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=700000.0,
+            bess_capex_vnd=300000.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.70,
+            debt_interest_rate_fraction=0.085,
+            debt_term_years=10,
+            project_years=25,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_idc_hand_computed_fixture(self):
+        result = self._run(construction_months=12)
+
+        construction = result["derivation"]["construction"]
+        self.assertEqual(construction["construction_months"], 12)
+        self.assertEqual(construction["principal_grace_years"], 0)
+        self.assertAlmostEqual(construction["idc_usd"], 29750.0)
+        self.assertAlmostEqual(construction["cod_debt_balance_usd"], 729750.0)
+        # IDC is debt-funded (rolled up): equity is unchanged.
+        self.assertAlmostEqual(result["summary"]["equity_investment_vnd"], 300000.0)
+        self.assertAlmostEqual(result["summary"]["debt_principal_vnd"], 700000.0)
+        self.assertAlmostEqual(result["summary"]["idc_vnd"], 29750.0)
+        self.assertAlmostEqual(result["summary"]["cod_debt_balance_vnd"], 729750.0)
+        # Year-1 interest accrues on the full COD balance.
+        self.assertAlmostEqual(
+            result["annual_cash_flows"][0]["interest_vnd"], 729750.0 * 0.085
+        )
+
+    def test_depreciable_base_includes_idc_pro_rata_with_no_leakage(self):
+        result = self._run(construction_months=12)
+
+        # Year-1 per-class depreciation includes each class's pro-rata IDC
+        # share on its existing schedule (pv 20y, bess 8y).
+        self.assertAlmostEqual(
+            result["annual_cash_flows"][0]["depreciation_vnd"],
+            720825.0 / 20 + 308925.0 / 8,
+        )
+        # Total depreciation over the horizon equals the full base (no leakage).
+        self.assertAlmostEqual(
+            sum(row["depreciation_vnd"] for row in result["annual_cash_flows"]),
+            1029750.0,
+        )
+
+    def test_grace_years_are_interest_only_then_principal_amortizes(self):
+        result = self._run(principal_grace_years=3)
+
+        rows = result["annual_cash_flows"]
+        # Years 1..3: interest-only on the full COD balance (no IDC here).
+        for row in rows[:3]:
+            self.assertAlmostEqual(row["principal_vnd"], 0.0)
+            self.assertAlmostEqual(row["interest_vnd"], 700000.0 * 0.085)
+            self.assertAlmostEqual(row["debt_service_vnd"], 700000.0 * 0.085)
+            self.assertAlmostEqual(row["ending_debt_balance_vnd"], 700000.0)
+        # Principal starts in year g+1 and amortizes over the remaining 7 years.
+        self.assertGreater(rows[3]["principal_vnd"], 0.0)
+        self.assertAlmostEqual(
+            sum(row["principal_vnd"] for row in rows), 700000.0
+        )
+        self.assertAlmostEqual(rows[9]["ending_debt_balance_vnd"], 0.0)
+        # DSCR during grace reflects interest-only debt service (higher).
+        self.assertGreater(rows[0]["dscr"], rows[3]["dscr"])
+
+    def test_combined_construction_and_grace_fixture(self):
+        result = self._run(construction_months=12, principal_grace_years=2)
+
+        construction = result["derivation"]["construction"]
+        self.assertAlmostEqual(construction["idc_usd"], 29750.0)
+        self.assertAlmostEqual(construction["cod_debt_balance_usd"], 729750.0)
+        rows = result["annual_cash_flows"]
+        # Grace years are interest-only on the rolled-up COD balance.
+        self.assertAlmostEqual(rows[0]["principal_vnd"], 0.0)
+        self.assertAlmostEqual(rows[0]["interest_vnd"], 729750.0 * 0.085)
+        self.assertAlmostEqual(rows[1]["ending_debt_balance_vnd"], 729750.0)
+        # Sum of principal payments retires the full COD balance.
+        self.assertAlmostEqual(
+            sum(row["principal_vnd"] for row in rows), 729750.0
+        )
+
+    def test_idc_lowers_equity_irr_versus_overnight_build(self):
+        overnight = self._run()
+        construction = self._run(construction_months=12)
+
+        # Same equity outlay, extra rolled-up debt to service: IRR must fall.
+        self.assertLess(
+            construction["summary"]["equity_irr_fraction"],
+            overnight["summary"]["equity_irr_fraction"],
+        )
+
+    def test_validation_rejects_out_of_range_and_non_int_inputs(self):
+        for bad_kwargs in (
+            {"construction_months": 37},
+            {"construction_months": -1},
+            {"construction_months": 12.0},
+            {"construction_months": "12"},
+            {"construction_months": True},
+            {"principal_grace_years": 10},   # == debt_term_years
+            {"principal_grace_years": 11},   # > debt_term_years
+            {"principal_grace_years": -1},
+            {"principal_grace_years": 2.5},
+            {"principal_grace_years": True},
+        ):
+            with self.assertRaises(ValueError, msg=bad_kwargs):
+                self._run(**bad_kwargs)
+
+    def test_disabled_defaults_leave_outputs_byte_identical(self):
+        base = self._run()
+        # Passing the defaults explicitly must be indistinguishable from
+        # omitting them.
+        disabled = self._run(construction_months=0, principal_grace_years=0)
+
+        self.assertEqual(base["annual_cash_flows"], disabled["annual_cash_flows"])
+        self.assertEqual(base["summary"], disabled["summary"])
+        self.assertEqual(base["derivation"], disabled["derivation"])
+        # No construction keys leak when disabled.
+        self.assertNotIn("construction", base["derivation"])
+        self.assertNotIn("idc_vnd", base["summary"])
+        self.assertNotIn("idc_usd", base["summary"])
+        self.assertNotIn("cod_debt_balance_vnd", base["summary"])
+
+    def test_construction_and_grace_apply_under_direct_ownership(self):
+        result = self._run(
+            direct_ownership={},
+            construction_months=12,
+            principal_grace_years=2,
+        )
+
+        construction = result["derivation"]["construction"]
+        self.assertAlmostEqual(construction["idc_usd"], 29750.0)
+        row = result["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["principal_vnd"], 0.0)
+        self.assertAlmostEqual(row["interest_vnd"], 729750.0 * 0.085)
+
+    def test_construction_and_grace_apply_under_dppa(self):
+        settlement = {
+            "year_one": {
+                "c_dn_vnd": 0.0, "c_dppa_vnd": 0.0, "c_cl_vnd": 0.0,
+                "c_bl_vnd": 0.0, "cfd_strike_revenue_vnd": 0.0,
+                "cfd_fmp_offset_vnd": 0.0,
+                "generator_fmp_revenue_vnd": 200000.0,
+            },
+            "escalation": {},
+        }
+        result = self._run(
+            dppa_settlement=settlement,
+            construction_months=12,
+            principal_grace_years=2,
+        )
+
+        construction = result["derivation"]["construction"]
+        self.assertAlmostEqual(construction["idc_usd"], 29750.0)
+        self.assertAlmostEqual(construction["cod_debt_balance_usd"], 729750.0)
+        row = result["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["principal_vnd"], 0.0)
+        self.assertAlmostEqual(row["interest_vnd"], 729750.0 * 0.085)
+
+    def test_idc_restated_to_vnd_with_exchange_rate(self):
+        result = self._run(construction_months=12, exchange_rate_vnd_per_usd=25000)
+
+        self.assertAlmostEqual(result["summary"]["idc_usd"], 29750.0)
+        self.assertAlmostEqual(
+            result["summary"]["idc_vnd"], 29750.0 * 25000, delta=0.01
+        )
+        self.assertAlmostEqual(result["summary"]["cod_debt_balance_usd"], 729750.0)
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):

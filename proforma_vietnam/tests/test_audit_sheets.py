@@ -141,6 +141,14 @@ DIRECT_ASSUMPTIONS = {
 }
 
 
+def _construction_result():
+    # Construction + grace financing on the ESCO base: 12 months of capitalized
+    # IDC rolled into the COD debt balance and a 2-year principal grace, so the
+    # audit sheet exercises the gated named cells, the interest-only grace rows
+    # and the IDC-inclusive depreciation formulas.
+    return _esco_result(construction_months=12, principal_grace_years=2)
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -464,6 +472,79 @@ class DirectOwnershipAuditTests(TestCase):
         )
         labels = self._labels(workbook)
         self.assertNotIn(self.FLAT_CIT_LABEL, labels)
+
+
+class ConstructionGraceAuditTests(TestCase):
+
+    NAMES = ("CONSTRUCTION_MONTHS", "IDC", "PRINCIPAL_GRACE_YEARS",
+             "COD_DEBT_BALANCE")
+
+    def _labels(self, workbook):
+        sheet = workbook["Pro Forma (Audit)"]
+        return {
+            sheet.cell(row=row, column=1).value: row
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value
+        }
+
+    def test_disabled_construction_leaves_no_named_cells_or_formulas(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        for name in self.NAMES:
+            self.assertNotIn(name, workbook.defined_names, name)
+        # Debt and depreciation formulas keep the overnight-build shape.
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+        self.assertEqual(
+            sheet.cell(row=labels["Opening debt balance"], column=4).value,
+            "=DEBT_PRINCIPAL",
+        )
+        self.assertNotIn(
+            "PRINCIPAL_GRACE_YEARS",
+            sheet.cell(row=labels["Principal repayment"], column=4).value,
+        )
+        self.assertNotIn(
+            "IDC",
+            sheet.cell(row=labels["PV depreciation (straight-line)"], column=4).value,
+        )
+
+    def test_enabled_construction_defines_named_cells(self):
+        workbook = build_vietnam_esco_workbook(
+            _construction_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+
+        for name in self.NAMES:
+            self.assertIn(name, workbook.defined_names, name)
+
+    def test_debt_schedule_reproduces_grace_pattern(self):
+        workbook = build_vietnam_esco_workbook(
+            _construction_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        # The year-1 opening balance is the rolled-up COD balance, and the
+        # principal row stays 0 through the grace window.
+        self.assertEqual(
+            sheet.cell(row=labels["Opening debt balance"], column=4).value,
+            "=COD_DEBT_BALANCE",
+        )
+        principal_formula = sheet.cell(
+            row=labels["Principal repayment"], column=4
+        ).value
+        self.assertIn("PRINCIPAL_GRACE_YEARS", principal_formula)
+
+    def test_depreciable_base_tie_out_includes_idc(self):
+        workbook = build_vietnam_esco_workbook(
+            _construction_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        for label in ("PV depreciation (straight-line)",
+                      "BESS depreciation (straight-line)"):
+            formula = sheet.cell(row=labels[label], column=4).value
+            self.assertIn("IDC", formula, label)
 
 
 class CitRegimeAuditTests(TestCase):

@@ -659,6 +659,36 @@ class VietnamDirectOwnershipAdapterTests(TestCase):
         self.assertNotIn("direct_ownership", result["derivation"])
 
 
+class ConstructionFinancingAdapterTests(TestCase):
+    """Construction + grace ride the shared financing-override path (like debt
+    fraction / rate / term) straight through to the cash flow."""
+
+    def test_construction_and_grace_inputs_flow_to_cash_flow(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            construction_months=12,
+            principal_grace_years=2,
+        )
+
+        construction = result["derivation"]["construction"]
+        self.assertEqual(construction["construction_months"], 12)
+        self.assertEqual(construction["principal_grace_years"], 2)
+        # capex 110,000 (PV 100,000 + BESS 10,000) × 0.7 debt × 8.5% × 0.5.
+        self.assertAlmostEqual(construction["idc_usd"], 3272.5)
+        self.assertAlmostEqual(construction["cod_debt_balance_usd"], 80272.5)
+
+    def test_defaults_leave_derivation_without_construction_block(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+        )
+
+        self.assertNotIn("construction", result["derivation"])
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

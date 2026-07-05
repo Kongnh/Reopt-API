@@ -62,6 +62,8 @@ def calculate_vietnam_esco_cash_flow(
     debt_fraction=DEFAULT_DEBT_FRACTION,
     debt_interest_rate_fraction=DEFAULT_DEBT_INTEREST_RATE,
     debt_term_years=DEFAULT_DEBT_TERM_YEARS,
+    construction_months=0,
+    principal_grace_years=0,
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
@@ -122,25 +124,45 @@ def calculate_vietnam_esco_cash_flow(
             "with a preferential/holiday regime."
         )
     replacement_costs_by_year = replacement_costs_by_year or []
+    _validate_construction_financing(
+        construction_months, principal_grace_years, debt_term_years
+    )
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
     debt_principal_vnd = total_capex_vnd * debt_fraction
     equity_investment_vnd = total_capex_vnd - debt_principal_vnd
+    # Interest during construction (IDC): even drawdown of the debt-funded
+    # capex over the construction period, interest at the debt rate on the
+    # average balance (half the final draw), simple (no compounding). IDC is
+    # debt-funded (rolled up): the balance at COD is the drawn principal plus
+    # IDC; equity is unchanged. With construction_months=0 this collapses to
+    # the legacy overnight build, bit-for-bit.
+    idc_vnd = (
+        debt_principal_vnd * debt_interest_rate_fraction
+        * (construction_months / 12) / 2
+    ) if construction_months else 0
+    cod_debt_balance_vnd = debt_principal_vnd + idc_vnd
+    construction_enabled = construction_months > 0 or principal_grace_years > 0
 
+    # Principal grace: years 1..g are interest-only on the full COD balance,
+    # then principal amortizes over the remaining (tenor − g) years with the
+    # same level-payment annuity as before.
     annual_debt_payment_vnd = _annual_debt_payment(
-        debt_principal_vnd,
+        cod_debt_balance_vnd,
         debt_interest_rate_fraction,
-        debt_term_years,
+        debt_term_years - principal_grace_years,
     )
     debt_schedule = _debt_schedule(
-        debt_principal_vnd,
+        cod_debt_balance_vnd,
         debt_interest_rate_fraction,
         annual_debt_payment_vnd,
         debt_term_years,
         project_years,
+        grace_years=principal_grace_years,
     )
     validate_pv_depreciation_years(pv_depreciation_years)
     depreciation_by_year = _depreciation_schedule(
-        pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years
+        pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years,
+        idc_vnd=idc_vnd,
     )
 
     base_energy_revenue_vnd = sum(
@@ -423,6 +445,11 @@ def calculate_vietnam_esco_cash_flow(
             else None
         ),
     }
+    if construction_enabled:
+        # Gated so cases without construction/grace stay byte-for-byte
+        # unchanged; _finalize_currencies emits the _usd pair below.
+        summary["idc_vnd"] = idc_vnd
+        summary["cod_debt_balance_vnd"] = cod_debt_balance_vnd
     _finalize_currencies(summary, exchange_rate_vnd_per_usd)
 
     derivation = {
@@ -468,6 +495,17 @@ def calculate_vietnam_esco_cash_flow(
     if preferential_rate is not None:
         derivation["cit"]["preferential_rate"] = preferential_rate
         derivation["cit"]["preferential_years"] = preferential_years
+    if construction_enabled:
+        # Self-describing construction/grace financing so the audit sheet can
+        # rebuild IDC, the COD balance and the grace debt schedule from named
+        # cells. Omitted when both inputs are 0 so existing cases stay
+        # byte-for-byte unchanged.
+        derivation["construction"] = {
+            "construction_months": construction_months,
+            "principal_grace_years": principal_grace_years,
+            "idc_usd": idc_vnd,
+            "cod_debt_balance_usd": cod_debt_balance_vnd,
+        }
     if surplus_enabled:
         # Self-describing surplus config so the audit sheet can rebuild the
         # revenue row from named cells (year-1 sold kWh, USD price, escalation,
@@ -615,14 +653,50 @@ def _finalize_currencies(values, exchange_rate_vnd_per_usd=None):
                 values[key] = value * exchange_rate_vnd_per_usd
 
 
-def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years):
+def _validate_construction_financing(construction_months, principal_grace_years,
+                                     debt_term_years):
+    if isinstance(construction_months, bool) or not isinstance(construction_months, int):
+        raise ValueError(
+            f"construction_months must be an integer, got {construction_months!r}."
+        )
+    if not 0 <= construction_months <= 36:
+        raise ValueError(
+            f"construction_months must be within 0-36, got {construction_months}."
+        )
+    if isinstance(principal_grace_years, bool) or not isinstance(principal_grace_years, int):
+        raise ValueError(
+            f"principal_grace_years must be an integer, got {principal_grace_years!r}."
+        )
+    if principal_grace_years < 0:
+        raise ValueError(
+            f"principal_grace_years must be >= 0, got {principal_grace_years}."
+        )
+    if principal_grace_years and principal_grace_years >= debt_term_years:
+        raise ValueError(
+            "principal_grace_years must be less than debt_term_years "
+            f"({debt_term_years}), got {principal_grace_years}."
+        )
+
+
+def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years,
+                           pv_depreciation_years, idc_vnd=0.0):
+    # Capitalized IDC (borrowing costs during construction; VAS / Circular 45)
+    # is allocated pro-rata across the depreciable classes by capex share and
+    # rides each class's existing schedule — never expensed. idc_vnd=0 leaves
+    # the bases unchanged.
+    depreciable_capex_vnd = pv_capex_vnd + bess_capex_vnd
+    idc_pv_vnd = (
+        idc_vnd * pv_capex_vnd / depreciable_capex_vnd
+        if depreciable_capex_vnd else 0.0
+    )
+    idc_bess_vnd = idc_vnd - idc_pv_vnd if depreciable_capex_vnd else 0.0
     pv_depreciation = straight_line_depreciation_schedule(
-        pv_capex_vnd,
+        pv_capex_vnd + idc_pv_vnd,
         pv_depreciation_years,
         project_years=project_years,
     )
     bess_depreciation = straight_line_depreciation_schedule(
-        bess_capex_vnd,
+        bess_capex_vnd + idc_bess_vnd,
         BESS_DEPRECIATION_YEARS,
         project_years=project_years,
     )
@@ -646,14 +720,20 @@ def _annual_debt_payment(principal, interest_rate, term_years):
     )
 
 
-def _debt_schedule(principal, interest_rate, annual_payment, term_years, project_years):
+def _debt_schedule(principal, interest_rate, annual_payment, term_years,
+                   project_years, grace_years=0):
     rows = []
     balance = principal
 
     for year_index in range(project_years):
         if year_index < term_years and balance > 0:
             interest = balance * interest_rate
-            principal_payment = min(max(annual_payment - interest, 0), balance)
+            if year_index < grace_years:
+                # Principal grace: interest-only on the full COD balance;
+                # amortization starts in year grace_years + 1.
+                principal_payment = 0
+            else:
+                principal_payment = min(max(annual_payment - interest, 0), balance)
             debt_service = interest + principal_payment
             balance -= principal_payment
         else:

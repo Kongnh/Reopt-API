@@ -67,6 +67,8 @@ FINANCIAL_ASSUMPTION_KEYS = [
     "debt_fraction",
     "debt_interest_rate_fraction",
     "debt_term_years",
+    "construction_months",
+    "principal_grace_years",
     "annual_om_usd",
     "annual_om_vnd",
     "om_escalation_rate",

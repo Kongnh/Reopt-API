@@ -940,6 +940,32 @@ class VietnamCaseBuilderTests(TestCase):
         overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
         self.assertEqual(overrides["direct_ownership"], {"enabled": True})
 
+    def test_construction_financing_inputs_round_trip(self):
+        # Construction + grace travel the same path as the other financing
+        # scalars (debt fraction / rate / term): into assumptions, not the
+        # REopt payload, and back out through the rebuild override mapping.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "financial": {
+                    "construction_months": 12,
+                    "principal_grace_years": 2,
+                },
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["construction_months"], 12)
+        self.assertEqual(case["assumptions"]["principal_grace_years"], 2)
+        self.assertNotIn("construction_months", case["payload"]["Financial"])
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["construction_months"], 12)
+        self.assertEqual(overrides["principal_grace_years"], 2)
+
     def test_direct_ownership_carries_options_into_assumptions(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 
