@@ -976,7 +976,10 @@ class DirectOwnershipTests(TestCase):
             self.assertAlmostEqual(row["cit_vnd"], 8000.0)
 
     def test_explicit_cit_regime_override_is_honored(self):
-        result = self._run(cit_regime="re_producer")
+        result = self._run(
+            direct_ownership={"assume_profitable_host": False},
+            cit_regime="re_producer",
+        )
         cit = result["derivation"]["cit"]
         self.assertEqual(cit["regime"], "re_producer")
         self.assertIn("preferential_rate", cit)
@@ -1007,6 +1010,40 @@ class DirectOwnershipTests(TestCase):
         ]
         self.assertAlmostEqual(cit[0], 0.0)
         self.assertAlmostEqual(cit[1], 0.0)
+
+    def test_profitable_host_with_preferential_regime_raises(self):
+        # The immediate-shield convention is only defined for the flat
+        # standard regime; layering it on the re_producer preferential/holiday
+        # schedule is undefined economics (default host convention, explicit
+        # regime override).
+        with self.assertRaises(ValueError) as context:
+            self._run(cit_regime="re_producer")
+        self.assertIn("assume_profitable_host", str(context.exception))
+
+    def test_preferential_regime_with_host_disabled_uses_carryforward(self):
+        # host disabled routes to the FIFO carryforward branch
+        # (immediate_loss_relief=False) with the re_producer preferential/
+        # holiday schedule applied to the eventual taxed income.
+        cit = [
+            row["cit_vnd"]
+            for row in self._run(
+                direct_ownership={"assume_profitable_host": False},
+                cit_regime="re_producer",
+                replacement_costs_by_year=[0.0, 0.0, 80000.0, 0.0, 0.0],
+                project_years=5,
+            )["annual_cash_flows"]
+        ]
+        # Year 1 (index 0): within the 4-year holiday (clock starts at the
+        # first profitable year, index 0).
+        self.assertAlmostEqual(cit[0], 0.0)
+        # Year 3 (index 2) loss: carried forward, not an immediate shield — CIT
+        # is exactly 0, not the -4000 an immediate-relief path would give
+        # (-40000 loss x 10% preferential rate).
+        self.assertAlmostEqual(cit[2], 0.0)
+        # Year 5 (index 4): past the holiday, in the 9-year reduced-rate
+        # window, at the re_producer preferential 10% base rate:
+        # 40000 x (0.10 x 0.50) = 2000.
+        self.assertAlmostEqual(cit[4], 2000.0)
 
     def test_surplus_export_is_in_the_taxable_base_and_revenue(self):
         row = self._run(

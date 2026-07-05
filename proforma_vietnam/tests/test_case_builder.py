@@ -961,6 +961,25 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(block["assume_profitable_host"], False)
         self.assertEqual(block["cit_regime"], "re_producer")
 
+    def test_direct_ownership_rejects_preferential_cit_regime_with_default_host(self):
+        # The immediate profitable-host shield convention (default on) is only
+        # defined for the flat standard regime; a preferential/holiday regime
+        # needs assume_profitable_host: false (5-yr FIFO carryforward).
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "direct_ownership": {"enabled": True, "cit_regime": "re_producer"},
+                }
+            )
+
+        self.assertIn("assume_profitable_host", str(context.exception))
+
     def test_direct_ownership_does_not_require_esco_discount_fraction(self):
         # The factory captures the whole avoided bill, so the ESCO discount is
         # unused; a case may omit it and still build (defaulted to 0, never used).

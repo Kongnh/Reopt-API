@@ -20,6 +20,7 @@ from proforma_vietnam.dppa_settlement import (
     load_cfmp_series,
     load_fmp_series,
 )
+from proforma_vietnam.tax_model import CIT_REGIME_STANDARD_FLAT
 from reoptjl.src.vietnam import build_evn_tariff
 from reoptjl.src.vietnam.evn_tariff import RATE_VINTAGE_KEYS, _normalize_voltage_level
 
@@ -425,6 +426,15 @@ def _direct_ownership_config(direct_ownership_config, dppa_inputs):
             "direct_ownership (factory self-invest) cannot be combined with a "
             "dppa block; the factory owns the asset, there is no DPPA counterparty."
         )
+    cit_regime = direct_ownership_config.get("cit_regime")
+    if cit_regime is not None and cit_regime != CIT_REGIME_STANDARD_FLAT:
+        if direct_ownership_config.get("assume_profitable_host") is not False:
+            raise ValueError(
+                f"direct_ownership.cit_regime={cit_regime!r} needs "
+                "assume_profitable_host: false; the immediate tax-shield "
+                "convention is only defined for the flat standard regime "
+                f"({CIT_REGIME_STANDARD_FLAT!r}), not a preferential/holiday schedule."
+            )
     return dict(direct_ownership_config)
 
 

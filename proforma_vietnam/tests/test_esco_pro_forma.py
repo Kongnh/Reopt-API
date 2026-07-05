@@ -613,7 +613,11 @@ class VietnamDirectOwnershipAdapterTests(TestCase):
             _fake_reopt_results(can_grid_charge=False),
             esco_energy_discount_fraction=0.9,
             project_years=1,
-            direct_ownership={"enabled": True, "cit_regime": "re_producer"},
+            direct_ownership={
+                "enabled": True,
+                "cit_regime": "re_producer",
+                "assume_profitable_host": False,
+            },
         )
         self.assertEqual(result["derivation"]["cit"]["regime"], "re_producer")
 

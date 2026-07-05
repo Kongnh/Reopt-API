@@ -444,6 +444,27 @@ class DirectOwnershipAuditTests(TestCase):
         formula = sheet.cell(row=post_row, column=4).value
         self.assertIn("OPT_BILL_Y1", formula)
 
+    def test_preferential_regime_with_host_disabled_has_no_shield_row(self):
+        # Task 2a's carryforward machinery is already regime-aware; confirm
+        # the flat profitable-host shield row is absent and the workbook
+        # still builds cleanly for a host=False + re_producer DIRECT result.
+        result = _esco_result(
+            direct_ownership={"assume_profitable_host": False, "cit_regime": "re_producer"},
+        )
+        workbook = build_vietnam_esco_workbook(
+            result,
+            assumptions={
+                **DIRECT_ASSUMPTIONS,
+                "direct_ownership": {
+                    "enabled": True,
+                    "assume_profitable_host": False,
+                    "cit_regime": "re_producer",
+                },
+            },
+        )
+        labels = self._labels(workbook)
+        self.assertNotIn(self.FLAT_CIT_LABEL, labels)
+
 
 class CitRegimeAuditTests(TestCase):
 

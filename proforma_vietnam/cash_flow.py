@@ -108,6 +108,19 @@ def calculate_vietnam_esco_cash_flow(
             # annually; EVN energy escalation is the documented proxy for drift.
             surplus_price_escalation_rate = evn_energy_escalation_rate
     cit_regime = _resolve_cit_regime(cit_regime, structure)
+    if assume_profitable_host and cit_regime != CIT_REGIME_STANDARD_FLAT:
+        # The immediate-shield convention deducts a loss year against the
+        # host's other profits at the base rate every year; layering that onto
+        # a preferential/holiday schedule (partial-rate or zero-rate years) is
+        # undefined economics, so it is only defined for the flat standard
+        # regime.
+        raise ValueError(
+            "direct_ownership.assume_profitable_host (immediate tax-shield "
+            f"convention) is only defined for the flat standard CIT regime "
+            f"({CIT_REGIME_STANDARD_FLAT!r}); got cit_regime={cit_regime!r}. "
+            "Use assume_profitable_host: false (5-year FIFO loss carryforward) "
+            "with a preferential/holiday regime."
+        )
     replacement_costs_by_year = replacement_costs_by_year or []
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
     debt_principal_vnd = total_capex_vnd * debt_fraction
