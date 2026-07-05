@@ -21,6 +21,11 @@ TOU_SCHEDULES = {
     },
 }
 
+# Vintage-disclosure keys carried on build_evn_tariff()'s output. They are audit
+# metadata, not REopt.jl ElectricTariff scenario fields — callers that submit the
+# tariff dict to REopt.jl must strip these keys from the payload first.
+RATE_VINTAGE_KEYS = ("rate_vintage_year", "rate_vintage_source")
+
 VOLTAGE_LEVEL_ALIASES = {
     ">=110kv": "110kv_and_above",
     "110kv_and_above": "110kv_and_above",

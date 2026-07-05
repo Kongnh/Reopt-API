@@ -3,6 +3,7 @@ import os
 from urllib import request
 
 from reoptjl.src.vietnam import build_evn_tariff
+from reoptjl.src.vietnam.evn_tariff import RATE_VINTAGE_KEYS
 
 
 def build_example_payload(tou_schedule="current"):
@@ -13,6 +14,10 @@ def build_example_payload(tou_schedule="current"):
         exchange_rate_vnd_per_usd=25000,
         tou_schedule=tou_schedule
     )
+    # Vintage disclosure is audit metadata, not a REopt.jl ElectricTariff field;
+    # strip it so the submitted payload only carries scenario inputs.
+    for key in RATE_VINTAGE_KEYS:
+        tariff.pop(key, None)
 
     return {
         "Settings": {

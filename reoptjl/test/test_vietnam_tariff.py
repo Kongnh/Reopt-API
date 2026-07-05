@@ -117,6 +117,10 @@ class VietnamEvnTariffTests(TestCase):
         self.assertEqual(payload["ElectricTariff"]["monthly_demand_rates"], [])
         self.assertEqual(payload["Settings"]["time_steps_per_hour"], 1)
         self.assertEqual(payload["ElectricLoad"]["year"], 2025)
+        # Vintage disclosure is audit metadata, not a REopt.jl ElectricTariff
+        # field — it must never reach a payload submitted to REopt.jl.
+        self.assertNotIn("rate_vintage_year", payload["ElectricTariff"])
+        self.assertNotIn("rate_vintage_source", payload["ElectricTariff"])
 
     def test_standard_rates_fall_back_to_latest_vintage_at_or_before_requested_year(self):
         tariff = build_evn_tariff(year=2026, voltage_level="22-110kV")

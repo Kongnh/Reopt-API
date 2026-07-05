@@ -15,7 +15,7 @@ from proforma_vietnam.dppa_settlement import (
     load_fmp_series,
 )
 from reoptjl.src.vietnam import build_evn_tariff
-from reoptjl.src.vietnam.evn_tariff import _normalize_voltage_level
+from reoptjl.src.vietnam.evn_tariff import RATE_VINTAGE_KEYS, _normalize_voltage_level
 
 
 DEFAULT_COUNTRY = "Vietnam"
@@ -81,12 +81,13 @@ def build_vietnam_case(case_config):
     year = load_config.get("year") or tariff_config.get("year")
     loads_kw = _read_8760_load_csv(load_config["path"])
     tariff = _build_tariff(tariff_config)
-    # rate_vintage_year/source describe which EVN rate vintage was resolved for the
+    # RATE_VINTAGE_KEYS describe which EVN rate vintage was resolved for the
     # requested tariff year (see evn_tariff.py's vintage fallback); they're audit
     # metadata, not REopt.jl ElectricTariff scenario fields, so they're popped off
     # here and routed into assumptions instead of the payload sent to REopt.
-    rate_vintage_year = tariff.pop("rate_vintage_year", None)
-    rate_vintage_source = tariff.pop("rate_vintage_source", None)
+    rate_vintage_year, rate_vintage_source = (
+        tariff.pop(key, None) for key in RATE_VINTAGE_KEYS
+    )
     site = case_config.get("site", {})
     pv_inputs = _pv_inputs(technologies.get("pv", {}), site)
 
