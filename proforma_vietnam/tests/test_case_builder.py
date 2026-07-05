@@ -274,9 +274,10 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(assumptions["evn_energy_escalation_rate"], 0.04)
 
     def test_default_exchange_rate_matches_versioned_defaults(self):
-        # Guards the no-value-change constraint: Task 1b moved this constant
-        # from a hardcoded literal to vietnam_defaults.json's financial block.
-        self.assertEqual(DEFAULT_EXCHANGE_RATE_VND_PER_USD, 25000)
+        # The default contract FX planning rate lives in vietnam_defaults.json's
+        # financial block. Refreshed to the June 2026 market reference (26,300
+        # VND/USD; 2026 avg ~26,244) — see vietnam_market_context.md.
+        self.assertEqual(DEFAULT_EXCHANGE_RATE_VND_PER_USD, 26300)
         self.assertEqual(
             DEFAULT_EXCHANGE_RATE_VND_PER_USD,
             FINANCIAL_DEFAULTS["exchange_rate_vnd_per_usd"],

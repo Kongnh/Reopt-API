@@ -25,8 +25,9 @@ DEFAULT_TOU_SCHEDULE = "current"
 DEFAULT_DEMAND_SAVINGS_ESCO_SHARE = 0.8
 DEFAULT_GRID_CHARGING_ENABLED = False
 # Default contract FX planning rate (VND per USD), used when a case's tariff
-# block doesn't specify one. The value lives in vietnam_defaults.json's
-# financial block so it can be revised without touching code.
+# block doesn't specify one. June 2026 market reference (~26,300 VND/USD; 2026
+# avg ~26,244). The value lives in vietnam_defaults.json's financial block so it
+# can be revised without touching code.
 DEFAULT_EXCHANGE_RATE_VND_PER_USD = FINANCIAL_DEFAULTS["exchange_rate_vnd_per_usd"]
 
 DPPA_VOLTAGE_ELIGIBLE_GRID_CFD = {"110kv_and_above", "22_to_110kv"}
