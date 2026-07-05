@@ -88,6 +88,12 @@ Regulatory/commercial constants live in `defaults/vietnam_defaults.json`
 `tax_model.py` read their `DEFAULT_*` / `CIT_*` / depreciation constants from
 there; regulatory provenance stays in code comments next to each use.
 
-> Follow-up (out of scope here): the EVN tariff rate tables in
-> `reoptjl/src/vietnam/evn_rates.py` could move to the same versioned-defaults
-> pattern.
+The EVN tariff rate tables also follow this pattern: they live in
+`defaults/evn_tariff_rates.json`, keyed by year (vintage) rather than a single
+snapshot. `reoptjl/src/vietnam/evn_rates.py` loads the JSON and re-exposes it
+under its original Python names/shapes; `reoptjl/src/vietnam/evn_tariff.py`
+resolves a requested year to the latest vintage year <= that year (raising
+only when the requested year predates every vintage), and
+`build_evn_tariff(...)` reports the resolved vintage via `rate_vintage_year`
+/ `rate_vintage_source`, which `case_builder.py` carries into the case's
+`assumptions` for the audit workbook's raw echo.

@@ -190,6 +190,24 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(case["assumptions"]["om_escalation_rate"], 0.03)
         self.assertEqual(case["assumptions"]["pv_degradation_rate"], 0.006)
 
+    def test_assumptions_carry_evn_rate_vintage_disclosure(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2026, "path": str(load_csv_path)},
+                "tariff": {"year": 2026, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        assumptions = case["assumptions"]
+        self.assertEqual(assumptions["rate_vintage_year"], 2025)
+        self.assertIn("1279/QD-BCT", assumptions["rate_vintage_source"])
+        self.assertNotIn("rate_vintage_year", case["payload"]["ElectricTariff"])
+        self.assertNotIn("rate_vintage_source", case["payload"]["ElectricTariff"])
+
     def test_builds_two_component_pilot_tariff_when_enabled(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

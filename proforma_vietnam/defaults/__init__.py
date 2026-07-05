@@ -17,3 +17,8 @@ with open(_PATH, encoding="utf-8") as _f:
 VERSION = _DEFAULTS["version"]
 FINANCIAL_DEFAULTS = _DEFAULTS["financial"]
 TAX_DEFAULTS = _DEFAULTS["tax"]
+
+_EVN_TARIFF_PATH = os.path.join(os.path.dirname(__file__), "evn_tariff_rates.json")
+
+with open(_EVN_TARIFF_PATH, encoding="utf-8") as _evn_tariff_f:
+    EVN_TARIFF_RATES = json.load(_evn_tariff_f)

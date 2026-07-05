@@ -81,6 +81,12 @@ def build_vietnam_case(case_config):
     year = load_config.get("year") or tariff_config.get("year")
     loads_kw = _read_8760_load_csv(load_config["path"])
     tariff = _build_tariff(tariff_config)
+    # rate_vintage_year/source describe which EVN rate vintage was resolved for the
+    # requested tariff year (see evn_tariff.py's vintage fallback); they're audit
+    # metadata, not REopt.jl ElectricTariff scenario fields, so they're popped off
+    # here and routed into assumptions instead of the payload sent to REopt.
+    rate_vintage_year = tariff.pop("rate_vintage_year", None)
+    rate_vintage_source = tariff.pop("rate_vintage_source", None)
     site = case_config.get("site", {})
     pv_inputs = _pv_inputs(technologies.get("pv", {}), site)
 
@@ -118,6 +124,8 @@ def build_vietnam_case(case_config):
             esco_contract,
             tariff_config,
             dppa_inputs,
+            rate_vintage_year,
+            rate_vintage_source,
         ),
     }
 
@@ -269,7 +277,8 @@ def _resolve_fmp_path(fmp_path):
     return str(repo_root / fmp_path)
 
 
-def _assumptions(case_config, financial, technologies, esco_contract, tariff_config, dppa_inputs):
+def _assumptions(case_config, financial, technologies, esco_contract, tariff_config, dppa_inputs,
+                  rate_vintage_year=None, rate_vintage_source=None):
     if esco_contract.get("esco_energy_discount_fraction") is None:
         raise ValueError("esco_contract.esco_energy_discount_fraction is required.")
 
@@ -282,6 +291,8 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         "exchange_rate_vnd_per_usd": tariff_config.get("exchange_rate_vnd_per_usd"),
         "evn_energy_escalation_rate": tariff_config.get("evn_energy_escalation_rate"),
         "evn_capacity_escalation_rate": tariff_config.get("evn_capacity_escalation_rate"),
+        "rate_vintage_year": rate_vintage_year,
+        "rate_vintage_source": rate_vintage_source,
         "esco_energy_discount_fraction": esco_contract.get("esco_energy_discount_fraction"),
         "demand_savings_esco_share": esco_contract.get(
             "demand_savings_esco_share",

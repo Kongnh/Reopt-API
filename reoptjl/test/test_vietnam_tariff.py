@@ -118,6 +118,40 @@ class VietnamEvnTariffTests(TestCase):
         self.assertEqual(payload["Settings"]["time_steps_per_hour"], 1)
         self.assertEqual(payload["ElectricLoad"]["year"], 2025)
 
+    def test_standard_rates_fall_back_to_latest_vintage_at_or_before_requested_year(self):
+        tariff = build_evn_tariff(year=2026, voltage_level="22-110kV")
+
+        jan_6_2025_10am = datetime(2025, 1, 6, 10).timetuple().tm_yday - 1
+        jan_6_2025_10am_index = jan_6_2025_10am * 24 + 10
+
+        self.assertEqual(tariff["rate_vintage_year"], 2025)
+        self.assertIn("1279/QD-BCT", tariff["rate_vintage_source"])
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_10am_index], 3398)
+
+    def test_standard_rates_raise_for_year_before_earliest_vintage(self):
+        # 2019 (not 2020) is deliberately used here: 2020 is a leap year, which
+        # would trip the unrelated 8760-hour leap-year guard before the vintage
+        # lookup ever runs, and this test wants to isolate the vintage-fallback error.
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(year=2019, voltage_level="22-110kV")
+
+        self.assertIn("2019", str(context.exception))
+
+    def test_two_component_pilot_rates_fall_back_to_latest_vintage(self):
+        tariff = build_evn_tariff(
+            year=2026,
+            voltage_level="6-22kV",
+            two_component_pilot_enabled=True,
+        )
+
+        jan_6_2025_10am = datetime(2025, 1, 6, 10).timetuple().tm_yday - 1
+        jan_6_2025_10am_index = jan_6_2025_10am * 24 + 10
+
+        self.assertEqual(tariff["rate_vintage_year"], 2025)
+        self.assertIn("paper simulation from 2025-10", tariff["rate_vintage_source"])
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_10am_index], 2189)
+        self.assertEqual(tariff["monthly_demand_rates"], [240050] * 12)
+
     def test_example_payload_accepts_decision_963_schedule_for_case_studies(self):
         payload = build_example_payload(tou_schedule="decision_963")
 

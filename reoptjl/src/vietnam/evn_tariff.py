@@ -52,19 +52,25 @@ def build_evn_tariff(year, voltage_level, tariff_category="manufacturing",
 
     voltage_key = _normalize_voltage_level(voltage_level)
     schedule = _tou_schedule(tou_schedule)
-    rates = _rates_for(year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled)
+    rates, rate_vintage_year, rate_vintage_source = _rates_for(
+        year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled
+    )
     tou_rates = [_convert_currency(rates[_period_for(year, hour_index, schedule)], currency, exchange_rate_vnd_per_usd)
                  for hour_index in range(8760)]
 
     monthly_demand_rates = []
     if two_component_pilot_enabled:
-        cp_rate = TWO_COMPONENT_PILOT_RATES[year]["rates"][voltage_key]["capacity_per_kw_month"]
+        cp_rate = TWO_COMPONENT_PILOT_RATES[rate_vintage_year]["rates"][voltage_key]["capacity_per_kw_month"]
         monthly_demand_rates = [_convert_currency(cp_rate, currency, exchange_rate_vnd_per_usd)] * 12
 
-    return {
+    result = {
         "tou_energy_rates_per_kwh": tou_rates,
         "monthly_demand_rates": monthly_demand_rates,
     }
+    if rate_vintage_year is not None:
+        result["rate_vintage_year"] = rate_vintage_year
+        result["rate_vintage_source"] = rate_vintage_source
+    return result
 
 
 def _normalize_voltage_level(voltage_level):
@@ -88,19 +94,36 @@ def _tou_schedule(tou_schedule):
 
 def _rates_for(year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled):
     if two_component_pilot_enabled:
-        if year not in TWO_COMPONENT_PILOT_RATES:
-            raise ValueError("No EVN two-component pilot rates configured for year {}.".format(year))
-        return TWO_COMPONENT_PILOT_RATES[year]["rates"][voltage_key]["energy_per_kwh"]
+        vintage_year = _latest_vintage_year(TWO_COMPONENT_PILOT_RATES, year, "two-component pilot")
+        vintage = TWO_COMPONENT_PILOT_RATES[vintage_year]
+        return vintage["rates"][voltage_key]["energy_per_kwh"], vintage_year, vintage["source"]
 
     if base_rate_per_kwh is not None:
-        return {
+        rates = {
             period: base_rate_per_kwh * multiplier
             for period, multiplier in STANDARD_TOU_MULTIPLIERS.items()
         }
+        return rates, None, None
 
-    if year not in STANDARD_MANUFACTURING_RATES:
-        raise ValueError("No EVN standard manufacturing rates configured for year {}.".format(year))
-    return STANDARD_MANUFACTURING_RATES[year]["rates_per_kwh"][voltage_key]
+    vintage_year = _latest_vintage_year(STANDARD_MANUFACTURING_RATES, year, "standard manufacturing")
+    vintage = STANDARD_MANUFACTURING_RATES[vintage_year]
+    return vintage["rates_per_kwh"][voltage_key], vintage_year, vintage["source"]
+
+
+def _latest_vintage_year(rates_by_year, year, label):
+    """Resolve ``year`` to the latest configured vintage year <= ``year``.
+
+    Rate tables only carry the years a tariff decision actually changed;
+    a requested year with no exact entry falls back to the newest vintage
+    on or before it (e.g. 2026 resolves to a 2025 vintage). Raises only
+    when ``year`` predates every configured vintage.
+    """
+    eligible_years = [vintage_year for vintage_year in rates_by_year if vintage_year <= year]
+    if not eligible_years:
+        raise ValueError(
+            "No EVN {} rates configured for year {} or earlier.".format(label, year)
+        )
+    return max(eligible_years)
 
 
 def _period_for(year, hour_index, schedule):
