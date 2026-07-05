@@ -24,6 +24,7 @@ def calculate_esco_pro_forma_from_reopt_results(
     )
     dppa_inputs = cash_flow_overrides.pop("dppa_inputs", None)
     surplus_export = cash_flow_overrides.pop("surplus_export", None)
+    direct_ownership = cash_flow_overrides.pop("direct_ownership", None)
     battery_replacement_year = cash_flow_overrides.pop("battery_replacement_year", None)
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
@@ -159,6 +160,21 @@ def calculate_esco_pro_forma_from_reopt_results(
             )
         cash_flow_inputs["dppa_settlement"] = dppa_settlement
 
+    direct_ownership_enabled = direct_ownership is not None and (
+        not isinstance(direct_ownership, dict) or direct_ownership.get("enabled", True)
+    )
+    if direct_ownership_enabled:
+        # Factory self-invest benchmark. Mutually exclusive with any DPPA block
+        # (the factory owns the asset, there is no generator/offtaker split);
+        # the top-level Decree 243 surplus_export IS allowed here (the factory is
+        # the rooftop owner) and rides on the shared 3a machinery below.
+        if dppa_inputs is not None and dppa_inputs.get("type", DPPA_TYPE_NONE) != DPPA_TYPE_NONE:
+            raise ValueError(
+                "direct_ownership (factory self-invest) cannot be combined with a "
+                "DPPA block (grid CfD or private wire)."
+            )
+        _apply_direct_ownership(cash_flow_inputs, direct_ownership)
+
     if surplus_export is not None and surplus_export.get("enabled"):
         _apply_surplus_export(
             cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd
@@ -206,6 +222,27 @@ def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rat
         _apply_surplus_export(
             cash_flow_inputs, nested_surplus, pv_outputs, exchange_rate_vnd_per_usd
         )
+
+
+def _apply_direct_ownership(cash_flow_inputs, direct_ownership):
+    """Flag a factory self-invest (DIRECT_OWNERSHIP) run for the cash flow.
+
+    The benefit is the full avoided EVN bill (bau − optimized), so the ESCO
+    bau/optimized bill, O&M and replacement extraction above are reused
+    unchanged — only the structure flag, the flat-CIT default and the
+    profitable-host convention differ. The ESCO discount fraction / demand-split
+    inputs, if present, are ignored (the factory captures the whole bill).
+    An optional ``assume_profitable_host`` and ``cit_regime`` override ride in
+    the block; the cash flow defaults the host convention on and the regime to
+    ``standard_flat``.
+    """
+    config = direct_ownership if isinstance(direct_ownership, dict) else {}
+    block = {}
+    if config.get("assume_profitable_host") is not None:
+        block["assume_profitable_host"] = config["assume_profitable_host"]
+    cash_flow_inputs["direct_ownership"] = block
+    if config.get("cit_regime") is not None:
+        cash_flow_inputs["cit_regime"] = config["cit_regime"]
 
 
 def _apply_surplus_export(cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd):

@@ -40,21 +40,30 @@ _ROWS = [
     # --- identity / per-year cash flow ---
     RowSpec("year", "Year", currency=False),
     # ESCO discount-to-EVN / grid-CfD generator energy line. Hidden under the
-    # physical private wire, which presents its PPA energy line instead.
+    # physical private wire (PPA energy line) and under direct ownership (single
+    # bill-savings line).
     RowSpec("esco_energy_revenue", "ESCO Energy Revenue",
-            applies_to=(ESCO, DPPA, DIRECT_OWNERSHIP)),
+            applies_to=(ESCO, DPPA)),
     # ND57 Điều 25 private-wire PPA energy line (physical DPPA only).
     RowSpec("ppa_matched_kwh", "PPA Matched Energy (kWh)", currency=False,
             applies_to=(PHYSICAL_DPPA,)),
     RowSpec("ppa_energy_revenue", "PPA Energy Revenue", applies_to=(PHYSICAL_DPPA,)),
-    RowSpec("esco_demand_revenue", "ESCO Demand Revenue"),
-    RowSpec("esco_grid_arbitrage_revenue", "ESCO Grid Arbitrage Revenue"),
-    # Decree 243/2026 rooftop surplus-export (ESCO and physical private wire;
-    # under grid DPPA the export energy is already monetized at FMP).
+    # Factory self-invest: the full avoided EVN bill (energy + demand), captured
+    # whole with no ESCO discount or 80/20 demand split (direct ownership only).
+    RowSpec("bill_savings_revenue", "Bill Savings (Avoided EVN Bill)",
+            applies_to=(DIRECT_OWNERSHIP,)),
+    # ESCO / grid-CfD / physical demand + arbitrage share lines. Hidden under
+    # direct ownership, where the full bill delta already folds in demand.
+    RowSpec("esco_demand_revenue", "ESCO Demand Revenue",
+            applies_to=(ESCO, DPPA, PHYSICAL_DPPA)),
+    RowSpec("esco_grid_arbitrage_revenue", "ESCO Grid Arbitrage Revenue",
+            applies_to=(ESCO, DPPA, PHYSICAL_DPPA)),
+    # Decree 243/2026 rooftop surplus-export (ESCO, physical private wire and
+    # direct ownership; under grid DPPA the export energy is monetized at FMP).
     RowSpec("surplus_export_kwh", "Surplus Export (kWh)", currency=False,
-            applies_to=(ESCO, PHYSICAL_DPPA)),
+            applies_to=(ESCO, PHYSICAL_DPPA, DIRECT_OWNERSHIP)),
     RowSpec("surplus_export_revenue", "Surplus Export Revenue",
-            applies_to=(ESCO, PHYSICAL_DPPA)),
+            applies_to=(ESCO, PHYSICAL_DPPA, DIRECT_OWNERSHIP)),
     RowSpec("esco_revenue", "ESCO Revenue"),
     RowSpec("annual_om", "O&M"),
     RowSpec("replacement_cost", "Replacement Cost"),
@@ -102,6 +111,8 @@ CASH_FLOW_VIEW = [
     # Physical private-wire PPA energy lines (hidden under ESCO/grid DPPA):
     "ppa_matched_kwh",
     "ppa_energy_revenue",
+    # Direct-ownership avoided-bill line (hidden under ESCO/DPPA/physical):
+    "bill_savings_revenue",
     "esco_demand_revenue",
     "esco_grid_arbitrage_revenue",
     # Surplus-export lines (ESCO + physical private wire; hidden under grid DPPA):

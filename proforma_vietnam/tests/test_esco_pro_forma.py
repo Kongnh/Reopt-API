@@ -555,6 +555,106 @@ class VietnamPhysicalDppaAdapterTests(TestCase):
             )
 
 
+class VietnamDirectOwnershipAdapterTests(TestCase):
+    """Factory self-invest (DIRECT_OWNERSHIP) config resolution: reuses the ESCO
+    bill extraction, flags the structure, allows the top-level surplus leg, and
+    is mutually exclusive with any DPPA block."""
+
+    def _direct_results(self):
+        results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        results["outputs"]["PV"] = {
+            "size_kw": 100,
+            "installed_cost_per_kw": 1000,
+            "electric_to_load_series_kw": [1, 2],
+            "electric_to_grid_series_kw": [400, 400],
+            "electric_curtailed_series_kw": [200, 200],
+            "electric_to_storage_series_kw": [0, 0],
+        }
+        return results
+
+    def test_selects_structure_and_captures_full_avoided_bill(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            direct_ownership={"enabled": True},
+        )
+        self.assertEqual(result["derivation"]["structure"], "direct_ownership")
+        row = result["annual_cash_flows"][0]
+        # bill savings = bau 50000 − optimized 30000 (full delta, energy + demand).
+        self.assertAlmostEqual(row["bill_savings_revenue_vnd"], 20000.0)
+        self.assertAlmostEqual(row["esco_energy_revenue_vnd"], 0.0)
+
+    def test_defaults_to_standard_flat_and_profitable_host(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            direct_ownership={"enabled": True},
+        )
+        self.assertEqual(result["derivation"]["cit"]["regime"], "standard_flat")
+        self.assertTrue(
+            result["derivation"]["direct_ownership"]["assume_profitable_host"]
+        )
+
+    def test_assume_profitable_host_false_carries_through(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            direct_ownership={"enabled": True, "assume_profitable_host": False},
+        )
+        self.assertFalse(
+            result["derivation"]["direct_ownership"]["assume_profitable_host"]
+        )
+
+    def test_cit_regime_override_carried_through(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            direct_ownership={"enabled": True, "cit_regime": "re_producer"},
+        )
+        self.assertEqual(result["derivation"]["cit"]["regime"], "re_producer")
+
+    def test_top_level_surplus_export_allowed_with_direct_ownership(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._direct_results(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            direct_ownership={"enabled": True},
+            surplus_export={"enabled": True, "region": "south"},
+        )
+        self.assertEqual(result["derivation"]["structure"], "direct_ownership")
+        self.assertIn("surplus_export", result["derivation"])
+        self.assertIn(
+            "surplus_export_revenue_usd", result["annual_cash_flows"][0]
+        )
+
+    def test_physical_dppa_block_rejected_with_direct_ownership(self):
+        with self.assertRaises(ValueError):
+            calculate_esco_pro_forma_from_reopt_results(
+                _fake_reopt_results(can_grid_charge=False),
+                esco_energy_discount_fraction=0.9,
+                project_years=1,
+                exchange_rate_vnd_per_usd=25000,
+                direct_ownership={"enabled": True},
+                dppa_inputs={"type": "physical_private_wire",
+                             "ppa_price_vnd_per_kwh": 2500.0},
+            )
+
+    def test_disabled_block_does_not_select_direct_ownership(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            direct_ownership={"enabled": False},
+        )
+        self.assertEqual(result["derivation"]["structure"], "esco")
+        self.assertNotIn("direct_ownership", result["derivation"])
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

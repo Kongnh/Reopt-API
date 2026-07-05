@@ -2,7 +2,7 @@ from unittest import TestCase
 
 from proforma_vietnam import proforma_schema as schema
 from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
-from proforma_vietnam.structures import DPPA, ESCO, PHYSICAL_DPPA
+from proforma_vietnam.structures import DIRECT_OWNERSHIP, DPPA, ESCO, PHYSICAL_DPPA
 
 
 def _esco_result():
@@ -87,6 +87,29 @@ def _physical_result():
     )
 
 
+def _direct_result():
+    # Factory self-invest with surplus enabled so the DIRECT-scoped bill-savings
+    # line and the surplus lines the schema presents both exist in the compute
+    # output the single-source-of-truth test checks against.
+    return calculate_vietnam_esco_cash_flow(
+        project_served_pv_kwh=[1000, 1000],
+        evn_energy_rates_vnd_per_kwh=[2000, 2000],
+        bau_evn_bill_vnd=5_000_000,
+        optimized_evn_bill_vnd=3_000_000,
+        bau_demand_charge_vnd=1_000_000,
+        optimized_demand_charge_vnd=600_000,
+        pv_capex_vnd=10_000_000,
+        bess_capex_vnd=4_000_000,
+        annual_om_vnd=200_000,
+        esco_energy_discount_fraction=0.9,
+        debt_fraction=0.7,
+        project_years=2,
+        direct_ownership={},
+        surplus_export_kwh_year1=5_000,
+        surplus_export_price_usd_per_kwh=1_000,
+    )
+
+
 # Per-year sheet views are validated against an annual cash-flow row; summary
 # views against the summary dict.
 ANNUAL_VIEWS = [
@@ -144,6 +167,15 @@ class SchemaIsSingleSourceOfTruthTests(TestCase):
         for view in SUMMARY_VIEWS:
             self._assert_view_keys_present(view, PHYSICAL_DPPA, summary)
 
+    def test_direct_ownership_presented_keys_exist_in_compute_output(self):
+        result = _direct_result()
+        annual = result["annual_cash_flows"][0]
+        summary = result["summary"]
+        for view in ANNUAL_VIEWS:
+            self._assert_view_keys_present(view, DIRECT_OWNERSHIP, annual)
+        for view in SUMMARY_VIEWS:
+            self._assert_view_keys_present(view, DIRECT_OWNERSHIP, summary)
+
 
 class StructureFilteringTests(TestCase):
     def test_dppa_only_lines_are_hidden_under_esco(self):
@@ -190,3 +222,38 @@ class StructureFilteringTests(TestCase):
         }
         self.assertNotIn("generator_revenue_usd", physical_keys)
         self.assertNotIn("dppa_offtaker_cost_usd", physical_keys)
+
+    def test_bill_savings_line_appears_under_direct_ownership_only(self):
+        direct_keys = {
+            key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DIRECT_OWNERSHIP)
+        }
+        self.assertIn("bill_savings_revenue_usd", direct_keys)
+        # The self-invest factory presents its avoided-bill line, not the ESCO /
+        # grid-CfD energy line nor the private-wire PPA line.
+        self.assertNotIn("esco_energy_revenue_usd", direct_keys)
+        self.assertNotIn("ppa_energy_revenue_usd", direct_keys)
+
+    def test_bill_savings_line_is_hidden_under_other_structures(self):
+        for structure in (ESCO, DPPA, PHYSICAL_DPPA):
+            keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, structure)}
+            self.assertNotIn("bill_savings_revenue_usd", keys, structure)
+
+    def test_esco_and_dppa_lines_are_hidden_under_direct_ownership(self):
+        direct_keys = {
+            key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DIRECT_OWNERSHIP)
+        }
+        # The full avoided-bill delta already folds in energy, demand and any
+        # grid arbitrage, so none of those component lines appear; nor do the
+        # grid-CfD generator/offtaker lines.
+        for hidden in ("esco_demand_revenue_usd", "esco_grid_arbitrage_revenue_usd",
+                       "generator_revenue_usd", "dppa_offtaker_cost_usd"):
+            self.assertNotIn(hidden, direct_keys, hidden)
+
+    def test_surplus_export_lines_appear_under_direct_ownership(self):
+        # The factory is the rooftop owner and may sell surplus to EVN (Decree
+        # 243), so the shared 3a surplus lines ride on this structure too.
+        direct_keys = {
+            key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DIRECT_OWNERSHIP)
+        }
+        self.assertIn("surplus_export_kwh", direct_keys)
+        self.assertIn("surplus_export_revenue_usd", direct_keys)

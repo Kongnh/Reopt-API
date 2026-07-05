@@ -6,6 +6,9 @@ from unittest.mock import patch
 
 from proforma_vietnam.case_builder import DEFAULT_EXCHANGE_RATE_VND_PER_USD, build_vietnam_case
 from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
+from proforma_vietnam.run_dppa_negotiation_sweep import (
+    cash_flow_overrides_from_assumptions,
+)
 
 
 STUB_PV_SERIES = [0.25] * 8760
@@ -917,6 +920,137 @@ class VietnamCaseBuilderTests(TestCase):
             )
 
         self.assertIn("esco_energy_discount_fraction", str(context.exception))
+
+    def test_direct_ownership_block_selects_structure_and_round_trips(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "direct_ownership": {"enabled": True},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["direct_ownership"], {"enabled": True})
+        # The rebuild path maps the block into the cash-flow override the
+        # esco_pro_forma adapter pops to select the structure.
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["direct_ownership"], {"enabled": True})
+
+    def test_direct_ownership_carries_options_into_assumptions(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "direct_ownership": {
+                    "enabled": True,
+                    "assume_profitable_host": False,
+                    "cit_regime": "re_producer",
+                },
+            }
+        )
+
+        block = case["assumptions"]["direct_ownership"]
+        self.assertEqual(block["assume_profitable_host"], False)
+        self.assertEqual(block["cit_regime"], "re_producer")
+
+    def test_direct_ownership_does_not_require_esco_discount_fraction(self):
+        # The factory captures the whole avoided bill, so the ESCO discount is
+        # unused; a case may omit it and still build (defaulted to 0, never used).
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "direct_ownership": {"enabled": True},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["esco_energy_discount_fraction"], 0.0)
+        self.assertEqual(case["assumptions"]["direct_ownership"], {"enabled": True})
+
+    def test_direct_ownership_rejects_dppa_block(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "direct_ownership": {"enabled": True},
+                    "dppa": {
+                        "type": "physical_private_wire",
+                        "ppa_price_vnd_per_kwh": 1850.0,
+                    },
+                }
+            )
+
+        self.assertIn("dppa", str(context.exception).lower())
+
+    def test_direct_ownership_rejects_unknown_keys(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "direct_ownership": {"enabled": True, "bogus": 1},
+                }
+            )
+
+        self.assertIn("bogus", str(context.exception))
+
+    def test_direct_ownership_disabled_block_is_not_selected(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "direct_ownership": {"enabled": False},
+            }
+        )
+
+        self.assertNotIn("direct_ownership", case["assumptions"])
+
+    def test_direct_ownership_leaves_can_grid_charge_as_configured(self):
+        # Unlike the DPPA co-located BESS (forced off), the factory owns
+        # everything, so a configured grid-charge flag is preserved.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {
+                    "esco_energy_discount_fraction": 0.9,
+                    "grid_charging_enabled": True,
+                },
+                "technologies": {
+                    "storage": {"max_kw": 500.0, "max_kwh": 2000.0, "can_grid_charge": True},
+                },
+                "direct_ownership": {"enabled": True},
+            }
+        )
+
+        self.assertEqual(case["payload"]["ElectricStorage"]["can_grid_charge"], True)
 
 
 def _write_load_csv(values):

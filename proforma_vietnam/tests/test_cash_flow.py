@@ -888,6 +888,182 @@ class PhysicalDppaTests(TestCase):
         self.assertAlmostEqual(row["ppa_energy_revenue_vnd"], 2000.0 * 25000)
 
 
+class DirectOwnershipTests(TestCase):
+    """Factory self-invest benchmark: benefit is the FULL avoided EVN bill
+    (energy + demand), no ESCO discount / 80/20 split; flat 20% CIT with the
+    profitable-host shield by default."""
+
+    def _run(self, direct_ownership=None, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100.0, 100.0],
+            evn_energy_rates_vnd_per_kwh=[10.0, 10.0],
+            bau_evn_bill_vnd=100000.0,
+            optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=0.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.0,
+            project_years=2,
+            direct_ownership={} if direct_ownership is None else direct_ownership,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_resolve_structure_returns_direct_ownership(self):
+        from proforma_vietnam.structures import DIRECT_OWNERSHIP, resolve_structure
+
+        self.assertEqual(resolve_structure(direct_ownership={}), DIRECT_OWNERSHIP)
+        self.assertEqual(self._run()["derivation"]["structure"], DIRECT_OWNERSHIP)
+
+    def test_mutual_exclusion_with_cfd_settlement_raises(self):
+        with self.assertRaises(ValueError):
+            self._run(dppa_settlement={"year_one": {}, "escalation": {}})
+
+    def test_mutual_exclusion_with_physical_dppa_raises(self):
+        with self.assertRaises(ValueError):
+            self._run(physical_dppa={
+                "matched_kwh_year1": 1.0, "ppa_price_usd_per_kwh": 1.0,
+            })
+
+    def test_bill_savings_is_full_evn_bill_delta(self):
+        row = self._run()["annual_cash_flows"][0]
+        # BAU 100000 − optimized 60000 = 40000 (energy + demand, full delta).
+        self.assertAlmostEqual(row["bill_savings_revenue_vnd"], 40000.0)
+        # No ESCO discount / demand-split / arbitrage lines for the factory.
+        self.assertAlmostEqual(row["esco_energy_revenue_vnd"], 0.0)
+        self.assertAlmostEqual(row["esco_demand_revenue_vnd"], 0.0)
+        self.assertAlmostEqual(row["esco_grid_arbitrage_revenue_vnd"], 0.0)
+        # Total developer revenue is the full bill savings (no surplus here).
+        self.assertAlmostEqual(row["esco_revenue_vnd"], 40000.0)
+
+    def test_full_demand_delta_is_captured_without_80_20_split(self):
+        # With a demand delta, the factory keeps 100% of it (it is inside the
+        # total-bill delta), not the ESCO 80% share.
+        row = self._run(
+            bau_evn_bill_vnd=100000.0,
+            optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=30000.0,
+            optimized_demand_charge_vnd=10000.0,
+        )["annual_cash_flows"][0]
+        # bill savings = total bau − total opt = 40000 (demand already inside).
+        self.assertAlmostEqual(row["bill_savings_revenue_vnd"], 40000.0)
+        self.assertAlmostEqual(row["esco_demand_revenue_vnd"], 0.0)
+
+    def test_buyer_view_equals_developer_view(self):
+        row = self._run()["annual_cash_flows"][0]
+        # The factory IS the investor: residual cost is the optimized bill and
+        # savings equal the bill-savings revenue line (no ESCO fee).
+        self.assertAlmostEqual(row["offtaker_post_project_cost_vnd"], 60000.0)
+        self.assertAlmostEqual(row["offtaker_savings_vnd"], 40000.0)
+        self.assertAlmostEqual(
+            row["offtaker_savings_vnd"], row["bill_savings_revenue_vnd"]
+        )
+
+    def test_default_regime_is_standard_flat_20_percent(self):
+        result = self._run()
+        cit = result["derivation"]["cit"]
+        self.assertEqual(cit["regime"], "standard_flat")
+        self.assertEqual(cit["holiday_years"], 0)
+        self.assertEqual(cit["reduced_rate_years"], 0)
+        self.assertNotIn("preferential_rate", cit)
+        # Flat 20% every year on positive income: 40000 × 0.20 = 8000.
+        for row in result["annual_cash_flows"]:
+            self.assertAlmostEqual(row["cit_vnd"], 8000.0)
+
+    def test_explicit_cit_regime_override_is_honored(self):
+        result = self._run(cit_regime="re_producer")
+        cit = result["derivation"]["cit"]
+        self.assertEqual(cit["regime"], "re_producer")
+        self.assertIn("preferential_rate", cit)
+
+    def test_invalid_cit_regime_raises(self):
+        with self.assertRaises(ValueError):
+            self._run(cit_regime="not_a_regime")
+
+    def test_negative_taxable_income_yields_negative_cit_shield(self):
+        # Year-1 replacement expense drives EBT negative; the profitable host
+        # takes an immediate shield (negative CIT), then pays on the year-2 profit.
+        cit = [
+            row["cit_vnd"]
+            for row in self._run(replacement_costs_by_year=[80000.0])["annual_cash_flows"]
+        ]
+        self.assertAlmostEqual(cit[0], -8000.0)   # (40000 − 80000) × 0.20
+        self.assertAlmostEqual(cit[1], 8000.0)    # 40000 × 0.20
+
+    def test_carryforward_path_when_profitable_host_disabled(self):
+        # Standalone treatment: the year-1 loss pays no CIT and carries forward
+        # FIFO to zero out the year-2 profit (no immediate shield).
+        cit = [
+            row["cit_vnd"]
+            for row in self._run(
+                direct_ownership={"assume_profitable_host": False},
+                replacement_costs_by_year=[80000.0],
+            )["annual_cash_flows"]
+        ]
+        self.assertAlmostEqual(cit[0], 0.0)
+        self.assertAlmostEqual(cit[1], 0.0)
+
+    def test_surplus_export_is_in_the_taxable_base_and_revenue(self):
+        row = self._run(
+            surplus_export_kwh_year1=500.0,
+            surplus_export_price_usd_per_kwh=1.0,
+        )["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["surplus_export_revenue_vnd"], 500.0)
+        # revenue = bill savings 40000 + surplus 500; CIT taxes both.
+        self.assertAlmostEqual(row["esco_revenue_vnd"], 40500.0)
+        self.assertAlmostEqual(row["cit_vnd"], 40500.0 * 0.20)
+        # Surplus goes to EVN, so the buyer's residual cost is unchanged.
+        self.assertAlmostEqual(row["offtaker_post_project_cost_vnd"], 60000.0)
+
+    def test_bill_savings_shrinks_with_degradation_repurchase(self):
+        # base served retail = 100×10 + 100×10 = 2000; year-2 degradation grows
+        # the residual bill by 2000 × 0.10 = 200, shrinking the savings.
+        rows = self._run(pv_degradation_rate=0.10)["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["bill_savings_revenue_vnd"], 40000.0)
+        self.assertAlmostEqual(rows[1]["bill_savings_revenue_vnd"], 40000.0 - 200.0)
+
+    def test_developer_metrics_use_incremental_cash_flow(self):
+        # CFADS = savings + surplus − opex − CIT; here 40000 − 8000 = 32000.
+        row = self._run()["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["cash_available_for_debt_service_vnd"], 32000.0)
+        self.assertAlmostEqual(row["equity_cash_flow_vnd"], 32000.0)
+
+    def test_no_cfd_or_ppa_keys_leak_into_direct_rows(self):
+        row = self._run()["annual_cash_flows"][0]
+        for leaked in ("ppa_energy_revenue_vnd", "ppa_matched_kwh", "c_dn_vnd",
+                       "cfd_net_vnd", "generator_revenue_vnd"):
+            self.assertNotIn(leaked, row)
+
+    def test_direct_keys_absent_and_esco_unchanged_without_block(self):
+        esco = calculate_vietnam_esco_cash_flow(
+            project_served_pv_kwh=[100.0, 100.0],
+            evn_energy_rates_vnd_per_kwh=[10.0, 10.0],
+            bau_evn_bill_vnd=100000.0,
+            optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=0.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            debt_fraction=0.0,
+            project_years=2,
+        )
+        self.assertNotIn("bill_savings_revenue_vnd", esco["annual_cash_flows"][0])
+        self.assertNotIn("direct_ownership", esco["derivation"])
+        self.assertEqual(esco["derivation"]["cit"]["regime"], "standard_with_holiday")
+
+    def test_bill_savings_restated_to_vnd_with_exchange_rate(self):
+        row = self._run(exchange_rate_vnd_per_usd=25000)["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["bill_savings_revenue_usd"], 40000.0)
+        self.assertAlmostEqual(row["bill_savings_revenue_vnd"], 40000.0 * 25000)
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):

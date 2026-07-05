@@ -12,8 +12,10 @@ import tempfile
 import unittest
 
 from proforma_vietnam.tests.test_audit_sheets import (
+    DIRECT_ASSUMPTIONS,
     ESCO_ASSUMPTIONS,
     PHYSICAL_ASSUMPTIONS,
+    _direct_result,
     _dppa_result,
     _esco_result,
     _esco_surplus_result,
@@ -124,6 +126,21 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _physical_result(), assumptions=PHYSICAL_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "physical_dppa.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_direct_ownership_fixture_workbook_passes(self):
+        # Factory self-invest: the live bill-savings formula (BAU − optimized,
+        # degradation repurchase) plus the flat-20% profitable-host CIT row (a
+        # negative CIT in the year-11 replacement loss) must reproduce the engine
+        # so the per-year CFADS/equity/CIT checks stay PASS.
+        workbook = build_vietnam_esco_workbook(
+            _direct_result(), assumptions=DIRECT_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "direct_ownership.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)

@@ -36,7 +36,7 @@ from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
 )
-from proforma_vietnam.structures import DPPA, PHYSICAL_DPPA
+from proforma_vietnam.structures import DIRECT_OWNERSHIP, DPPA, PHYSICAL_DPPA
 
 NAVY = "1F3864"
 ACCENT = "2E74B5"
@@ -135,6 +135,9 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     is_physical = derivation.get("structure") == PHYSICAL_DPPA or bool(
         dppa and dppa.get("type", "none") == DPPA_TYPE_PHYSICAL_PRIVATE_WIRE
     )
+    is_direct = derivation.get("structure") == DIRECT_OWNERSHIP or bool(
+        assumptions and assumptions.get("direct_ownership")
+    )
 
     worksheet.sheet_view.showGridLines = False
     worksheet.merge_cells("B1:E1")
@@ -192,6 +195,8 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
         structure_label = "Grid DPPA with CfD (ND57/2025)"
     elif is_physical:
         structure_label = "Physical (private-wire) DPPA (ND57 Điều 25; Decree 243/2026)"
+    elif is_direct:
+        structure_label = "Direct ownership — factory self-invest (avoided EVN bill)"
     else:
         structure_label = "ESCO discount-to-EVN (behind-the-meter)"
 
@@ -387,6 +392,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     regime_label = {
         "re_producer": "RE producer — Law 67/2025 preferential (10% / 15y)",
         "standard_with_holiday": "Standard + holiday (conservative ESCO default)",
+        "standard_flat": "Standard flat 20% (self-invest factory; no new-project incentive)",
     }.get(cit.get("regime"), "Standard + holiday (conservative ESCO default)")
     entry("CIT regime", regime_label,
           source="proforma_vietnam.cash_flow (structure-dependent; explicit override wins)")
@@ -471,6 +477,17 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
               unit="USD", source="REopt net grid arbitrage × ESCO share "
                                  "(0 under a private wire)",
               name="BASE_GRID_ARB", fmt=FMT_AMOUNT)
+    elif is_direct:
+        # Factory self-invest: the benefit line is the full avoided EVN bill
+        # (BAU − optimized), rebuilt on the Pro Forma sheet from BAU_BILL_Y1 /
+        # OPT_BILL_Y1 / BASE_SERVED_RETAIL above; no ESCO discount base applies.
+        profitable_host = bool((d.get("direct_ownership") or {}).get("assume_profitable_host"))
+        entry("Profitable-host tax convention",
+              "Yes — project losses shield the host's other profits (negative CIT)"
+              if profitable_host else
+              "No — standalone 5-year FIFO loss carryforward",
+              source="case.json direct_ownership.assume_profitable_host "
+                     "(default: yes for direct ownership)")
     else:
         entry("Year-1 ESCO energy revenue base", d.get("base_energy_revenue_usd"),
               unit="USD", source="Σ served kWh × EVN TOU rate × ESCO discount",
@@ -658,6 +675,8 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     years = d["project_years"]
     is_dppa = d["structure"] == DPPA
     is_physical = d["structure"] == PHYSICAL_DPPA
+    is_direct = d["structure"] == DIRECT_OWNERSHIP
+    assume_profitable_host = bool((d.get("direct_ownership") or {}).get("assume_profitable_host"))
     w = _ProFormaWriter(worksheet, years)
 
     worksheet.sheet_view.showGridLines = False
@@ -730,30 +749,27 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
             formula=lambda y, c:
                 f"=PPA_MATCHED_KWH_Y1*PPA_PRICE*(1+PPA_ESC)^({year_ref(c)}-1)"
                 f"*{c}{r_fac_deg}")
+    elif is_direct:
+        # Factory self-invest: the benefit is the FULL avoided EVN bill (energy +
+        # demand — BAU/optimized are total bills), captured whole with no ESCO
+        # discount / 80/20 demand split. Same trajectories as the offtaker block:
+        # BAU − optimized, the residual bill grown by the degradation repurchase.
+        r_energy_rev = w.line(
+            "energy_rev", "Bill savings (avoided EVN bill: BAU − optimized)", "USD",
+            formula=lambda y, c:
+                f"=BAU_BILL_Y1*{c}{r_fac_energy}"
+                f"-(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))*{c}{r_fac_energy}",
+            bold=True)
     else:
         r_energy_rev = w.line(
             "energy_rev", "ESCO energy revenue (discount-to-EVN)", "USD",
             formula=lambda y, c: f"=BASE_ENERGY_REV*{c}{r_fac_energy}*{c}{r_fac_deg}")
-    r_dem_savings = w.line(
-        "dem_savings", "Demand charge savings (total)", "USD",
-        formula=lambda y, c: f"=BASE_DEMAND_SAVINGS*{c}{r_fac_capacity}")
-    r_dem_rev = w.line(
-        "dem_rev", "ESCO share of demand savings", "USD",
-        formula=lambda y, c: f"={c}{r_dem_savings}*DEMAND_SHARE")
-    if is_dppa:
-        r_arb_rev = None
-        r_revenue = w.line(
-            "revenue", "Total developer revenue", "USD",
-            formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_dem_rev}", bold=True)
-    else:
-        r_arb_rev = w.line(
-            "arb_rev", "Grid arbitrage revenue", "USD",
-            formula=lambda y, c: f"=BASE_GRID_ARB*{c}{r_fac_energy}")
+    if is_direct:
+        # Bill savings already folds in demand + any grid arbitrage (BAU/optimized
+        # are the total EVN bills), so there is no separate demand-share or
+        # arbitrage line; only the optional surplus leg is added.
         surplus = d.get("surplus_export")
         if surplus:
-            # Volume degrades with PV output (r_fac_deg); the price escalates
-            # independently (annual market re-set proxy). Matches the engine's
-            # surplus_export_revenue exactly so the tie-out holds.
             r_surplus = w.line(
                 "surplus_rev", "Surplus export revenue (Decree 243)", "USD",
                 formula=lambda y, c:
@@ -761,14 +777,47 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
                     f"*(1+SURPLUS_ESC)^({year_ref(c)}-1)")
             r_revenue = w.line(
                 "revenue", "Total developer revenue", "USD",
-                formula=lambda y, c:
-                    f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}+{c}{r_surplus}",
-                bold=True)
+                formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_surplus}", bold=True)
         else:
             r_revenue = w.line(
                 "revenue", "Total developer revenue", "USD",
-                formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}",
-                bold=True)
+                formula=lambda y, c: f"={c}{r_energy_rev}", bold=True)
+    else:
+        r_dem_savings = w.line(
+            "dem_savings", "Demand charge savings (total)", "USD",
+            formula=lambda y, c: f"=BASE_DEMAND_SAVINGS*{c}{r_fac_capacity}")
+        r_dem_rev = w.line(
+            "dem_rev", "ESCO share of demand savings", "USD",
+            formula=lambda y, c: f"={c}{r_dem_savings}*DEMAND_SHARE")
+        if is_dppa:
+            r_arb_rev = None
+            r_revenue = w.line(
+                "revenue", "Total developer revenue", "USD",
+                formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_dem_rev}", bold=True)
+        else:
+            r_arb_rev = w.line(
+                "arb_rev", "Grid arbitrage revenue", "USD",
+                formula=lambda y, c: f"=BASE_GRID_ARB*{c}{r_fac_energy}")
+            surplus = d.get("surplus_export")
+            if surplus:
+                # Volume degrades with PV output (r_fac_deg); the price escalates
+                # independently (annual market re-set proxy). Matches the engine's
+                # surplus_export_revenue exactly so the tie-out holds.
+                r_surplus = w.line(
+                    "surplus_rev", "Surplus export revenue (Decree 243)", "USD",
+                    formula=lambda y, c:
+                        f"=SURPLUS_KWH_Y1*{c}{r_fac_deg}*SURPLUS_PRICE"
+                        f"*(1+SURPLUS_ESC)^({year_ref(c)}-1)")
+                r_revenue = w.line(
+                    "revenue", "Total developer revenue", "USD",
+                    formula=lambda y, c:
+                        f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}+{c}{r_surplus}",
+                    bold=True)
+            else:
+                r_revenue = w.line(
+                    "revenue", "Total developer revenue", "USD",
+                    formula=lambda y, c: f"={c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}",
+                    bold=True)
     w.skip()
 
     # --- operating costs ----------------------------------------------------
@@ -832,91 +881,102 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     r_ebt = w.line(
         "ebt", "Taxable income before loss relief (EBT)", "USD",
         formula=lambda y, c: f"={c}{r_ebitda}-{c}{r_dep}-{c}{r_interest}", bold=True)
-    r_newloss = w.line(
-        "newloss", "New tax loss arising", "USD",
-        formula=lambda y, c: f"=MAX(-{c}{r_ebt},0)")
-    r_income_pos = w.line(
-        "income_pos", "Assessable income (pre-relief)", "USD",
-        formula=lambda y, c: f"=MAX({c}{r_ebt},0)")
-
-    # FIFO tax-loss carryforward with 5-year expiry (Circular 78/2014 Art. 9):
-    # avail[j] = unused loss aged j years; usage consumes oldest vintages first.
-    r_avail = {}
-    r_used = {}
-    for age in range(1, 6):
-        r_avail[age] = w.line(
-            f"loss_avail_{age}", f"Loss vintage aged {age}y — available", "USD",
-            formula=None)
-    oldest_first = [5, 4, 3, 2, 1]
-    for age in oldest_first:
-        def used_formula(y, c, age=age):
-            older_terms = "".join(
-                f"-{c}{r_used[a]}" for a in oldest_first[:oldest_first.index(age)]
-            )
-            return (f"=MIN({c}{r_avail[age]},"
-                    f"MAX({c}{r_income_pos}{older_terms},0))")
-        r_used[age] = w.line(
-            f"loss_used_{age}", f"Loss vintage aged {age}y — utilised", "USD",
-            formula=used_formula)
-    # availability recursion (needs r_used, so filled after)
-    for age in range(1, 6):
-        for year in range(1, years + 1):
-            cell = worksheet.cell(row=r_avail[age], column=3 + year)
-            prev = w.col(year - 1)
-            if age == 1:
-                cell.value = 0 if year == 1 else f"={prev}{r_newloss}"
-            else:
-                cell.value = (
-                    0 if year == 1
-                    else f"=MAX({prev}{r_avail[age - 1]}-{prev}{r_used[age - 1]},0)"
-                )
-            cell.number_format = FMT_AMOUNT
-    r_relief = w.line(
-        "relief", "Loss relief utilised (FIFO, ≤5y old)", "USD",
-        formula=lambda y, c: "=" + "+".join(f"{c}{r_used[a]}" for a in oldest_first))
-    r_taxbase = w.line(
-        "taxbase", "Taxable income after loss relief", "USD",
-        formula=lambda y, c: f"={c}{r_income_pos}-{c}{r_relief}", bold=True)
-    r_flag = w.line(
-        "profit_flag", "Profitable-to-date flag (starts CIT clock)", "0/1",
-        formula=lambda y, c: (
-            f"=IF({c}{r_ebt}>0,1,0)" if y == 1
-            else f"=IF(OR({w.col(y - 1)}{w.rows['profit_flag']}=1,{c}{r_ebt}>0),1,0)"
-        ), fmt="0")
-    r_clock = w.metric(
-        "cit_clock", "CIT clock start year (first profit, capped)",
-        f"=MIN(IFERROR(MATCH(1,{w.year_range(r_flag)},0),CIT_CLOCK_CAP_YEAR),"
-        "CIT_CLOCK_CAP_YEAR)",
-        "0", note="Circular 78/2014 Art. 18")
-    clock_ref = f"$C${r_clock}"
-    cit = d.get("cit", {})
-    if cit.get("preferential_rate") is not None:
-        # Law 67/2025 re_producer: the applicable base rate is the preferential
-        # rate for the first CIT_PREF_YEARS years (counted from year 1), then
-        # the standard rate. The 50% reduction multiplies whichever base rate
-        # applies. The standard regime keeps CIT_RATE as the base throughout
-        # (formula below collapses to the legacy expression, bit-for-bit).
-        r_cit_base = w.line(
-            "cit_base_rate", "Applicable base CIT rate (preferential window)", "%",
-            formula=lambda y, c:
-                f"=IF({year_ref(c)}<=CIT_PREF_YEARS,CIT_PREF_RATE,CIT_RATE)",
-            fmt=FMT_PERCENT)
-
-        def base_ref(c):
-            return f"{c}{r_cit_base}"
+    if is_direct and assume_profitable_host:
+        # Profitable-host convention (DIRECT_OWNERSHIP default): the factory has
+        # other taxable profits, so the project's deductions offset them at the
+        # flat standard rate every year — a negative EBT yields a negative CIT
+        # (an immediate tax shield). No first-profit holiday, no reduced-rate
+        # window and no loss carryforward apply. Ties out to the engine's flat
+        # calculate_cit(immediate_loss_relief=True) exactly, EBT sign regardless.
+        r_cit = w.line(
+            "cit", "CIT payable (flat 20%; profitable-host shield)", "USD",
+            formula=lambda y, c: f"={c}{r_ebt}*CIT_RATE", bold=True)
     else:
-        def base_ref(c):
-            return "CIT_RATE"
-    r_cit_rate = w.line(
-        "cit_rate", "Applicable CIT rate", "%",
-        formula=lambda y, c: (
-            f"=IF({year_ref(c)}<{clock_ref}+CIT_HOLIDAY_YEARS,0,"
-            f"IF({year_ref(c)}<{clock_ref}+CIT_HOLIDAY_YEARS+CIT_REDUCED_YEARS,"
-            f"{base_ref(c)}*CIT_REDUCED_FRACTION,{base_ref(c)}))"
-        ), fmt=FMT_PERCENT)
-    r_cit = w.line(
-        "cit", "CIT payable", "USD",
-        formula=lambda y, c: f"={c}{r_taxbase}*{c}{r_cit_rate}", bold=True)
+        r_newloss = w.line(
+            "newloss", "New tax loss arising", "USD",
+            formula=lambda y, c: f"=MAX(-{c}{r_ebt},0)")
+        r_income_pos = w.line(
+            "income_pos", "Assessable income (pre-relief)", "USD",
+            formula=lambda y, c: f"=MAX({c}{r_ebt},0)")
+
+        # FIFO tax-loss carryforward with 5-year expiry (Circular 78/2014 Art. 9):
+        # avail[j] = unused loss aged j years; usage consumes oldest vintages first.
+        r_avail = {}
+        r_used = {}
+        for age in range(1, 6):
+            r_avail[age] = w.line(
+                f"loss_avail_{age}", f"Loss vintage aged {age}y — available", "USD",
+                formula=None)
+        oldest_first = [5, 4, 3, 2, 1]
+        for age in oldest_first:
+            def used_formula(y, c, age=age):
+                older_terms = "".join(
+                    f"-{c}{r_used[a]}" for a in oldest_first[:oldest_first.index(age)]
+                )
+                return (f"=MIN({c}{r_avail[age]},"
+                        f"MAX({c}{r_income_pos}{older_terms},0))")
+            r_used[age] = w.line(
+                f"loss_used_{age}", f"Loss vintage aged {age}y — utilised", "USD",
+                formula=used_formula)
+        # availability recursion (needs r_used, so filled after)
+        for age in range(1, 6):
+            for year in range(1, years + 1):
+                cell = worksheet.cell(row=r_avail[age], column=3 + year)
+                prev = w.col(year - 1)
+                if age == 1:
+                    cell.value = 0 if year == 1 else f"={prev}{r_newloss}"
+                else:
+                    cell.value = (
+                        0 if year == 1
+                        else f"=MAX({prev}{r_avail[age - 1]}-{prev}{r_used[age - 1]},0)"
+                    )
+                cell.number_format = FMT_AMOUNT
+        r_relief = w.line(
+            "relief", "Loss relief utilised (FIFO, ≤5y old)", "USD",
+            formula=lambda y, c: "=" + "+".join(f"{c}{r_used[a]}" for a in oldest_first))
+        r_taxbase = w.line(
+            "taxbase", "Taxable income after loss relief", "USD",
+            formula=lambda y, c: f"={c}{r_income_pos}-{c}{r_relief}", bold=True)
+        r_flag = w.line(
+            "profit_flag", "Profitable-to-date flag (starts CIT clock)", "0/1",
+            formula=lambda y, c: (
+                f"=IF({c}{r_ebt}>0,1,0)" if y == 1
+                else f"=IF(OR({w.col(y - 1)}{w.rows['profit_flag']}=1,{c}{r_ebt}>0),1,0)"
+            ), fmt="0")
+        r_clock = w.metric(
+            "cit_clock", "CIT clock start year (first profit, capped)",
+            f"=MIN(IFERROR(MATCH(1,{w.year_range(r_flag)},0),CIT_CLOCK_CAP_YEAR),"
+            "CIT_CLOCK_CAP_YEAR)",
+            "0", note="Circular 78/2014 Art. 18")
+        clock_ref = f"$C${r_clock}"
+        cit = d.get("cit", {})
+        if cit.get("preferential_rate") is not None:
+            # Law 67/2025 re_producer: the applicable base rate is the preferential
+            # rate for the first CIT_PREF_YEARS years (counted from year 1), then
+            # the standard rate. The 50% reduction multiplies whichever base rate
+            # applies. The standard regime keeps CIT_RATE as the base throughout
+            # (formula below collapses to the legacy expression, bit-for-bit).
+            r_cit_base = w.line(
+                "cit_base_rate", "Applicable base CIT rate (preferential window)", "%",
+                formula=lambda y, c:
+                    f"=IF({year_ref(c)}<=CIT_PREF_YEARS,CIT_PREF_RATE,CIT_RATE)",
+                fmt=FMT_PERCENT)
+
+            def base_ref(c):
+                return f"{c}{r_cit_base}"
+        else:
+            def base_ref(c):
+                return "CIT_RATE"
+        r_cit_rate = w.line(
+            "cit_rate", "Applicable CIT rate", "%",
+            formula=lambda y, c: (
+                f"=IF({year_ref(c)}<{clock_ref}+CIT_HOLIDAY_YEARS,0,"
+                f"IF({year_ref(c)}<{clock_ref}+CIT_HOLIDAY_YEARS+CIT_REDUCED_YEARS,"
+                f"{base_ref(c)}*CIT_REDUCED_FRACTION,{base_ref(c)}))"
+            ), fmt=FMT_PERCENT)
+        r_cit = w.line(
+            "cit", "CIT payable", "USD",
+            formula=lambda y, c: f"={c}{r_taxbase}*{c}{r_cit_rate}", bold=True)
     w.skip()
 
     # --- cash flows -----------------------------------------------------------
@@ -968,6 +1028,17 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
                 f"={c}{r_c_dn}+{c}{r_c_dppa}+{c}{r_c_cl}+{c}{r_c_bl}"
                 f"+{c}{w.rows['cfd_net']}+OPT_DEMAND_Y1*{c}{r_fac_capacity}"
                 f"+{c}{r_dem_rev}",
+            bold=True)
+    elif is_direct:
+        # The factory IS the investor: it pays no ESCO fee, so its residual cost
+        # is just the optimized EVN bill (energy + demand, grown by the
+        # degradation repurchase). Savings = BAU − optimized = the bill-savings
+        # revenue line above — the buyer view equals the developer view.
+        r_post = w.line(
+            "post_cost", "Buyer cost with project (residual EVN bill)", "USD",
+            formula=lambda y, c:
+                f"=(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))"
+                f"*{c}{r_fac_energy}",
             bold=True)
     else:
         r_post = w.line(
@@ -1249,15 +1320,17 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
 # Model Basis
 # ---------------------------------------------------------------------------
 
-def _settlement_title_suffix(is_dppa, is_physical):
+def _settlement_title_suffix(is_dppa, is_physical, is_direct=False):
     if is_dppa:
         return " — ND57/2025 grid DPPA with CfD"
     if is_physical:
         return " — ND57 Điều 25 physical (private-wire) DPPA"
+    if is_direct:
+        return " — direct ownership (factory self-invest)"
     return " — ESCO discount-to-EVN"
 
 
-def _settlement_bullets(is_dppa, is_physical):
+def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable_host=True):
     if is_dppa:
         return [
             "Q_adj[h] = Q_re_meter[h] / K_pp × delta — quantity conversion generator→customer uses "
@@ -1289,6 +1362,32 @@ def _settlement_bullets(is_dppa, is_physical):
             "negotiated rate (flat by default), the surplus/residual legs at EVN escalation, and all volumes "
             "degrade with PV, per the factors on the Pro Forma (Audit) sheet.",
         ]
+    if is_direct:
+        host_bullet = (
+            "Profitable-host convention (default): the factory has other taxable profits, so the project's "
+            "deductions offset them at the flat 20% rate every year — a loss year yields a NEGATIVE CIT "
+            "(immediate tax shield), with no loss carryforward."
+            if assume_profitable_host else
+            "Standalone tax treatment (assume_profitable_host = No): a loss year pays no CIT and its loss "
+            "carries forward FIFO for up to 5 years, exactly as for a standalone project."
+        )
+        return [
+            "The factory self-invests: it owns the PV/BESS asset, borrows the debt, and pays O&M and "
+            "replacements. Its benefit is the FULL avoided EVN bill — the buyer's natural benchmark against "
+            "an ESCO or DPPA offer (\"what if we just built it ourselves?\").",
+            "Bill savings = BAU EVN bill − optimized residual EVN bill, the full delta (energy + demand). "
+            "There is NO ESCO discount and NO 80/20 demand-savings split — the factory captures everything; "
+            "the buyer-analysis savings view therefore equals the developer view.",
+            "May sell rooftop surplus to EVN under Decree 243/2026 (PV→grid + would-be-curtailed), capped "
+            "at the Decision 988 regional ceiling and 50% of PV output — the same machinery as the ESCO "
+            "surplus leg; omitted → surplus not monetized (conservative).",
+            "CIT: flat standard 20% every year (standard_flat) — no first-profit holiday and no RE-producer "
+            "preferential rate. A factory adding rooftop solar to an existing operation gets no new-project "
+            "incentive on its general income and is not a licensed RE generator.",
+            host_bullet,
+            "Incremental taxable income = bill savings + surplus − O&M − replacement − depreciation − "
+            "interest; the developer metrics and DSCR are computed on the factory's incremental cash flow.",
+        ]
     return [
         "The ESCO is paid a contracted fraction of the time-specific EVN tariff for project-served "
         "energy (PV→load, plus battery→load when the battery cannot grid-charge).",
@@ -1302,6 +1401,10 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
     is_physical = derivation.get("structure") == PHYSICAL_DPPA
+    is_direct = derivation.get("structure") == DIRECT_OWNERSHIP
+    assume_profitable_host = bool(
+        (derivation.get("direct_ownership") or {}).get("assume_profitable_host")
+    )
     fx = derivation.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
 
     if derivation.get("cit", {}).get("regime") == "re_producer":
@@ -1309,6 +1412,21 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
             "320/2025/NĐ-CP) — 10% preferential base rate for the first 15 years "
             "counted from the first revenue-generating year, then 20%."
+        )
+    elif derivation.get("cit", {}).get("regime") == "standard_flat":
+        cit_regime_text = (
+            "CIT regime: flat standard 20% every year (standard_flat) — no "
+            "first-profit holiday and no RE-producer preferential rate. A factory "
+            "self-investing in rooftop solar gets no new-project incentive on its "
+            "general income and is not a licensed RE generator. "
+            + (
+                "Under the profitable-host convention a loss year yields a negative "
+                "CIT (immediate shield against the host's other profits), with no "
+                "carryforward."
+                if assume_profitable_host else
+                "Under standalone treatment a loss year pays no CIT and carries "
+                "forward FIFO for up to 5 years."
+            )
         )
     else:
         cit_regime_text = (
@@ -1346,8 +1464,8 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "regulatory quantities, not conversions.",
             "Debt is assumed VND-denominated (local bank), so DSCR is FX-neutral.",
         ]),
-        ("3. Settlement math" + _settlement_title_suffix(is_dppa, is_physical),
-         _settlement_bullets(is_dppa, is_physical)),
+        ("3. Settlement math" + _settlement_title_suffix(is_dppa, is_physical, is_direct),
+         _settlement_bullets(is_dppa, is_physical, is_direct, assume_profitable_host)),
         ("4. Multi-year mechanics", [
             "PV degradation compounds on generation-linked terms; energy lost to degradation is repurchased "
             "from EVN at retail (added to the buyer's residual bill / C_BL).",
@@ -1355,10 +1473,12 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "replacement unit costs.",
             "Debt: level-payment annuity over the debt term (interest + principal split per the Debt "
             "Schedule block).",
-            cit_regime_text + " The 4-year exemption and 9-year 50%-reduction periods count from the first "
-            "profitable year, no later than year 4; the 50% reduction applies to the then-applicable base "
-            "rate. Tax losses carry forward at most 5 consecutive years, consumed FIFO — the carryforward "
-            "schedule is fully visible on the Pro Forma sheet.",
+            cit_regime_text if is_direct else (
+                cit_regime_text + " The 4-year exemption and 9-year 50%-reduction periods count from the "
+                "first profitable year, no later than year 4; the 50% reduction applies to the "
+                "then-applicable base rate. Tax losses carry forward at most 5 consecutive years, consumed "
+                "FIFO — the carryforward schedule is fully visible on the Pro Forma sheet."
+            ),
             "Straight-line depreciation: PV over the configured life within the 7-20y band of Circular "
             "45/2013/TT-BTC; BESS over its own life.",
         ]),
@@ -1419,6 +1539,7 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
     is_physical = derivation.get("structure") == PHYSICAL_DPPA
+    is_direct = derivation.get("structure") == DIRECT_OWNERSHIP
     case_name = (assumptions or {}).get("case_name", "Vietnam ESCO / DPPA Case")
 
     worksheet.sheet_view.showGridLines = False
@@ -1432,6 +1553,8 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
         subtitle = "Grid-connected DPPA with CfD (ND57/2025)"
     elif is_physical:
         subtitle = "Physical (private-wire) DPPA — ND57 Điều 25 (Decree 243/2026)"
+    elif is_direct:
+        subtitle = "Direct ownership — factory self-invest benchmark (avoided EVN bill)"
     else:
         subtitle = "ESCO discount-to-EVN tariff (behind-the-meter)"
     worksheet.cell(

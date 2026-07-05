@@ -38,18 +38,36 @@ edits. `tests/test_proforma_schema.py` fails if a presented key is missing from
 the compute output, so drift is caught in CI instead of resolving to a blank
 cell.
 
-## Adding a new financing structure (e.g. direct ownership)
+## Adding a new financing structure
 
-`DIRECT_OWNERSHIP` already exists as a placeholder in `structures.py`.
+The four live structures — `ESCO`, `DPPA` (grid CfD), `PHYSICAL_DPPA` (private
+wire) and `DIRECT_OWNERSHIP` (factory self-invest) — were all wired with the
+same three steps:
 
 1. Teach `resolve_structure()` (and `xlsx_builder`'s structure detection) when a
-   run is that structure.
+   run is that structure — it keys off a marker in the cash-flow inputs
+   (`dppa_settlement`, `physical_dppa`, `direct_ownership`).
 2. Set `applies_to` on the `RowSpec`s that differ between structures; shared
    financial lines default to `ALL_STRUCTURES` and need no change.
-3. Wire the structure's formulas in `cash_flow.py`.
+3. Wire the structure's formulas in `cash_flow.py` (and its live-formula mirror
+   + named cells in `audit_sheets.py`, gated on the `derivation` block so
+   disabled workbooks stay byte-identical).
 
 `columns(view, structure)` filters by `applies_to`, so one view serves every
 structure (DPPA-only settlement lines are hidden under ESCO automatically).
+
+**Worked example — `DIRECT_OWNERSHIP` (wired):** the factory self-invests and its
+benefit is the full avoided EVN bill (`bau − optimized`, energy + demand), so it
+reuses the ESCO bau/optimized bill trajectories with no discount and no 80/20
+demand split. `resolve_structure(..., direct_ownership=...)` returns it from a
+`direct_ownership` marker (mutually exclusive with any DPPA block); `cash_flow`
+emits a single `bill_savings_revenue` line, defaults CIT to the flat 20%
+`standard_flat` regime, and applies the profitable-host convention
+(`assume_profitable_host`, default on) — a loss year yields a negative CIT
+(immediate shield) via `calculate_cit(immediate_loss_relief=True)` instead of the
+5-year FIFO carryforward. The schema hides the ESCO/DPPA energy, demand and
+arbitrage lines under it and shows `bill_savings_revenue` (+ the optional Decree
+243 surplus lines) instead.
 
 ## What is schema-driven vs not
 

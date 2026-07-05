@@ -323,6 +323,28 @@ Implemented (Task 3b) — Private-wire (physical) DPPA, `PHYSICAL_DPPA`:
   developer is the asset owner and defaults to the `re_producer` CIT regime.
 - The physical-PPA price negotiation sweep remains CfD-only (follow-up).
 
+Implemented (Task 3c) — Direct ownership (factory self-invest), `DIRECT_OWNERSHIP`:
+
+- The factory self-invests: it owns the PV/BESS asset, borrows the debt, pays
+  O&M and replacements, and its benefit is the FULL avoided EVN bill
+  (`bau − optimized`, energy + demand). This is the buyer's natural benchmark
+  against an ESCO/DPPA offer — "what if we just built it ourselves?".
+- No ESCO discount and no 80/20 demand-savings split — the factory captures the
+  whole bill delta; the buyer-analysis savings view therefore equals the
+  developer view (no separate offtaker block is built).
+- CIT defaults to a flat standard 20% every year (`standard_flat`): no
+  first-profit holiday and no RE-producer preferential rate (a factory adding
+  rooftop solar to an existing operation gets no new-project incentive and is
+  not a licensed generator). The `assume_profitable_host` convention (default
+  on) treats a negative incremental taxable income as a negative CIT — an
+  immediate shield against the host's other profits — via
+  `calculate_cit(immediate_loss_relief=True)`; set it off for the standalone
+  5-year FIFO carryforward treatment.
+- May sell rooftop surplus to EVN under Decree 243/2026 using the Task 3a
+  machinery (the top-level `surplus_export` config is allowed here, unlike under
+  a DPPA block); omitted → surplus not monetized (conservative).
+- A cross-structure comparison column in Buyer Analysis is a follow-up.
+
 Excluded from Phase 3 (deferred):
 
 - Factory-side BESS configuration.

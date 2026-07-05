@@ -169,6 +169,7 @@ def cash_flow_overrides_from_assumptions(assumptions):
         "grid_charging_enabled": "grid_charging_enabled",
         "dppa": "dppa_inputs",
         "surplus_export": "surplus_export",
+        "direct_ownership": "direct_ownership",
     }
     return {
         target: assumptions[source]

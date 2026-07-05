@@ -28,10 +28,19 @@ CIT_INCENTIVE_START_CAP_INDEX = TAX_DEFAULTS["cit_incentive_start_cap_index"]
 
 # CIT regimes. The regime is structure/case-dependent (not a JSON default):
 # ``standard_with_holiday`` is the conservative ESCO default (legacy shape);
-# ``re_producer`` is the Law 67/2025 renewable-energy producer incentive.
+# ``re_producer`` is the Law 67/2025 renewable-energy producer incentive;
+# ``standard_flat`` is a plain 20% every year with no first-profit holiday and
+# no RE preferential rate — a factory adding rooftop solar to an existing
+# operation (DIRECT_OWNERSHIP) gets no new-project incentive on its general
+# income and is not a licensed RE generator.
 CIT_REGIME_STANDARD_WITH_HOLIDAY = "standard_with_holiday"
 CIT_REGIME_RE_PRODUCER = "re_producer"
-CIT_REGIMES = (CIT_REGIME_STANDARD_WITH_HOLIDAY, CIT_REGIME_RE_PRODUCER)
+CIT_REGIME_STANDARD_FLAT = "standard_flat"
+CIT_REGIMES = (
+    CIT_REGIME_STANDARD_WITH_HOLIDAY,
+    CIT_REGIME_RE_PRODUCER,
+    CIT_REGIME_STANDARD_FLAT,
+)
 # Circular 45/2013/TT-BTC: power generating equipment may be depreciated
 # straight-line over 7-20 years; 20 is this model's explicit default.
 PV_DEPRECIATION_YEARS = TAX_DEFAULTS["pv_depreciation_years"]
@@ -59,6 +68,7 @@ def calculate_cit(
     loss_carryforward_years=CIT_LOSS_CARRYFORWARD_YEARS,
     preferential_rate=None,
     preferential_years=None,
+    immediate_loss_relief=False,
 ):
     """CIT schedule with a first-profit exemption/reduction holiday.
 
@@ -68,6 +78,13 @@ def calculate_cit(
     standard rate afterwards; the 50% reduction multiplies whichever base rate
     applies that year. Left unset, the base rate is always ``standard_rate`` —
     the legacy ``standard_with_holiday`` behaviour, bit-for-bit.
+
+    ``immediate_loss_relief`` toggles the profitable-host convention
+    (DIRECT_OWNERSHIP): a loss year yields a NEGATIVE CIT equal to the loss ×
+    base rate — an immediate tax shield offsetting the host's other profits —
+    instead of a carried-forward loss. Left False (every other structure), a
+    loss year pays no CIT and its loss is carried forward FIFO for up to
+    ``loss_carryforward_years``, exactly as before.
     """
     clock_start = next(
         (
@@ -83,9 +100,20 @@ def calculate_cit(
     carried_losses = []  # [loss_year_index, remaining_loss]
 
     for index, taxable_income in enumerate(taxable_income_by_year):
+        if preferential_rate is not None and index < preferential_years:
+            base_rate = preferential_rate
+        else:
+            base_rate = standard_rate
+
         if taxable_income < 0:
-            carried_losses.append([index, -taxable_income])
-            cit_by_year.append(0.0)
+            if immediate_loss_relief:
+                # Profitable-host shield: the loss deducts against the host's
+                # other taxable profit this year at the base rate (negative CIT);
+                # it is not carried forward, so no double relief later.
+                cit_by_year.append(taxable_income * base_rate)
+            else:
+                carried_losses.append([index, -taxable_income])
+                cit_by_year.append(0.0)
             continue
 
         taxable_base = taxable_income
@@ -97,11 +125,6 @@ def calculate_cit(
             taxable_base -= offset
             if taxable_base <= 0:
                 break
-
-        if preferential_rate is not None and index < preferential_years:
-            base_rate = preferential_rate
-        else:
-            base_rate = standard_rate
 
         if index < clock_start + holiday_years:
             rate = 0

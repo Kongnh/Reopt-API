@@ -1,5 +1,10 @@
 from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
-from proforma_vietnam.structures import DPPA, PHYSICAL_DPPA, resolve_structure
+from proforma_vietnam.structures import (
+    DIRECT_OWNERSHIP,
+    DPPA,
+    PHYSICAL_DPPA,
+    resolve_structure,
+)
 from proforma_vietnam.tax_model import (
     BESS_DEPRECIATION_YEARS,
     CIT_HOLIDAY_YEARS,
@@ -10,6 +15,7 @@ from proforma_vietnam.tax_model import (
     CIT_REDUCED_RATE_FRACTION,
     CIT_REDUCED_RATE_YEARS,
     CIT_REGIME_RE_PRODUCER,
+    CIT_REGIME_STANDARD_FLAT,
     CIT_REGIME_STANDARD_WITH_HOLIDAY,
     CIT_REGIMES,
     CIT_STANDARD_RATE,
@@ -60,6 +66,7 @@ def calculate_vietnam_esco_cash_flow(
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
     physical_dppa=None,
+    direct_ownership=None,
     exchange_rate_vnd_per_usd=None,
     cit_regime=None,
     surplus_export_kwh_year1=None,
@@ -70,7 +77,18 @@ def calculate_vietnam_esco_cash_flow(
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
 
-    structure = resolve_structure(dppa_settlement, physical_dppa)
+    structure = resolve_structure(dppa_settlement, physical_dppa, direct_ownership)
+
+    # Profitable-host convention (DIRECT_OWNERSHIP only, default on): the factory
+    # has other taxable profits, so project deductions produce an immediate tax
+    # shield (negative CIT) rather than a carried-forward loss. Meaningless for
+    # every other structure, so it is forced off there to stay byte-identical.
+    if structure == DIRECT_OWNERSHIP:
+        block = direct_ownership if isinstance(direct_ownership, dict) else {}
+        assume_profitable_host = block.get("assume_profitable_host")
+        assume_profitable_host = True if assume_profitable_host is None else bool(assume_profitable_host)
+    else:
+        assume_profitable_host = False
 
     # Decree 243/2026 rooftop surplus-export revenue (ESCO only). Primitives are
     # pre-resolved by esco_pro_forma (year-1 sold kWh already capped, USD price).
@@ -196,12 +214,32 @@ def calculate_vietnam_esco_cash_flow(
                 * surplus_price_multiplier
             )
 
-        esco_revenue_vnd = (
-            esco_energy_revenue_vnd
-            + esco_demand_revenue_vnd
-            + esco_grid_arbitrage_revenue_vnd
-            + surplus_export_revenue_vnd
-        )
+        if structure == DIRECT_OWNERSHIP:
+            # Factory self-invest: the benefit is the FULL avoided EVN bill
+            # (energy + demand — bau/optimized are total bills), captured whole
+            # with no ESCO discount and no 80/20 demand split. Reuse the same
+            # bau/optimized bill trajectories the offtaker block builds below
+            # (EVN escalation + degradation repurchase-at-retail of the residual
+            # bill). Zero the ESCO component lines so the offtaker residual below
+            # is just the optimized bill and the audit sheet shows one savings
+            # line; grid arbitrage is already inside the optimized bill.
+            esco_energy_revenue_vnd = 0.0
+            esco_demand_revenue_vnd = 0.0
+            esco_grid_arbitrage_revenue_vnd = 0.0
+            bau_evn_bill_year_vnd = bau_evn_bill_vnd * energy_multiplier
+            optimized_evn_bill_year_vnd = (
+                optimized_evn_bill_vnd
+                + base_served_retail_value_vnd * (1 - degradation_multiplier)
+            ) * energy_multiplier
+            bill_savings_vnd = bau_evn_bill_year_vnd - optimized_evn_bill_year_vnd
+            esco_revenue_vnd = bill_savings_vnd + surplus_export_revenue_vnd
+        else:
+            esco_revenue_vnd = (
+                esco_energy_revenue_vnd
+                + esco_demand_revenue_vnd
+                + esco_grid_arbitrage_revenue_vnd
+                + surplus_export_revenue_vnd
+            )
         interest_vnd = debt_schedule[year_index]["interest_vnd"]
         taxable_income_vnd = (
             esco_revenue_vnd
@@ -233,16 +271,25 @@ def calculate_vietnam_esco_cash_flow(
             # still drives esco_revenue/offtaker cost), shown under its own key.
             row["ppa_matched_kwh"] = matched_kwh_year1 * degradation_multiplier
             row["ppa_energy_revenue_vnd"] = esco_energy_revenue_vnd
+        if structure == DIRECT_OWNERSHIP:
+            # Presentation: the developer's single revenue line is the avoided
+            # EVN bill (esco_revenue additionally folds in any surplus leg).
+            row["bill_savings_revenue_vnd"] = bill_savings_vnd
         if dppa_year is not None:
             row.update(dppa_year)
         preliminary_rows.append(row)
         taxable_income_by_year.append(taxable_income_vnd)
 
-    preferential_rate, preferential_years = _cit_preferential_params(cit_regime)
+    holiday_years, reduced_rate_years, preferential_rate, preferential_years = (
+        _cit_regime_params(cit_regime)
+    )
     cit_by_year = calculate_cit(
         taxable_income_by_year,
+        holiday_years=holiday_years,
+        reduced_rate_years=reduced_rate_years,
         preferential_rate=preferential_rate,
         preferential_years=preferential_years,
+        immediate_loss_relief=assume_profitable_host,
     )
     annual_cash_flows = []
     project_cash_flows = [-total_capex_vnd]
@@ -398,8 +445,8 @@ def calculate_vietnam_esco_cash_flow(
         "cit": {
             "regime": cit_regime,
             "standard_rate": CIT_STANDARD_RATE,
-            "holiday_years": CIT_HOLIDAY_YEARS,
-            "reduced_rate_years": CIT_REDUCED_RATE_YEARS,
+            "holiday_years": holiday_years,
+            "reduced_rate_years": reduced_rate_years,
             "reduced_rate_fraction": CIT_REDUCED_RATE_FRACTION,
             "loss_carryforward_years": CIT_LOSS_CARRYFORWARD_YEARS,
             "incentive_start_cap_index": CIT_INCENTIVE_START_CAP_INDEX,
@@ -425,6 +472,13 @@ def calculate_vietnam_esco_cash_flow(
             "matched_kwh_year1": matched_kwh_year1,
             "ppa_price_usd_per_kwh": ppa_price_usd_per_kwh,
             "ppa_price_escalation_rate": ppa_price_escalation_rate,
+        }
+    if structure == DIRECT_OWNERSHIP:
+        # Self-describing block so the audit sheet can gate the bill-savings line
+        # and disclose the flat-CIT / profitable-host convention. The bill
+        # trajectories reuse the bau/optimized derivation keys above.
+        derivation["direct_ownership"] = {
+            "assume_profitable_host": assume_profitable_host,
         }
     if dppa_settlement is not None:
         year_one = dppa_settlement["year_one"]
@@ -492,14 +546,17 @@ def _resolve_cit_regime(cit_regime, structure):
 
     An explicit ``cit_regime`` wins; otherwise either DPPA structure (a licensed
     RE generator selling electricity — grid CfD or private wire) defaults to the
-    Law 67/2025 ``re_producer`` incentive and every other structure to the
-    conservative ``standard_with_holiday`` regime.
+    Law 67/2025 ``re_producer`` incentive, ``DIRECT_OWNERSHIP`` (a factory adding
+    rooftop solar, not a licensed generator) defaults to the flat standard 20%
+    ``standard_flat`` regime, and every other structure to the conservative
+    ``standard_with_holiday`` regime.
     """
     if cit_regime is None:
-        return (
-            CIT_REGIME_RE_PRODUCER if structure in (DPPA, PHYSICAL_DPPA)
-            else CIT_REGIME_STANDARD_WITH_HOLIDAY
-        )
+        if structure in (DPPA, PHYSICAL_DPPA):
+            return CIT_REGIME_RE_PRODUCER
+        if structure == DIRECT_OWNERSHIP:
+            return CIT_REGIME_STANDARD_FLAT
+        return CIT_REGIME_STANDARD_WITH_HOLIDAY
     if cit_regime not in CIT_REGIMES:
         raise ValueError(
             f"cit_regime must be one of {CIT_REGIMES}, got {cit_regime!r}."
@@ -507,11 +564,23 @@ def _resolve_cit_regime(cit_regime, structure):
     return cit_regime
 
 
-def _cit_preferential_params(cit_regime):
-    """Preferential (rate, years) for the regime; (None, None) keeps legacy CIT."""
+def _cit_regime_params(cit_regime):
+    """(holiday_years, reduced_rate_years, preferential_rate, preferential_years).
+
+    ``re_producer`` adds the Law 67/2025 10%/15y preferential rate; ``standard_flat``
+    drops the first-profit holiday and reduced-rate window entirely (flat 20%);
+    every other regime keeps the legacy holiday schedule with no preferential rate.
+    """
     if cit_regime == CIT_REGIME_RE_PRODUCER:
-        return CIT_PREFERENTIAL_RATE, CIT_PREFERENTIAL_RATE_YEARS
-    return None, None
+        return (
+            CIT_HOLIDAY_YEARS,
+            CIT_REDUCED_RATE_YEARS,
+            CIT_PREFERENTIAL_RATE,
+            CIT_PREFERENTIAL_RATE_YEARS,
+        )
+    if cit_regime == CIT_REGIME_STANDARD_FLAT:
+        return 0, 0, None, None
+    return CIT_HOLIDAY_YEARS, CIT_REDUCED_RATE_YEARS, None, None
 
 
 def _finalize_currencies(values, exchange_rate_vnd_per_usd=None):

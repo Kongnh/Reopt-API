@@ -118,6 +118,29 @@ PHYSICAL_ASSUMPTIONS = {
 }
 
 
+def _direct_result():
+    # Factory self-invest (DIRECT_OWNERSHIP) with the surplus leg enabled, so the
+    # audit sheet exercises the live bill-savings formula, the shared surplus
+    # cells, and the flat-CIT (profitable-host) row. The year-11 replacement
+    # (inherited from _esco_result) also drives an EBT sign flip, so the negative
+    # CIT shield is covered by the Excel tie-out.
+    return _esco_result(
+        direct_ownership={},
+        surplus_export_kwh_year1=500000.0,
+        surplus_export_price_usd_per_kwh=0.04,
+        surplus_price_escalation_rate=0.04,
+        surplus_cap_fraction=0.5,
+    )
+
+
+DIRECT_ASSUMPTIONS = {
+    "case_name": "Audit Test",
+    "exchange_rate_vnd_per_usd": 25000,
+    "run_uuid": "test-uuid",
+    "direct_ownership": {"enabled": True},
+}
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -334,6 +357,92 @@ class PhysicalDppaAuditTests(TestCase):
         # The Year 1 BAU vs DPPA / Settlement sheets are grid-CfD only.
         for sheet_name in ("Year 1 BAU vs DPPA", "Monthly Settlement", "Hourly Settlement"):
             self.assertNotIn(sheet_name, workbook.sheetnames)
+
+
+class DirectOwnershipAuditTests(TestCase):
+
+    BILL_SAVINGS_LABEL = "Bill savings (avoided EVN bill: BAU − optimized)"
+    FLAT_CIT_LABEL = "CIT payable (flat 20%; profitable-host shield)"
+
+    def _labels(self, workbook):
+        sheet = workbook["Pro Forma (Audit)"]
+        return {
+            sheet.cell(row=row, column=1).value: row
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value
+        }
+
+    def test_esco_workbook_has_no_direct_ownership_rows(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        labels = self._labels(workbook)
+        self.assertNotIn(self.BILL_SAVINGS_LABEL, labels)
+        self.assertNotIn(self.FLAT_CIT_LABEL, labels)
+        # The ESCO workbook keeps its discount-to-EVN energy line and the full
+        # loss-carryforward CIT schedule.
+        self.assertIn("ESCO energy revenue (discount-to-EVN)", labels)
+        self.assertIn("CIT payable", labels)
+
+    def test_direct_workbook_adds_live_bill_savings_row(self):
+        workbook = build_vietnam_esco_workbook(
+            _direct_result(), assumptions=DIRECT_ASSUMPTIONS
+        )
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        # The self-invest factory replaces the ESCO energy line with the single
+        # avoided-bill line, rebuilt from the reused BAU/optimized named cells.
+        self.assertNotIn("ESCO energy revenue (discount-to-EVN)", labels)
+        savings_row = labels[self.BILL_SAVINGS_LABEL]
+        year1_formula = sheet.cell(row=savings_row, column=4).value
+        self.assertIn("BAU_BILL_Y1", year1_formula)
+        self.assertIn("OPT_BILL_Y1", year1_formula)
+        self.assertIn("BASE_SERVED_RETAIL", year1_formula)
+
+        # Total developer revenue folds in the bill-savings line (and surplus).
+        revenue_formula = sheet.cell(row=labels["Total developer revenue"], column=4).value
+        self.assertIn(f"D{savings_row}", revenue_formula)
+
+    def test_direct_workbook_uses_flat_cit_row_and_no_carryforward(self):
+        workbook = build_vietnam_esco_workbook(
+            _direct_result(), assumptions=DIRECT_ASSUMPTIONS
+        )
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        cit_row = labels[self.FLAT_CIT_LABEL]
+        cit_formula = sheet.cell(row=cit_row, column=4).value
+        # Flat 20% on EBT every year (negative EBT → negative CIT shield).
+        self.assertIn("CIT_RATE", cit_formula)
+        # Under the profitable-host convention the FIFO carryforward schedule and
+        # the holiday-clock CIT-rate row are dropped entirely.
+        self.assertNotIn("Loss vintage aged 1y — available", labels)
+        self.assertNotIn("Applicable CIT rate", labels)
+        self.assertNotIn("CIT payable", labels)
+
+    def test_direct_workbook_reuses_shared_surplus_named_cells(self):
+        workbook = build_vietnam_esco_workbook(
+            _direct_result(), assumptions=DIRECT_ASSUMPTIONS
+        )
+        # The Decree 243 surplus leg rides on the shared 3a machinery; no new
+        # direct-ownership named cells are minted (BAU/OPT/BASE are reused).
+        for name in ("SURPLUS_KWH_Y1", "SURPLUS_PRICE", "SURPLUS_ESC", "SURPLUS_CAP"):
+            self.assertIn(name, workbook.defined_names, name)
+        for name in ("BAU_BILL_Y1", "OPT_BILL_Y1", "BASE_SERVED_RETAIL"):
+            self.assertIn(name, workbook.defined_names, name)
+
+    def test_direct_workbook_buyer_cost_is_residual_optimized_bill(self):
+        workbook = build_vietnam_esco_workbook(
+            _direct_result(), assumptions=DIRECT_ASSUMPTIONS
+        )
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        # Buyer view equals developer view: residual cost is just the optimized
+        # bill (no ESCO fee), so the row rebuilds from OPT_BILL_Y1.
+        post_row = labels["Buyer cost with project (residual EVN bill)"]
+        formula = sheet.cell(row=post_row, column=4).value
+        self.assertIn("OPT_BILL_Y1", formula)
 
 
 class CitRegimeAuditTests(TestCase):

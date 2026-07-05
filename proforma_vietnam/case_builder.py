@@ -44,6 +44,12 @@ SURPLUS_EXPORT_ALLOWED_KEYS = {
     "enabled", "price_vnd_per_kwh", "region", "cap_fraction", "price_escalation_rate",
 }
 
+# Factory self-invest (DIRECT_OWNERSHIP) block. Optional; selects the self-invest
+# benchmark. No ESCO discount / demand-split inputs are required (the factory
+# captures the whole avoided bill). ``cit_regime`` overrides the standard_flat
+# default; ``assume_profitable_host`` toggles the immediate-shield convention.
+DIRECT_OWNERSHIP_ALLOWED_KEYS = {"enabled", "assume_profitable_host", "cit_regime"}
+
 # Two-component tariff pilot eligibility (MOIT phased rollout; official pilot
 # billing from 2026-07 for selected production customers). Selection is
 # administrative, so these thresholds only drive a disclosure, never a hard
@@ -102,6 +108,12 @@ def build_vietnam_case(case_config):
     voltage_key = _normalize_voltage_level(tariff_config["voltage_level"])
     dppa_inputs = _dppa_inputs(case_config.get("dppa"), voltage_key, tariff_config)
     surplus_export = _surplus_export_config(case_config.get("surplus_export"))
+    # Factory self-invest benchmark (DIRECT_OWNERSHIP). Mutually exclusive with a
+    # DPPA block. Grid charging is intentionally left as configured: the factory
+    # owns everything, so any grid-charged arbitrage is already reflected in the
+    # optimized EVN bill (same attribution as BAU retail) — no forcing here,
+    # unlike the DPPA co-located BESS which forces can_grid_charge off.
+    direct_ownership = _direct_ownership_config(case_config.get("direct_ownership"), dppa_inputs)
 
     year = load_config.get("year") or tariff_config.get("year")
     loads_kw = _read_8760_load_csv(load_config["path"])
@@ -154,6 +166,7 @@ def build_vietnam_case(case_config):
             rate_vintage_source,
             loads_kw,
             surplus_export,
+            direct_ownership,
         ),
     }
 
@@ -389,6 +402,32 @@ def _surplus_export_config(surplus_config):
     return dict(surplus_config)
 
 
+def _direct_ownership_config(direct_ownership_config, dppa_inputs):
+    """Validate the optional factory self-invest (DIRECT_OWNERSHIP) block.
+
+    Select the benchmark with ``direct_ownership: {"enabled": true}`` (or with
+    ``assume_profitable_host`` / ``cit_regime`` options). Unknown keys are
+    rejected; a disabled block is dropped. It is mutually exclusive with an
+    active DPPA block — the factory owns the asset, so there is no DPPA
+    counterparty. Returns the block (or None when absent/disabled).
+    """
+    if not direct_ownership_config:
+        return None
+    unknown = set(direct_ownership_config) - DIRECT_OWNERSHIP_ALLOWED_KEYS
+    if unknown:
+        raise ValueError(
+            "Unknown direct_ownership keys: {}.".format(sorted(unknown))
+        )
+    if direct_ownership_config.get("enabled") is False:
+        return None
+    if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
+        raise ValueError(
+            "direct_ownership (factory self-invest) cannot be combined with a "
+            "dppa block; the factory owns the asset, there is no DPPA counterparty."
+        )
+    return dict(direct_ownership_config)
+
+
 def _resolve_fmp_path(fmp_path):
     path = Path(fmp_path)
     if path.is_absolute():
@@ -399,9 +438,16 @@ def _resolve_fmp_path(fmp_path):
 
 def _assumptions(case_config, financial, technologies, esco_contract, tariff_config, dppa_inputs,
                   rate_vintage_year=None, rate_vintage_source=None, loads_kw=None,
-                  surplus_export=None):
-    if esco_contract.get("esco_energy_discount_fraction") is None:
-        raise ValueError("esco_contract.esco_energy_discount_fraction is required.")
+                  surplus_export=None, direct_ownership=None):
+    discount_fraction = esco_contract.get("esco_energy_discount_fraction")
+    if discount_fraction is None:
+        if direct_ownership is None:
+            raise ValueError("esco_contract.esco_energy_discount_fraction is required.")
+        # DIRECT_OWNERSHIP captures the FULL avoided EVN bill, so the ESCO
+        # discount fraction is unused; default it to 0 so the offline report
+        # round-trip (which passes it positionally to esco_pro_forma) still has
+        # a value. It never reaches a live formula for this structure.
+        discount_fraction = 0.0
 
     assumptions = {
         "case_name": case_config.get("case", {}).get("name", "Vietnam REopt case"),
@@ -414,7 +460,7 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         "evn_capacity_escalation_rate": tariff_config.get("evn_capacity_escalation_rate"),
         "rate_vintage_year": rate_vintage_year,
         "rate_vintage_source": rate_vintage_source,
-        "esco_energy_discount_fraction": esco_contract.get("esco_energy_discount_fraction"),
+        "esco_energy_discount_fraction": discount_fraction,
         "demand_savings_esco_share": esco_contract.get(
             "demand_savings_esco_share",
             DEFAULT_DEMAND_SAVINGS_ESCO_SHARE,
@@ -442,6 +488,10 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         # ESCO-only revenue line; carried verbatim so rebuild_report round-trips
         # it into the esco_pro_forma surplus_export config.
         assumptions["surplus_export"] = surplus_export
+    if direct_ownership is not None:
+        # Factory self-invest selector; carried verbatim so rebuild_report
+        # round-trips it into the esco_pro_forma direct_ownership config.
+        assumptions["direct_ownership"] = direct_ownership
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         assumptions["dppa"] = dppa_inputs
         if dppa_inputs["type"] == DPPA_TYPE_GRID_CFD:
