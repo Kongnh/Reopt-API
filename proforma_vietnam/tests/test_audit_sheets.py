@@ -202,6 +202,57 @@ class ProFormaAuditSheetTests(TestCase):
         self.assertNotIn("ESCO energy revenue (discount-to-EVN)", labels)
 
 
+class CitRegimeAuditTests(TestCase):
+
+    def test_re_producer_case_defines_preferential_named_cells(self):
+        result, dppa_inputs = _dppa_result()
+        workbook = build_vietnam_esco_workbook(
+            result, assumptions={**ESCO_ASSUMPTIONS, "dppa": dppa_inputs}
+        )
+
+        self.assertEqual(result["derivation"]["cit"]["regime"], "re_producer")
+        for name in ("CIT_PREF_RATE", "CIT_PREF_YEARS"):
+            self.assertIn(name, workbook.defined_names, name)
+
+    def test_re_producer_rate_formula_switches_at_preferential_window(self):
+        result, dppa_inputs = _dppa_result()
+        workbook = build_vietnam_esco_workbook(
+            result, assumptions={**ESCO_ASSUMPTIONS, "dppa": dppa_inputs}
+        )
+        sheet = workbook["Pro Forma (Audit)"]
+
+        year1_formulas = [
+            sheet.cell(row=row, column=4).value
+            for row in range(1, sheet.max_row + 1)
+        ]
+        self.assertTrue(
+            any(
+                isinstance(formula, str)
+                and "CIT_PREF_YEARS" in formula
+                and "CIT_PREF_RATE" in formula
+                for formula in year1_formulas
+            ),
+            "no CIT rate formula switches at the preferential window boundary",
+        )
+
+    def test_standard_regime_rate_formula_is_unchanged(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+
+        self.assertNotIn("CIT_PREF_RATE", workbook.defined_names)
+        self.assertEqual(result["derivation"]["cit"]["regime"], "standard_with_holiday")
+
+        sheet = workbook["Pro Forma (Audit)"]
+        rate_row = next(
+            row for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value == "Applicable CIT rate"
+        )
+        formula = sheet.cell(row=rate_row, column=4).value
+        self.assertNotIn("CIT_PREF", formula)
+        # legacy formula preserved bit-for-bit for the conservative ESCO default
+        self.assertIn("CIT_RATE*CIT_REDUCED_FRACTION,CIT_RATE))", formula)
+
+
 class FxSensitivitySheetTests(TestCase):
 
     def test_table_carries_engine_scenarios_and_live_irr_formulas(self):

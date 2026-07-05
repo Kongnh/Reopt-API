@@ -487,6 +487,91 @@ class CurrencyFinalizationTests(TestCase):
         self.assertEqual(derivation["cit"]["holiday_years"], 4)
 
 
+class CitRegimeTests(TestCase):
+
+    def _esco_case(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[1000],
+            evn_energy_rates_vnd_per_kwh=[3000],
+            bau_evn_bill_vnd=5000000,
+            optimized_evn_bill_vnd=3000000,
+            bau_demand_charge_vnd=0,
+            optimized_demand_charge_vnd=0,
+            pv_capex_vnd=2000000,
+            bess_capex_vnd=0,
+            annual_om_vnd=100000,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            debt_fraction=0,
+            project_years=25,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def _dppa_settlement(self, generator_fmp=3000000.0):
+        return {
+            "type": "grid_dppa_cfd",
+            "esco_energy_revenue_vnd": 0.0,
+            "year_one": {
+                "c_dn_vnd": 100.0,
+                "c_dppa_vnd": 25.0,
+                "c_cl_vnd": 10.0,
+                "c_bl_vnd": 40.0,
+                "cfd_strike_revenue_vnd": 0.0,
+                "cfd_fmp_offset_vnd": 0.0,
+                "generator_fmp_revenue_vnd": generator_fmp,
+            },
+            "escalation": {"fee_escalation_rate": 0.0, "cfd_strike_escalation_rate": 0.0},
+            "hourly_breakout": [],
+            "monthly_breakout": [],
+        }
+
+    def test_dppa_case_defaults_to_re_producer_with_lower_cit_from_year_five(self):
+        default_dppa = self._esco_case(dppa_settlement=self._dppa_settlement())
+        standard_dppa = self._esco_case(
+            dppa_settlement=self._dppa_settlement(),
+            cit_regime="standard_with_holiday",
+        )
+
+        self.assertEqual(default_dppa["derivation"]["cit"]["regime"], "re_producer")
+        # Year 5 (index 4) is the first reduced-rate year: 5% under re_producer
+        # (10% preferential × 50%) vs 10% under the standard-holiday regime.
+        # taxable = 3,000,000 generator revenue − 100,000 O&M − 100,000 dep.
+        self.assertAlmostEqual(default_dppa["annual_cash_flows"][4]["cit_vnd"], 2800000.0 * 0.05)
+        self.assertAlmostEqual(standard_dppa["annual_cash_flows"][4]["cit_vnd"], 2800000.0 * 0.10)
+        self.assertLess(
+            default_dppa["annual_cash_flows"][4]["cit_vnd"],
+            standard_dppa["annual_cash_flows"][4]["cit_vnd"],
+        )
+
+    def test_esco_case_defaults_to_standard_with_holiday(self):
+        result = self._esco_case()
+
+        self.assertEqual(result["derivation"]["cit"]["regime"], "standard_with_holiday")
+        # taxable = 2,700,000 revenue − 100,000 O&M − 100,000 dep = 2,500,000;
+        # year 5 taxed at 10% (standard-holiday reduced rate).
+        self.assertAlmostEqual(result["annual_cash_flows"][4]["cit_vnd"], 2500000.0 * 0.10)
+
+    def test_explicit_cit_regime_overrides_structure_default(self):
+        result = self._esco_case(cit_regime="re_producer")
+
+        self.assertEqual(result["derivation"]["cit"]["regime"], "re_producer")
+        # ESCO forced to re_producer: year 5 at 5% instead of the default 10%.
+        self.assertAlmostEqual(result["annual_cash_flows"][4]["cit_vnd"], 2500000.0 * 0.05)
+
+    def test_invalid_cit_regime_raises_value_error(self):
+        with self.assertRaises(ValueError):
+            self._esco_case(cit_regime="not_a_regime")
+
+    def test_result_derivation_carries_regime_and_preferential_params(self):
+        result = self._esco_case(cit_regime="re_producer")
+
+        cit = result["derivation"]["cit"]
+        self.assertEqual(cit["regime"], "re_producer")
+        self.assertEqual(cit["preferential_rate"], 0.10)
+        self.assertEqual(cit["preferential_years"], 15)
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):

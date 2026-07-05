@@ -14,6 +14,8 @@
   },
   "tax": {
     "cit_standard_rate": 0.20,
+    "cit_preferential_rate": 0.10,
+    "cit_preferential_rate_years": 15,
     "cit_holiday_years": 4,
     "cit_reduced_rate_years": 9,
     "cit_reduced_rate_fraction": 0.50,

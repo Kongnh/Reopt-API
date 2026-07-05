@@ -329,23 +329,37 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
 
     section("Tax & Depreciation (Vietnam)")
     cit = d.get("cit", {})
+    regime_label = {
+        "re_producer": "RE producer — Law 67/2025 preferential (10% / 15y)",
+        "standard_with_holiday": "Standard + holiday (conservative ESCO default)",
+    }.get(cit.get("regime"), "Standard + holiday (conservative ESCO default)")
+    entry("CIT regime", regime_label,
+          source="proforma_vietnam.cash_flow (structure-dependent; explicit override wins)")
     entry("CIT standard rate", cit.get("standard_rate"), unit="of taxable income",
-          source="Law on CIT; vietnam_defaults.json",
+          source="Law 67/2025/QH15; vietnam_defaults.json",
           name="CIT_RATE", fmt=FMT_PERCENT)
+    if cit.get("preferential_rate") is not None:
+        entry("CIT preferential rate (RE producer)", cit.get("preferential_rate"),
+              unit="of taxable income",
+              source="Law 67/2025/QH15 + Decree 320/2025/NĐ-CP (first-15-year window)",
+              name="CIT_PREF_RATE", fmt=FMT_PERCENT)
+        entry("CIT preferential-rate period", cit.get("preferential_years"),
+              unit="years (from year 1)", source="Law 67/2025/QH15",
+              name="CIT_PREF_YEARS", fmt="0")
     entry("CIT holiday", cit.get("holiday_years"), unit="years",
-          source="Circular 78/2014 Art. 18 (from first profitable year)",
+          source="Law 67/2025 (from first profitable year); Circular 78/2014 Art. 18 shape",
           name="CIT_HOLIDAY_YEARS", fmt="0")
     entry("CIT reduced-rate period", cit.get("reduced_rate_years"), unit="years",
-          source="Circular 78/2014 Art. 18",
+          source="Law 67/2025; Circular 78/2014 Art. 18 shape",
           name="CIT_REDUCED_YEARS", fmt="0")
     entry("CIT reduction during period", cit.get("reduced_rate_fraction"),
-          unit="of standard rate", source="Circular 78/2014 Art. 18",
+          unit="of applicable base rate", source="Law 67/2025 (50% of base rate)",
           name="CIT_REDUCED_FRACTION", fmt=FMT_PERCENT)
     entry("Tax-loss carryforward limit", cit.get("loss_carryforward_years"),
-          unit="years", source="Circular 78/2014 Art. 9",
+          unit="years", source="Law 67/2025; Circular 78/2014 Art. 9 shape",
           name="CIT_LOSS_CF_YEARS", fmt="0")
     entry("Incentive clock cap", (cit.get("incentive_start_cap_index") or 3) + 1,
-          unit="year (latest start)", source="Circular 78/2014 Art. 18",
+          unit="year (latest start)", source="Law 67/2025; Circular 78/2014 Art. 18 shape",
           name="CIT_CLOCK_CAP_YEAR", fmt="0")
     entry("PV depreciation (straight-line)", d.get("pv_depreciation_years"),
           unit="years", source="Circular 45/2013/TT-BTC (7–20 yr band)",
@@ -786,12 +800,30 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         "CIT_CLOCK_CAP_YEAR)",
         "0", note="Circular 78/2014 Art. 18")
     clock_ref = f"$C${r_clock}"
+    cit = d.get("cit", {})
+    if cit.get("preferential_rate") is not None:
+        # Law 67/2025 re_producer: the applicable base rate is the preferential
+        # rate for the first CIT_PREF_YEARS years (counted from year 1), then
+        # the standard rate. The 50% reduction multiplies whichever base rate
+        # applies. The standard regime keeps CIT_RATE as the base throughout
+        # (formula below collapses to the legacy expression, bit-for-bit).
+        r_cit_base = w.line(
+            "cit_base_rate", "Applicable base CIT rate (preferential window)", "%",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}<=CIT_PREF_YEARS,CIT_PREF_RATE,CIT_RATE)",
+            fmt=FMT_PERCENT)
+
+        def base_ref(c):
+            return f"{c}{r_cit_base}"
+    else:
+        def base_ref(c):
+            return "CIT_RATE"
     r_cit_rate = w.line(
         "cit_rate", "Applicable CIT rate", "%",
         formula=lambda y, c: (
             f"=IF({year_ref(c)}<{clock_ref}+CIT_HOLIDAY_YEARS,0,"
             f"IF({year_ref(c)}<{clock_ref}+CIT_HOLIDAY_YEARS+CIT_REDUCED_YEARS,"
-            f"CIT_RATE*CIT_REDUCED_FRACTION,CIT_RATE))"
+            f"{base_ref(c)}*CIT_REDUCED_FRACTION,{base_ref(c)}))"
         ), fmt=FMT_PERCENT)
     r_cit = w.line(
         "cit", "CIT payable", "USD",
@@ -1133,6 +1165,20 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
     is_dppa = derivation.get("structure") == DPPA
     fx = derivation.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
 
+    if derivation.get("cit", {}).get("regime") == "re_producer":
+        cit_regime_text = (
+            "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
+            "320/2025/NĐ-CP) — 10% preferential base rate for the first 15 years "
+            "counted from the first revenue-generating year, then 20%."
+        )
+    else:
+        cit_regime_text = (
+            "CIT regime: standard rate with holiday (Law 67/2025; legacy Circular "
+            "78/2014 shape) — 20% base rate throughout. Conservative default for a "
+            "service ESCO, whose RE-producer status is a legal question; "
+            "grandfathered projects keep old-law incentives."
+        )
+
     worksheet.sheet_view.showGridLines = False
     worksheet.merge_cells("B1:C1")
     title = worksheet.cell(row=1, column=2, value="Model Basis, Conventions & Simplifications")
@@ -1190,9 +1236,10 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "replacement unit costs.",
             "Debt: level-payment annuity over the debt term (interest + principal split per the Debt "
             "Schedule block).",
-            "Vietnam CIT: exemption and 50%-reduction periods count from the first profitable year, no later "
-            "than year 4 (Circular 78/2014 Art. 18); tax losses carry forward at most 5 consecutive years "
-            "(Art. 9), consumed FIFO — the carryforward schedule is fully visible on the Pro Forma sheet.",
+            cit_regime_text + " The 4-year exemption and 9-year 50%-reduction periods count from the first "
+            "profitable year, no later than year 4; the 50% reduction applies to the then-applicable base "
+            "rate. Tax losses carry forward at most 5 consecutive years, consumed FIFO — the carryforward "
+            "schedule is fully visible on the Pro Forma sheet.",
             "Straight-line depreciation: PV over the configured life within the 7-20y band of Circular "
             "45/2013/TT-BTC; BESS over its own life.",
         ]),
@@ -1219,7 +1266,8 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
         ("7. Key references", [
             "ND57/2025 (DPPA decree) Art. 14-18 — settlement chain and eligibility.",
             "NSMO/CD7 simulation examples — k price-only conversion (Ví dụ 1), CfD cap on matched volume (Ví dụ 4).",
-            "Circular 78/2014/TT-BTC Art. 9, 18 — CIT incentives and loss carryforward.",
+            "Law 67/2025/QH15 + Decree 320/2025/NĐ-CP — CIT rates, RE-producer preferential incentive, "
+            "holiday & loss carryforward (legacy Circular 78/2014 Art. 9, 18 shape kept for the standard regime).",
             "Circular 45/2013/TT-BTC — fixed-asset depreciation bands.",
             "EVN retail tariff (current & QĐ963 TOU structures) as configured in the case file.",
         ]),

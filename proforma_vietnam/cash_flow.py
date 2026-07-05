@@ -5,8 +5,13 @@ from proforma_vietnam.tax_model import (
     CIT_HOLIDAY_YEARS,
     CIT_INCENTIVE_START_CAP_INDEX,
     CIT_LOSS_CARRYFORWARD_YEARS,
+    CIT_PREFERENTIAL_RATE,
+    CIT_PREFERENTIAL_RATE_YEARS,
     CIT_REDUCED_RATE_FRACTION,
     CIT_REDUCED_RATE_YEARS,
+    CIT_REGIME_RE_PRODUCER,
+    CIT_REGIME_STANDARD_WITH_HOLIDAY,
+    CIT_REGIMES,
     CIT_STANDARD_RATE,
     PV_DEPRECIATION_YEARS,
     calculate_cit,
@@ -55,11 +60,13 @@ def calculate_vietnam_esco_cash_flow(
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
     exchange_rate_vnd_per_usd=None,
+    cit_regime=None,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
 
     structure = resolve_structure(dppa_settlement)
+    cit_regime = _resolve_cit_regime(cit_regime, structure)
     replacement_costs_by_year = replacement_costs_by_year or []
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
     debt_principal_vnd = total_capex_vnd * debt_fraction
@@ -162,7 +169,12 @@ def calculate_vietnam_esco_cash_flow(
         preliminary_rows.append(row)
         taxable_income_by_year.append(taxable_income_vnd)
 
-    cit_by_year = calculate_cit(taxable_income_by_year)
+    preferential_rate, preferential_years = _cit_preferential_params(cit_regime)
+    cit_by_year = calculate_cit(
+        taxable_income_by_year,
+        preferential_rate=preferential_rate,
+        preferential_years=preferential_years,
+    )
     annual_cash_flows = []
     project_cash_flows = [-total_capex_vnd]
     equity_cash_flows = [-equity_investment_vnd]
@@ -315,6 +327,7 @@ def calculate_vietnam_esco_cash_flow(
         "pv_depreciation_years": pv_depreciation_years,
         "bess_depreciation_years": BESS_DEPRECIATION_YEARS,
         "cit": {
+            "regime": cit_regime,
             "standard_rate": CIT_STANDARD_RATE,
             "holiday_years": CIT_HOLIDAY_YEARS,
             "reduced_rate_years": CIT_REDUCED_RATE_YEARS,
@@ -323,6 +336,9 @@ def calculate_vietnam_esco_cash_flow(
             "incentive_start_cap_index": CIT_INCENTIVE_START_CAP_INDEX,
         },
     }
+    if preferential_rate is not None:
+        derivation["cit"]["preferential_rate"] = preferential_rate
+        derivation["cit"]["preferential_years"] = preferential_years
     if dppa_settlement is not None:
         year_one = dppa_settlement["year_one"]
         derivation["dppa_year_one_usd"] = {
@@ -382,6 +398,32 @@ def calculate_fx_sensitivity(
             "npv_usd": _npv(discount_rate, adjusted),
         })
     return rows
+
+
+def _resolve_cit_regime(cit_regime, structure):
+    """Resolve the CIT regime for a run.
+
+    An explicit ``cit_regime`` wins; otherwise a DPPA structure (a licensed RE
+    generator) defaults to the Law 67/2025 ``re_producer`` incentive and every
+    other structure to the conservative ``standard_with_holiday`` regime.
+    """
+    if cit_regime is None:
+        return (
+            CIT_REGIME_RE_PRODUCER if structure == DPPA
+            else CIT_REGIME_STANDARD_WITH_HOLIDAY
+        )
+    if cit_regime not in CIT_REGIMES:
+        raise ValueError(
+            f"cit_regime must be one of {CIT_REGIMES}, got {cit_regime!r}."
+        )
+    return cit_regime
+
+
+def _cit_preferential_params(cit_regime):
+    """Preferential (rate, years) for the regime; (None, None) keeps legacy CIT."""
+    if cit_regime == CIT_REGIME_RE_PRODUCER:
+        return CIT_PREFERENTIAL_RATE, CIT_PREFERENTIAL_RATE_YEARS
+    return None, None
 
 
 def _finalize_currencies(values, exchange_rate_vnd_per_usd=None):
