@@ -2,6 +2,7 @@ import csv
 from pathlib import Path
 
 from proforma_vietnam import pvwatts_client
+from proforma_vietnam.defaults import FINANCIAL_DEFAULTS, dppa_regulatory_for_year
 from proforma_vietnam.dppa_settlement import (
     DEFAULT_ALLOCATION_FRACTION_DELTA,
     DEFAULT_CFD_STRIKE_ESCALATION_RATE,
@@ -23,6 +24,10 @@ DEFAULT_ANALYSIS_YEARS = 25
 DEFAULT_TOU_SCHEDULE = "current"
 DEFAULT_DEMAND_SAVINGS_ESCO_SHARE = 0.8
 DEFAULT_GRID_CHARGING_ENABLED = False
+# Default contract FX planning rate (VND per USD), used when a case's tariff
+# block doesn't specify one. The value lives in vietnam_defaults.json's
+# financial block so it can be revised without touching code.
+DEFAULT_EXCHANGE_RATE_VND_PER_USD = FINANCIAL_DEFAULTS["exchange_rate_vnd_per_usd"]
 
 DPPA_VOLTAGE_ELIGIBLE_GRID_CFD = {"110kv_and_above", "22_to_110kv"}
 DEFAULT_FMP_SERIES_PATH = "DPPA DOC/fmp_cfmp_vn.json"
@@ -156,7 +161,10 @@ def _build_tariff(tariff_config):
         year=tariff_config["year"],
         voltage_level=tariff_config["voltage_level"],
         currency=tariff_config.get("currency", "usd"),
-        exchange_rate_vnd_per_usd=tariff_config.get("exchange_rate_vnd_per_usd", 25000),
+        exchange_rate_vnd_per_usd=tariff_config.get(
+            "exchange_rate_vnd_per_usd",
+            DEFAULT_EXCHANGE_RATE_VND_PER_USD,
+        ),
         tou_schedule=tariff_config.get("tou_schedule", DEFAULT_TOU_SCHEDULE),
         two_component_pilot_enabled=tariff_config.get("two_component_pilot_enabled", False),
     )
@@ -320,6 +328,13 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
     }
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         assumptions["dppa"] = dppa_inputs
+        # Disclose which DPPA regulatory vintage (loss factors, fee adders)
+        # applies to this case, resolved for the same year as the tariff —
+        # audit metadata mirroring rate_vintage_year/rate_vintage_source above.
+        # ESCO-only cases (no active DPPA block) must not carry these keys.
+        dppa_vintage_year, dppa_vintage = dppa_regulatory_for_year(tariff_config["year"])
+        assumptions["dppa_regulatory_vintage_year"] = dppa_vintage_year
+        assumptions["dppa_regulatory_source"] = dppa_vintage["source"]
     return assumptions
 
 

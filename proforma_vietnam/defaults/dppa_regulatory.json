@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "description": "Versioned DPPA (Direct Power Purchase Agreement) regulatory constants (transmission/distribution loss factors, settlement fee adders), keyed by vintage year. Mirrors evn_tariff_rates.json's pattern. proforma_vietnam/dppa_settlement.py's module constants are initialized from the latest vintage here; proforma_vietnam/defaults/__init__.py's dppa_regulatory_for_year() resolves a requested year to the latest vintage year <= that year.",
+  "vintages": {
+    "2025": {
+      "source": "NLDC/EVN 2025 announcements (EVN notice 08/05/2025, provisional); NSMO CD7 worked example",
+      "transmission_loss_factor_k": 1.026,
+      "distribution_loss_factor_kpp_by_voltage": {"110kv_and_above": 1.008525, "22_to_110kv": 1.027263},
+      "c_dppa_service_fee_vnd_per_kwh": 360.0,
+      "c_cl_settlement_adder_vnd_per_kwh": 163.3
+    }
+  }
+}

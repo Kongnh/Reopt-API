@@ -97,3 +97,17 @@ only when the requested year predates every vintage), and
 `build_evn_tariff(...)` reports the resolved vintage via `rate_vintage_year`
 / `rate_vintage_source`, which `case_builder.py` carries into the case's
 `assumptions` for the audit workbook's raw echo.
+
+The DPPA regulatory constants (transmission/distribution loss factors,
+settlement fee adders) live in `defaults/dppa_regulatory.json`, year-keyed the
+same way. `dppa_settlement.py` initializes its module constants from the
+latest vintage (its settlement functions take per-case overrides, so it needs
+no year plumbing); `defaults.dppa_regulatory_for_year(year)` resolves a
+requested year to the latest vintage <= that year, and `case_builder.py` uses
+it to stamp `dppa_regulatory_vintage_year` / `dppa_regulatory_source` into the
+`assumptions` of DPPA cases only (ESCO-only cases never carry these keys).
+The default contract FX rate is `vietnam_defaults.json`'s
+`financial.exchange_rate_vnd_per_usd`, exposed as
+`case_builder.DEFAULT_EXCHANGE_RATE_VND_PER_USD`. Commercial/structural
+defaults that are not regulatory vintages (allocation fraction delta, CfD
+strike escalation) stay as plain code constants in `dppa_settlement.py`.

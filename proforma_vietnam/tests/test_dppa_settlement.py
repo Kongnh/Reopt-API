@@ -3,10 +3,29 @@ from pathlib import Path
 from unittest import TestCase
 
 from proforma_vietnam.dppa_settlement import (
+    DEFAULT_C_CL_SETTLEMENT_ADDER_VND_PER_KWH,
+    DEFAULT_C_DPPA_SERVICE_FEE_VND_PER_KWH,
+    DEFAULT_TRANSMISSION_LOSS_FACTOR_K,
+    DISTRIBUTION_LOSS_FACTOR_KPP_BY_VOLTAGE,
     load_cfmp_series,
     load_fmp_series,
     settle_dppa_year_one,
 )
+
+
+class DppaRegulatoryConstantsTests(TestCase):
+    """Guards the no-value-change constraint: Task 1b moved these constants to
+    versioned defaults (defaults/dppa_regulatory.json), and today's numbers
+    must be unchanged."""
+
+    def test_module_constants_match_regulatory_values(self):
+        self.assertEqual(DEFAULT_TRANSMISSION_LOSS_FACTOR_K, 1.026)
+        self.assertEqual(
+            DISTRIBUTION_LOSS_FACTOR_KPP_BY_VOLTAGE,
+            {"110kv_and_above": 1.008525, "22_to_110kv": 1.027263},
+        )
+        self.assertEqual(DEFAULT_C_DPPA_SERVICE_FEE_VND_PER_KWH, 360.0)
+        self.assertEqual(DEFAULT_C_CL_SETTLEMENT_ADDER_VND_PER_KWH, 163.3)
 
 
 class SettleDppaYearOneTests(TestCase):

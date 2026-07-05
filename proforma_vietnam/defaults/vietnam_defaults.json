@@ -3,6 +3,7 @@
   "description": "Vietnam proforma financial and tax defaults. Single versioned source for the regulatory/commercial constants the proforma assumes, mirroring SAM's deploy/runtime/defaults/*.json. Edit values here; regulatory provenance is kept in code comments next to where each value is consumed.",
   "financial": {
     "project_years": 25,
+    "exchange_rate_vnd_per_usd": 25000,
     "evn_energy_escalation_rate": 0.04,
     "evn_capacity_escalation_rate": 0.04,
     "esco_demand_savings_share": 0.80,

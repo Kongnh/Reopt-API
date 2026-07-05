@@ -1,20 +1,30 @@
 import json
 from pathlib import Path
 
+from proforma_vietnam.defaults import DPPA_REGULATORY
+
 
 DPPA_TYPE_NONE = "none"
 DPPA_TYPE_GRID_CFD = "grid_dppa_cfd"
 
-DEFAULT_TRANSMISSION_LOSS_FACTOR_K = 1.026
+# The regulatory constants (loss factors, settlement fee adders) come from the
+# latest vintage in defaults/dppa_regulatory.json; regulatory provenance lives
+# in that vintage's "source" field. The settlement functions below take
+# per-case overrides, so no year plumbing is needed here — year-aware vintage
+# resolution happens in case_builder via defaults.dppa_regulatory_for_year().
+_LATEST_DPPA_REGULATORY = DPPA_REGULATORY["vintages"][
+    max(DPPA_REGULATORY["vintages"], key=int)
+]
+
+DEFAULT_TRANSMISSION_LOSS_FACTOR_K = _LATEST_DPPA_REGULATORY["transmission_loss_factor_k"]
 DEFAULT_ALLOCATION_FRACTION_DELTA = 1.0
-DEFAULT_C_DPPA_SERVICE_FEE_VND_PER_KWH = 360.0
-DEFAULT_C_CL_SETTLEMENT_ADDER_VND_PER_KWH = 163.3
+DEFAULT_C_DPPA_SERVICE_FEE_VND_PER_KWH = _LATEST_DPPA_REGULATORY["c_dppa_service_fee_vnd_per_kwh"]
+DEFAULT_C_CL_SETTLEMENT_ADDER_VND_PER_KWH = _LATEST_DPPA_REGULATORY["c_cl_settlement_adder_vnd_per_kwh"]
 DEFAULT_CFD_STRIKE_ESCALATION_RATE = 0.04
 
-DISTRIBUTION_LOSS_FACTOR_KPP_BY_VOLTAGE = {
-    "110kv_and_above": 1.008525,
-    "22_to_110kv": 1.027263,
-}
+DISTRIBUTION_LOSS_FACTOR_KPP_BY_VOLTAGE = _LATEST_DPPA_REGULATORY[
+    "distribution_loss_factor_kpp_by_voltage"
+]
 
 # Non-leap year month boundaries for 8760-hour series.
 MONTH_DAY_COUNTS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]

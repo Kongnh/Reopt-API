@@ -4,7 +4,8 @@ from pathlib import Path
 from unittest import TestCase
 from unittest.mock import patch
 
-from proforma_vietnam.case_builder import build_vietnam_case
+from proforma_vietnam.case_builder import DEFAULT_EXCHANGE_RATE_VND_PER_USD, build_vietnam_case
+from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
 
 
 STUB_PV_SERIES = [0.25] * 8760
@@ -272,6 +273,15 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(assumptions["bess_capex_usd"], 421000)
         self.assertEqual(assumptions["evn_energy_escalation_rate"], 0.04)
 
+    def test_default_exchange_rate_matches_versioned_defaults(self):
+        # Guards the no-value-change constraint: Task 1b moved this constant
+        # from a hardcoded literal to vietnam_defaults.json's financial block.
+        self.assertEqual(DEFAULT_EXCHANGE_RATE_VND_PER_USD, 25000)
+        self.assertEqual(
+            DEFAULT_EXCHANGE_RATE_VND_PER_USD,
+            FINANCIAL_DEFAULTS["exchange_rate_vnd_per_usd"],
+        )
+
     def test_bess_capex_omitted_when_storage_size_is_optimizer_chosen(self):
         # Regression: when storage sizes are not preset (optimizer chooses),
         # case_builder previously wrote bess_capex_usd=0 because installed_cost_constant
@@ -410,6 +420,22 @@ class VietnamCaseBuilderTests(TestCase):
 
         self.assertNotIn("dppa", case["assumptions"])
 
+    def test_esco_only_case_does_not_carry_dppa_regulatory_vintage_keys(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        assumptions = case["assumptions"]
+        self.assertNotIn("dppa_regulatory_vintage_year", assumptions)
+        self.assertNotIn("dppa_regulatory_source", assumptions)
+
     def test_grid_dppa_cfd_populates_assumptions_dppa_block_with_defaults_and_fmp_series(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 
@@ -438,6 +464,27 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(dppa["c_cl_settlement_adder_vnd_per_kwh"], 163.3)
         self.assertEqual(dppa["cfd_strike_escalation_rate"], 0.04)
         self.assertEqual(len(dppa["fmp_series_vnd_per_kwh"]), 8760)
+
+    def test_grid_dppa_cfd_assumptions_carry_regulatory_vintage_disclosure(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2026, "path": str(load_csv_path)},
+                "tariff": {"year": 2026, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "dppa": {
+                    "type": "grid_dppa_cfd",
+                    "cfd_strike_per_kwh_vnd": 1700.0,
+                    "cfd_contract_volume_kwh_per_hour": 80.0,
+                },
+            }
+        )
+
+        assumptions = case["assumptions"]
+        self.assertEqual(assumptions["dppa_regulatory_vintage_year"], 2025)
+        self.assertIn("NLDC/EVN", assumptions["dppa_regulatory_source"])
 
     def test_grid_dppa_cfd_preserves_explicit_strike_escalation_override(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
