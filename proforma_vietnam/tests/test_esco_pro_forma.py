@@ -108,11 +108,19 @@ class VietnamEscoProFormaAdapterTests(TestCase):
         annual_with = with_rate["annual_cash_flows"][0]
         annual_without = without_rate["annual_cash_flows"][0]
 
-        for key in ("c_dn_vnd", "c_dppa_vnd", "c_cl_vnd", "cfd_net_vnd",
-                    "generator_revenue_vnd", "dppa_offtaker_cost_vnd"):
+        # With an exchange rate the pair is real: _usd carries the converted
+        # cash-flow-currency value and _vnd is restated back to true VND (so
+        # it matches the unconverted run's native-VND value).
+        for key in ("c_dn", "c_dppa", "c_cl", "cfd_net",
+                    "generator_revenue", "dppa_offtaker_cost"):
             self.assertAlmostEqual(
-                annual_with[key], annual_without[key] / 25000, places=6,
-                msg=f"{key} not converted by exchange rate",
+                annual_with[f"{key}_usd"], annual_without[f"{key}_vnd"] / 25000,
+                places=6,
+                msg=f"{key}_usd not converted by exchange rate",
+            )
+            self.assertAlmostEqual(
+                annual_with[f"{key}_vnd"], annual_without[f"{key}_vnd"], places=4,
+                msg=f"{key}_vnd not restated to true VND",
             )
 
     def test_dppa_hourly_and_monthly_breakouts_stay_in_vnd_when_exchange_rate_is_provided(self):

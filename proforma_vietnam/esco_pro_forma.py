@@ -137,6 +137,11 @@ def calculate_esco_pro_forma_from_reopt_results(
             )
         cash_flow_inputs["dppa_settlement"] = dppa_settlement
 
+    # The inputs above are normalized to USD; passing the FX rate through lets
+    # the cash flow restate every _vnd key at the fixed contract rate instead
+    # of aliasing USD values under VND labels.
+    cash_flow_inputs.setdefault("exchange_rate_vnd_per_usd", exchange_rate_vnd_per_usd)
+
     return calculate_vietnam_esco_cash_flow(**cash_flow_inputs)
 
 

@@ -14,57 +14,53 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertEqual(
             workbook.sheetnames,
             [
+                "Cover",
                 "Executive Summary",
+                "Assumptions",
+                "Model Basis",
                 "Buyer Analysis",
                 "Developer Returns",
-                "Summary",
-                "System Sizing",
-                "Results Comparison",
-                "Annual Production",
+                "Technical Results",
                 "Dispatch Profile",
                 "Load Duration",
-                "Cash Flow",
-                "Tax Schedule",
-                "Debt Service",
-                "Developer Financials",
-                "Assumptions",
             ],
         )
 
-    def test_writes_key_summary_values(self):
-        workbook = build_vietnam_esco_workbook(_cash_flow_result())
-        summary = workbook["Summary"]
+    def test_adds_audit_and_fx_sheets_when_derivation_present(self):
+        cash_flow = _cash_flow_result_with_derivation()
+        workbook = build_vietnam_esco_workbook(
+            cash_flow,
+            assumptions={"esco_energy_discount_fraction": 0.9},
+        )
+
+        self.assertIn("Pro Forma (Audit)", workbook.sheetnames)
+        self.assertIn("FX Sensitivity", workbook.sheetnames)
+        # audit sheets come right after Model Basis in the reading flow
+        self.assertLess(
+            workbook.sheetnames.index("Model Basis"),
+            workbook.sheetnames.index("Pro Forma (Audit)"),
+        )
+
+    def test_technical_results_consolidates_sizing_production_and_bills(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(), report_data=_report_data()
+        )
+        sheet = workbook["Technical Results"]
 
         values_by_label = {
-            summary.cell(row=row, column=1).value: summary.cell(row=row, column=2).value
-            for row in range(1, summary.max_row + 1)
+            sheet.cell(row=row, column=1).value: sheet.cell(row=row, column=2).value
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value
         }
 
-        self.assertEqual(values_by_label["Total Capex (USD)"], 1000000)
-        self.assertEqual(values_by_label["Debt Principal (USD)"], 700000)
-        self.assertEqual(values_by_label["Equity Investment (USD)"], 300000)
-        self.assertEqual(values_by_label["NPV (USD)"], 123456)
-        self.assertEqual(values_by_label["Equity IRR"], 0.14)
-
-    def test_writes_annual_cash_flow_tax_and_debt_rows(self):
-        workbook = build_vietnam_esco_workbook(_cash_flow_result())
-
-        cash_flow = workbook["Cash Flow"]
-        self.assertEqual(cash_flow.cell(row=1, column=1).value, "Year")
-        self.assertEqual(cash_flow.cell(row=2, column=1).value, 1)
-        self.assertEqual(cash_flow.cell(row=2, column=2).value, 200000)
-        self.assertEqual(cash_flow.cell(row=2, column=10).value, 250000)
-        self.assertEqual(cash_flow.cell(row=2, column=13).value, 50000)
-
-        tax_schedule = workbook["Tax Schedule"]
-        self.assertEqual(tax_schedule.cell(row=1, column=1).value, "Year")
-        self.assertEqual(tax_schedule.cell(row=2, column=2).value, 40000)
-        self.assertEqual(tax_schedule.cell(row=2, column=3).value, 0)
-
-        debt_service = workbook["Debt Service"]
-        self.assertEqual(debt_service.cell(row=1, column=1).value, "Year")
-        self.assertEqual(debt_service.cell(row=2, column=2).value, 60000)
-        self.assertEqual(debt_service.cell(row=2, column=5).value, 640000)
+        self.assertIn("System Sizing", values_by_label)
+        self.assertIn("Annual Energy Balance (Year 1)", values_by_label)
+        self.assertIn("Year-1 Utility Bill Comparison", values_by_label)
+        self.assertEqual(values_by_label["PV Size (kW)"], 100)
+        self.assertEqual(values_by_label["Battery Energy (kWh)"], 200)
+        self.assertEqual(values_by_label["PV to Load (kWh)"], 80)
+        self.assertEqual(values_by_label["BAU Utility Bill (USD)"], 100000)
+        self.assertGreater(len(sheet._charts), 0)
 
     def test_writes_assumptions(self):
         workbook = build_vietnam_esco_workbook(
@@ -77,29 +73,45 @@ class VietnamXlsxBuilderTests(TestCase):
 
         assumptions = workbook["Assumptions"]
         values_by_label = {
-            assumptions.cell(row=row, column=1).value: assumptions.cell(row=row, column=2).value
+            assumptions.cell(row=row, column=2).value: assumptions.cell(row=row, column=3).value
             for row in range(1, assumptions.max_row + 1)
         }
 
-        self.assertEqual(values_by_label["esco_energy_discount_fraction"], 0.9)
-        self.assertEqual(values_by_label["evn_energy_escalation_rate"], 0.04)
+        self.assertEqual(
+            values_by_label["ESCO energy price (fraction of EVN tariff)"], 0.9
+        )
+        self.assertEqual(values_by_label["EVN energy escalation"], 0.04)
 
-    def test_writes_report_sheets_and_charts(self):
+    def test_dispatch_sheet_has_generation_split_and_peak_week_chart(self):
         workbook = build_vietnam_esco_workbook(
             _cash_flow_result(),
             report_data=_report_data(),
         )
 
-        self.assertEqual(workbook["System Sizing"]["A1"].value, "Metric")
-        self.assertEqual(workbook["System Sizing"]["B2"].value, 100)
-        self.assertEqual(workbook["Annual Production"]["A2"].value, "PV to Load (kWh)")
-        self.assertEqual(workbook["Dispatch Profile"]["A2"].value, 1)
+        dispatch = workbook["Dispatch Profile"]
+        headers = [
+            dispatch.cell(row=1, column=col).value
+            for col in range(1, dispatch.max_column + 1)
+        ]
+        self.assertIn("PV Generation Total (kW)", headers)
+        self.assertIn("PV Production Factor (kWh/kW) — irradiation proxy", headers)
+        self.assertIn("PV to Storage (kW)", headers)
+        self.assertIn("Grid to Storage (kW)", headers)
+        self.assertEqual(dispatch["A2"].value, 1)
+
+        self.assertEqual(len(dispatch._charts), 1)
+        chart = dispatch._charts[0]
+        self.assertIn("Peak-Load Week", chart.title.tx.rich.p[0].r[0].t)
+        # chart spans at most one week of rows, not the whole series
+        values_ref = chart.series[0].val.numRef.ref
+        first, last = values_ref.split("!")[1].split(":")
+        span = int("".join(ch for ch in last if ch.isdigit())) - int(
+            "".join(ch for ch in first if ch.isdigit())
+        ) + 1
+        self.assertLessEqual(span, 168)
+
         self.assertEqual(workbook["Load Duration"]["B2"].value, 20)
-        self.assertEqual(workbook["Developer Financials"]["A2"].value, "Project IRR")
-        self.assertGreater(len(workbook["Annual Production"]._charts), 0)
-        self.assertGreater(len(workbook["Dispatch Profile"]._charts), 0)
         self.assertGreater(len(workbook["Load Duration"]._charts), 0)
-        self.assertGreater(len(workbook["Developer Financials"]._charts), 0)
 
 
     def test_executive_summary_presents_both_sides_kpis(self):
@@ -174,12 +186,11 @@ class VietnamXlsxBuilderTests(TestCase):
             assumptions={"esco_energy_discount_fraction": 0.9},
         )
 
-        self.assertNotIn("DPPA Configuration", workbook.sheetnames)
         self.assertNotIn("Hourly Settlement", workbook.sheetnames)
         self.assertNotIn("Monthly Settlement", workbook.sheetnames)
-        self.assertNotIn("DPPA Annual Summary", workbook.sheetnames)
+        self.assertNotIn("Year 1 BAU vs DPPA", workbook.sheetnames)
 
-    def test_adds_four_dppa_sheets_when_dppa_type_is_grid_dppa_cfd(self):
+    def test_adds_settlement_sheets_when_dppa_type_is_grid_dppa_cfd(self):
         cash_flow = _cash_flow_result()
         cash_flow["annual_cash_flows"][0].update({
             "c_dn_vnd": 100.0,
@@ -225,10 +236,13 @@ class VietnamXlsxBuilderTests(TestCase):
             },
         )
 
-        self.assertIn("DPPA Configuration", workbook.sheetnames)
         self.assertIn("Hourly Settlement", workbook.sheetnames)
         self.assertIn("Monthly Settlement", workbook.sheetnames)
-        self.assertIn("DPPA Annual Summary", workbook.sheetnames)
+        self.assertIn("Year 1 BAU vs DPPA", workbook.sheetnames)
+        # config + per-year DPPA lines are consolidated into Assumptions and
+        # the Pro Forma (Audit) sheet
+        self.assertNotIn("DPPA Configuration", workbook.sheetnames)
+        self.assertNotIn("DPPA Annual Summary", workbook.sheetnames)
 
         hourly = workbook["Hourly Settlement"]
         self.assertEqual(hourly.cell(row=1, column=1).value, "Hour")
@@ -243,31 +257,22 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertEqual(monthly.cell(row=1, column=1).value, "Month")
         self.assertEqual(monthly.cell(row=2, column=2).value, 100.0)
 
-    def test_grid_dppa_cfd_cash_flow_sheet_includes_generator_revenue_and_cfd_columns(self):
-        cash_flow = _cash_flow_result()
-        cash_flow["annual_cash_flows"][0].update({
-            "c_dn_vnd": 100.0,
-            "c_dppa_vnd": 20.0,
-            "c_cl_vnd": 10.0,
-            "c_bl_vnd": 40.0,
-            "cfd_net_vnd": 5.0,
-            "generator_revenue_vnd": 150.0,
-            "dppa_offtaker_cost_vnd": 175.0,
-        })
-        workbook = build_vietnam_esco_workbook(
-            cash_flow,
-            assumptions={
-                "esco_energy_discount_fraction": 0.9,
-                "dppa": {"type": "grid_dppa_cfd"},
-            },
-        )
+def _cash_flow_result_with_derivation():
+    from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
 
-        cash_flow_sheet = workbook["Cash Flow"]
-        headers = [cash_flow_sheet.cell(row=1, column=col).value
-                   for col in range(1, cash_flow_sheet.max_column + 1)]
-        self.assertIn("Generator Revenue (USD)", headers)
-        self.assertIn("CfD Net (USD)", headers)
-        self.assertIn("DPPA Offtaker Cost (USD)", headers)
+    return calculate_vietnam_esco_cash_flow(
+        project_served_pv_kwh=[1000.0],
+        evn_energy_rates_vnd_per_kwh=[0.08],
+        bau_evn_bill_vnd=900000,
+        optimized_evn_bill_vnd=630000,
+        bau_demand_charge_vnd=180000,
+        optimized_demand_charge_vnd=120000,
+        pv_capex_vnd=2100000,
+        bess_capex_vnd=900000,
+        annual_om_vnd=45000,
+        esco_energy_discount_fraction=0.9,
+        exchange_rate_vnd_per_usd=25000,
+    )
 
 
 def _cash_flow_result():
@@ -333,18 +338,28 @@ def _report_data():
             {
                 "hour": 1,
                 "load_kw": 10,
-                "grid_to_load_kw": 7,
+                "pv_production_factor": 0.2,
+                "pv_total_kw": 4,
                 "pv_to_load_kw": 3,
+                "pv_to_storage_kw": 1,
+                "pv_to_grid_kw": 0,
+                "pv_curtailed_kw": 0,
+                "grid_to_load_kw": 7,
+                "grid_to_storage_kw": 0,
                 "storage_to_load_kw": 0,
-                "storage_charge_kw": 1,
             },
             {
                 "hour": 2,
                 "load_kw": 20,
-                "grid_to_load_kw": 8,
+                "pv_production_factor": 0.5,
+                "pv_total_kw": 7,
                 "pv_to_load_kw": 4,
+                "pv_to_storage_kw": 2,
+                "pv_to_grid_kw": 0,
+                "pv_curtailed_kw": 1,
+                "grid_to_load_kw": 8,
+                "grid_to_storage_kw": 1,
                 "storage_to_load_kw": 1,
-                "storage_charge_kw": 2,
             },
         ],
         "load_duration": [

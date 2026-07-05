@@ -1,4 +1,5 @@
 # Kịch bản thuyết trình — Session 4.3: On-Site Solutions Deep Dive
+
 ### Hội nghị CEBA · Người trình bày: Cong Nguyen (Allotrope Partners)
 
 > **Cách dùng tài liệu này:** Mỗi slide gồm ba phần — **[Hình ảnh trên slide]** để bạn biết khán giả đang nhìn gì, **[Lời dẫn]** là phần nói thành lời (đọc tự nhiên, không đọc nguyên văn bullet), và **[Chuyển slide]** là câu nối sang slide sau. Tổng thời lượng gợi ý: ~22–25 phút. Phần trọng tâm là Factory A Case Study (slide 13–19), nên dành ~12–14 phút cho khối này.
@@ -8,6 +9,7 @@
 ## PHẦN A — BỐI CẢNH & KHUNG PHÂN TÍCH (slide 1–12)
 
 ### Slide 1 — Title: On-Site Solutions Deep Dive
+
 **[Hình ảnh trên slide]** Container BESS đặt trước một nhà máy công nghiệp, tông màu xanh teal/navy của CEBA. Tiêu đề "Session 4.3 — On-Site Solutions Deep Dive, Additional Considerations".
 
 **[Lời dẫn]**
@@ -18,6 +20,7 @@
 ---
 
 ### Slide 2 — About the Speaker
+
 **[Hình ảnh trên slide]** Ảnh chân dung và tiểu sử Cong Nguyen, Vietnam Clean Energy Manager, Allotrope Partners.
 
 **[Lời dẫn]**
@@ -28,6 +31,7 @@
 ---
 
 ### Slide 3 — Section divider: BESS Integration Strategy
+
 **[Hình ảnh trên slide]** Slide phân mục, hình tua-bin gió, tiêu đề "BESS Integration Strategy — Clean Energy Procurement Analysis & Optimization Framework".
 
 **[Lời dẫn]**
@@ -38,6 +42,7 @@
 ---
 
 ### Slide 4 — The New Energy Era
+
 **[Hình ảnh trên slide]** Bên phải là ảnh trang trại điện gió + điện mặt trời + cụm container BESS đấu nối lưới. Bên trái là 4 gạch đầu dòng.
 
 **[Lời dẫn]**
@@ -50,6 +55,7 @@ Trong bối cảnh đó, BESS chuyển từ 'tùy chọn' sang 'nền tảng' �
 ---
 
 ### Slide 5 — Cost Shock: TOU Tariff Updates (QĐ963)
+
 **[Hình ảnh trên slide]** Bảng so sánh 2 cột "Cơ chế TOU cũ (trước 2026)" và "Cơ chế mới (QĐ963, 2026)". Bên phải là biểu đồ: đường cong sản lượng mặt trời (vàng) đạt đỉnh giữa trưa, nhưng dải đỏ "Giờ cao điểm (giá cao)" lại nằm ở 17:30–22:30 — *lệch hẳn* khỏi đỉnh mặt trời.
 
 **[Lời dẫn]**
@@ -64,6 +70,7 @@ Hệ quả tài chính rất trực tiếp: điện mặt trời lắp đơn thu
 ---
 
 ### Slide 6 — Two-Part Electricity Pricing Risks
+
 **[Hình ảnh trên slide]** Hai khối nội dung "Spiky Load Profile" và "Peak Shaving Strategy". Biểu đồ bên phải: đường tải răng cưa (nhiều đỉnh nhọn vượt 80 kW), một đường nét đứt ngang ~40 kW là "ngưỡng công suất mục tiêu", và phần BESS "gọt" các đỉnh vượt ngưỡng (vùng tô màu).
 
 **[Lời dẫn]**
@@ -76,6 +83,7 @@ Nhìn biểu đồ: đường tải răng cưa với các đỉnh vượt 80 kW.
 ---
 
 ### Slide 7 — CFE Energy Standards
+
 **[Hình ảnh trên slide]** Khối "Beyond Volumetric Matching" + dòng nhấn "BESS Solving the Gap". Ảnh nhà máy ban đêm với pin mặt trời và cụm BESS đang cấp điện cho ca tối.
 
 **[Lời dẫn]**
@@ -88,6 +96,7 @@ Và đây là khoảng trống mấu chốt — **nighttime emissions gap**: nh�
 ---
 
 ### Slide 8 — Value Stacking Equation
+
 **[Hình ảnh trên slide]** Ba thẻ ảnh + tiêu đề: "Capacity Management", "Increase Daily RE Consumption", "TOU Price Arbitrage".
 
 **[Lời dẫn]**
@@ -106,6 +115,7 @@ Ba — **Chênh lệch giá TOU (Price Arbitrage):** nạp khi giá thấp, xả
 ---
 
 ### Slide 9 — Supportive Regulatory Framework (2025–2026)
+
 **[Hình ảnh trên slide]** Bốn icon + bốn chính sách: Miễn giấy phép điện (NĐ61), Nới trần xuất điện (NĐ58), Mua bán P2P/DPPA, Tiêu chuẩn quốc gia TCVN.
 
 **[Lời dẫn]**
@@ -126,6 +136,7 @@ Tóm lại: rào cản về phép, về kỹ thuật, và về vốn đều đan
 ---
 
 ### Slide 10 — VPPA & Load Profile Risks
+
 **[Hình ảnh trên slide]** Slide nhiều chữ: ba khối "Profile Risk", "Curtailment Risk", và "BESS — The Firming Solution" (ba gạch đầu dòng).
 
 **[Lời dẫn]**
@@ -142,6 +153,7 @@ Tóm lại: rào cản về phép, về kỹ thuật, và về vốn đều đan
 ---
 
 ### Slide 11 — Enhancing Bankability
+
 **[Hình ảnh trên slide]** Khối lớn "100% — Elimination of Merchant-Tail Risk", bên phải là "Bankability Through Firmed PPA".
 
 **[Lời dẫn]**
@@ -154,6 +166,7 @@ Bên mua sẵn sàng trả thêm một khoản premium cho chi phí firming củ
 ---
 
 ### Slide 12 — Implementation Roadmap
+
 **[Hình ảnh trên slide]** Mũi tên quy trình 4 bước nối tiếp: Measurement → Load Profile Analysis → Integration → Expansion, mỗi bước có chú thích trên/dưới.
 
 **[Lời dẫn]**
@@ -178,6 +191,7 @@ Bước 1 và 2 là nơi chúng tôi thường bắt đầu với khách hàng �
 > **Lưu ý dẫn dắt cả khối:** Đây là phần khán giả chờ đợi nhất — số liệu thật, mô hình thật. Thông điệp xuyên suốt cần lặp lại 2–3 lần: *"BESS biến điện mặt trời từ một 'tấm chắn giá ban ngày' thành một tài sản năng lượng sạch linh hoạt 24/7 — và vẫn bankable."* Bốn case được tối ưu hóa kích thước *độc lập* bằng REopt; đừng để khán giả nghĩ ta chỉ 'gắn thêm pin vào cùng một hệ'.
 
 ### Slide 13 — Section divider: Factory A Case Study
+
 **[Hình ảnh trên slide]** Slide phân mục, ảnh nhà máy công nghiệp + container BESS, câu tagline: "BESS turns rooftop solar from a tariff hedge into a flexible clean-energy asset."
 
 **[Lời dẫn]**
@@ -188,6 +202,7 @@ Bước 1 và 2 là nơi chúng tôi thường bắt đầu với khách hàng �
 ---
 
 ### Slide 14 — One Factory, Four Procurement Strategies
+
 **[Hình ảnh trên slide]** Bên trái: bảng hồ sơ tải Nhà máy A + biểu đồ phụ tải theo giờ (đường ngày thường xanh, cuối tuần đỏ — tải khá phẳng, cao từ ~8h đến ~22h). Bên phải: 4 thẻ kịch bản (Case 4 Solar Only màu xanh lá; Case 1, 2 Solar+BESS màu teal; Case 3 màu cam) + các thông số mô hình tài chính.
 
 **[Lời dẫn]**
@@ -207,6 +222,7 @@ Giả định tài chính: dòng tiền ESCO 25 năm, 70% vốn vay với lãi 8
 ---
 
 ### Slide 15 — Finding 1: Solar Alone Stalls at One-Third of Demand
+
 **[Hình ảnh trên slide]** Bên phải: biểu đồ **vành khuyên (doughnut)** — phần xanh lá 36% "Clean (solar)", phần xám 64% "Grid". Dải KPI dưới cùng: **36%** tự cấp sạch · **$245k** tiết kiệm/năm · **18,7%** IRR vốn · **$0,80M** NPV 25 năm. Chú thích: "Hệ tối ưu: 3,45 MW PV, không pin".
 
 **[Lời dẫn]**
@@ -223,6 +239,7 @@ Về tài chính thì sao? IRR vốn 18,7% — nghe rất hấp dẫn. Nhưng h�
 ---
 
 ### Slide 16 — Finding 2: Storage Nearly Doubles Clean Supply and Savings
+
 **[Hình ảnh trên slide]** Hai biểu đồ cột so sánh Solar Only vs Solar+BESS: bên trái **Tỷ lệ tự cấp sạch** (35,8% → 65,5%), bên phải **Tiết kiệm hóa đơn/năm** ($245k → $569k). Dải nhấn dưới cùng: "+30 điểm điện sạch · +$324k/năm · vẫn đạt 16% IRR vốn với $1,44M NPV".
 
 **[Lời dẫn]**
@@ -241,6 +258,7 @@ Cơ chế đằng sau rất đơn giản: viên pin *dịch chuyển* điện m�
 ---
 
 ### Slide 17 — Finding 3: The 2026 Capacity Tariff Makes Peak-Shaving the Prize
+
 **[Hình ảnh trên slide]** Bên phải: biểu đồ cột **đỉnh công suất kéo từ lưới — Case 3**: cột đỏ 2.428 kW (không pin) so với cột cam 1.311 kW (có BESS). Dải KPI dưới: **$129k** tiết kiệm phí công suất/năm · **−65%** tổng hóa đơn ($758k → $263k) · **12,4%** IRR vốn · **1,01** DSCR bình quân.
 
 **[Lời dẫn]**
@@ -257,6 +275,7 @@ Bây giờ phần trung thực về tài chính: lợi nhuận có *thắt lại
 ---
 
 ### Slide 18 — Side by Side: Full Techno-Economic Comparison
+
 **[Hình ảnh trên slide]** Bảng so sánh đầy đủ 4 cột (Solar Only · Solar+BESS Current TOU · Solar+BESS TOU963 · Solar+BESS TOU963+2-comp), 10 hàng chỉ số. Cột phải là hộp "Đọc bảng này" với 4 ghi chú. Hàng "Clean self-supply" và "Equity IRR" được tô đậm.
 
 **[Lời dẫn]**
@@ -277,6 +296,7 @@ Nhìn cột Case 1 — Solar+BESS theo biểu giá hiện hành: NPV cao nhất 
 ---
 
 ### Slide 19 — Conclusions: What the Four Cases Tell Us
+
 **[Hình ảnh trên slide]** Bốn thẻ kết luận đánh số 01–04 (màu xanh lá / teal / navy / cam). Cột phải nền navy đậm: hộp "RECOMMENDATION" với câu chốt + dòng nhấn cam "tariff you will face in 2026".
 
 **[Lời dẫn]**

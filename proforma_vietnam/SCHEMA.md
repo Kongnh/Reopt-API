@@ -53,11 +53,23 @@ structure (DPPA-only settlement lines are hidden under ESCO automatically).
 
 ## What is schema-driven vs not
 
-- **Schema-driven** (proforma line-items): Cash Flow, Tax Schedule, Debt
-  Service, DPPA Annual Summary, Summary, Developer Financials.
+- **Schema views** (proforma line-items): `CASH_FLOW_VIEW`, `TAX_SCHEDULE_VIEW`,
+  `DEBT_SERVICE_VIEW`, `DPPA_ANNUAL_VIEW`, `SUMMARY_VIEW`,
+  `DEVELOPER_FINANCIAL_VIEW` remain the declared registry (guarded by
+  `tests/test_proforma_schema.py`), but since 2026-07-04 the workbook no longer
+  renders them as standalone sheets — the per-year record tables (Cash Flow,
+  Tax Schedule, Debt Service, DPPA Annual Summary, Summary, Developer
+  Financials, DPPA Configuration) were consolidated into the Pro Forma (Audit)
+  sheet + Assumptions to remove duplication from the deliverable.
 - **Bespoke layouts** (hand-tuned labels/formats, intentionally outside the
   schema): Executive Summary, Buyer Analysis, Developer Returns,
-  Year 1 BAU vs DPPA.
+  Year 1 BAU vs DPPA, Technical Results, Dispatch Profile.
+- **Audit layer** (`audit_sheets.py`, added 2026-07-04): Cover, Assumptions
+  (named cells), Model Basis, Pro Forma (Audit) and FX Sensitivity rebuild the
+  cash flow with live Excel formulas from `cash_flow`'s `derivation` block and
+  tie every metric back to the engine (PASS/REVIEW checks). These mirror the
+  compute layer directly (like SAM's cash-flow-to-Excel-with-equations export),
+  not the schema views. See `MODEL_AUDIT.md`.
 - **REopt report data** (not proforma line-items): System Sizing, Results
   Comparison, Annual Production, Dispatch, Load Duration, and the DPPA
   settlement hourly/monthly breakouts. These stay in `xlsx_builder`.

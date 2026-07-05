@@ -21,17 +21,24 @@ class VietnamReportDataTests(TestCase):
             {
                 "hour": 1,
                 "load_kw": 10,
-                "grid_to_load_kw": 7,
+                "pv_production_factor": 0.2,
+                "pv_total_kw": 4,       # to_load 3 + to_storage 1 + curtailed 0
                 "pv_to_load_kw": 3,
+                "pv_to_storage_kw": 1,
+                "pv_to_grid_kw": 0,
+                "pv_curtailed_kw": 0,
+                "grid_to_load_kw": 7,
+                "grid_to_storage_kw": 0,
                 "storage_to_load_kw": 0,
-                "storage_charge_kw": 1,
             },
         )
+        self.assertEqual(report["dispatch_profile"][1]["pv_total_kw"], 7)
+        self.assertEqual(report["dispatch_profile"][1]["grid_to_storage_kw"], 1)
         self.assertEqual(report["annual_production"]["pv_to_load_kwh"], 7)
         self.assertEqual(report["annual_production"]["grid_to_load_kwh"], 15)
         self.assertEqual(report["annual_production"]["storage_to_load_kwh"], 1)
-        self.assertEqual(report["results_comparison"]["bau_utility_bill_vnd"], 100000)
-        self.assertEqual(report["results_comparison"]["optimized_utility_bill_vnd"], 70000)
+        self.assertEqual(report["results_comparison"]["bau_utility_bill_usd"], 100000)
+        self.assertEqual(report["results_comparison"]["optimized_utility_bill_usd"], 70000)
         self.assertEqual(report["developer_financial_performance"]["equity_irr_fraction"], 0.14)
         self.assertEqual(report["load_duration"][0]["load_kw"], 20)
         self.assertEqual(report["load_duration"][0]["net_load_kw"], 8)
@@ -48,6 +55,7 @@ def _fake_reopt_results():
                 "electric_to_load_series_kw": [3, 4],
                 "electric_to_storage_series_kw": [1, 2],
                 "electric_curtailed_series_kw": [0, 1],
+                "production_factor_series": [0.2, 0.5],
             },
             "ElectricStorage": {
                 "size_kw": 50,

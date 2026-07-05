@@ -19,6 +19,11 @@ def rebuild_report(case_dir):
     case_dir = Path(case_dir)
     results = json.loads((case_dir / "results.json").read_text(encoding="utf-8"))
     assumptions = json.loads((case_dir / "assumptions.json").read_text(encoding="utf-8"))
+    case_path = case_dir / "case.json"
+    if case_path.exists():
+        # Surfaced on the Assumptions sheet so the workbook carries the full
+        # case definition (site, load profile, PV/storage technology terms).
+        assumptions["case_config"] = json.loads(case_path.read_text(encoding="utf-8"))
 
     cash_flow_result = calculate_esco_pro_forma_from_reopt_results(
         results,
@@ -28,7 +33,7 @@ def rebuild_report(case_dir):
     report_data = build_vietnam_report_data(results, cash_flow_result)
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
-        assumptions=assumptions,
+        assumptions={**assumptions, "run_uuid": results.get("run_uuid")},
         report_data=report_data,
     )
     out_path = case_dir / f"vietnam_report_{results['run_uuid']}.xlsx"

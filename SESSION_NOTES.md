@@ -1,3 +1,111 @@
+# 2026-07-04 (later) - Workbook reorganisation: full case inputs, consolidated sheets, dispatch upgrade
+
+- User goal (session /goal #2): (I) surface ALL case inputs (case.json +
+  assumptions.json + contract terms) in the workbook, (II) consolidate the old
+  data sheets and drop what the new sheets already carry, (III) keep Dispatch
+  Profile / Load Duration separate; add original-PV-generation, hourly
+  irradiation, grid→storage and PV→storage columns to Dispatch; chart one week
+  only.
+- **(I) Assumptions completeness.** `rebuild_report` now loads `case.json` and
+  passes it as `assumptions["case_config"]`; `audit_sheets` renders new curated
+  groups — Site & Load Profile, PV Technology (incl. PVWatts overrides),
+  Storage Technology (full cost/replacement terms, can_grid_charge) — plus
+  tariff currency/two-component-pilot rows, grid-charging flag, DPPA
+  allocation δ and FMP series path (the old DPPA Configuration sheet is now
+  fully covered here). A final "Other Assumptions (assumptions.json echo)"
+  group prints any scalar key not shown in a curated group, so nothing can be
+  silently dropped (`CURATED_ASSUMPTION_KEYS`).
+- **(II) Sheet consolidation.** Removed the duplicated per-year record sheets
+  (Summary, System Sizing, Results Comparison, Annual Production, Cash Flow,
+  Tax Schedule, Debt Service, Developer Financials, DPPA Configuration, DPPA
+  Annual Summary) — all their data lives on Pro Forma (Audit)/Assumptions/
+  Executive Summary. New compact "Technical Results" sheet = System Sizing +
+  Annual Energy Balance (+ PV-to-Grid row, bar chart) + Year-1 Bill
+  Comparison. ESCO workbook: 18 → 11 sheets; DPPA: 23 → 14 (Year 1 BAU vs
+  DPPA, Monthly & Hourly Settlement kept — VND-native). proforma_schema views
+  stay as the guarded registry; SCHEMA.md notes they are no longer rendered
+  as standalone sheets.
+- **(III) Dispatch upgrade.** report_data dispatch rows now carry:
+  pv_production_factor (PVWatts kWh/kW series from results inputs/outputs —
+  the hourly irradiation proxy; REopt does not persist raw irradiance),
+  pv_total_kw (original generation = to_load+to_storage+to_grid+curtailed),
+  pv_to_storage_kw, pv_to_grid_kw, pv_curtailed_kw, grid_to_storage_kw
+  (replacing the combined storage_charge_kw). Dedicated `_write_dispatch_sheet`
+  renders 11 columns and charts only the week containing the annual peak load
+  (168 h, titled with the hour range) with 4 selected series instead of the
+  full 8760-hour all-column chart.
+- **Validation.** 128 tests green (2 tests covering dropped sheets removed;
+  new Technical Results + dispatch-chart tests added; rebuild test now also
+  asserts the case.json groups). Regenerated workbooks and Excel-COM-verified
+  (read-only) 5 of 6 cases: 9/9 + 4/4 checks PASS, "ALL CHECKS PASS", new
+  dispatch columns and case.json groups present. **case_3 could not be
+  regenerated — its workbook was open in the user's Excel (file lock)**; rerun
+  `python -m proforma_vietnam.rebuild_report --case-dir
+  outputs/vietnam_case/factory_a/case_3` after closing it.
+- Files: report_data.py, xlsx_builder.py, audit_sheets.py, rebuild_report.py,
+  SCHEMA.md, MODEL_AUDIT.md + tests (report_data, xlsx_builder,
+  rebuild_report). Uncommitted.
+
+# 2026-07-04 - Model-audit pass + third-party-ready Excel (audit sheets, FX, currency fix)
+
+- User goal (session /goal): audit the whole model for realism, make it pass an
+  independent top-tier consulting-firm review, and rebuild the Excel output as a
+  complete investor/lender deliverable — engine outputs may be hardcoded, but
+  everything derivable must be a live Excel formula (SAM as reference).
+- **Currency question resolved (`_add_usd_aliases`).** Traced the pipeline: the
+  engine computes in USD end-to-end (EVN tariff converted VND→USD at 25,000
+  before REopt; `esco_pro_forma._money()` normalizes everything incl. DPPA VND
+  primitives; `cash_flow_overrides_from_assumptions` maps `pv_capex_usd` →
+  `pv_capex_vnd`). The `_vnd` keys were misnomers holding USD. Fix:
+  `calculate_vietnam_esco_cash_flow(..., exchange_rate_vnd_per_usd=)` +
+  `_finalize_currencies` — `_usd` keeps the computed value, `_vnd` is restated
+  at the fixed rate (true VND). No rate → legacy aliasing (reference tests
+  unchanged). `esco_pro_forma` passes the rate through; summary sums now read
+  `_usd` keys. Verified `npv_vnd/npv_usd == 25000` on all six cases and USD
+  headline metrics identical to the 2026-06-24 baseline table.
+- **`report_data._results_comparison` keys renamed `_vnd`→`_usd`** (they hold
+  REopt USD outputs). Fixed the Year-1 BAU-vs-DPPA `q_adj` fallback that used
+  hardcoded `1.026 × 1.027263` (k×K_pp — contradicting "quantity uses K_pp
+  only"); now uses configured K_pp.
+- **New `proforma_vietnam/audit_sheets.py`** + reworked workbook flow: Cover
+  (contents, colour legend, live overall status) → Executive Summary →
+  Assumptions (grouped, unit + source, ~36 workbook-scope named cells; year-1
+  engine bases exposed as shaded inputs) → Model Basis (methodology +
+  simplifications register + validation guide) → **Pro Forma (Audit)** (SAM
+  layout: line items down, Year 0..25 across; every white cell a live Excel
+  formula incl. debt annuity, straight-line depreciation, CIT incentive clock
+  and a fully-visible FIFO 5-year loss-carryforward schedule, IRR/NPV/MIN-DSCR/
+  payback as Excel functions; hardcoded only: year-1 dispatch/settlement bases,
+  replacement schedule, engine tie-out rows; per-year + per-metric PASS/REVIEW
+  checks) → **FX Sensitivity** (editable VND-depreciation scenarios, live IRR/
+  NPV, engine check columns) → existing sheets as record-copy appendix.
+  `cash_flow` now also emits a `derivation` block (authoritative input echo +
+  year-1 bases) and `calculate_fx_sensitivity()`.
+- **Two Excel-corruption bugs found via COM bisect** (Excel refused to open,
+  repair failed): (1) empty-string cells serialize as `<c t="inlineStr"/>`
+  with no `<is>` child — never write "" (guards added); (2) prose source
+  strings starting with "=" ("= PV + BESS + Other") become invalid formulas.
+  Both guarded by a regression test that scans every cell of a built workbook.
+- **Validation.** 130 unittests green (13 new: currency finalization,
+  derivation, FX sensitivity, audit-sheet structure/tie-out/corruption guards).
+  Regenerated all six Factory A workbooks offline (`rebuild_report`, run_uuid
+  now stamped on Cover/Assumptions) and ran a full Excel COM recalculation on
+  each: **9/9 pro-forma checks + 4/4 FX checks PASS on every case, cover
+  status "ALL CHECKS PASS", per-year max |Excel−engine| = 0.0000 USD** —
+  including the DPPA cases 5/6 (C_DN/C_BL degradation repurchase, CfD strike
+  vs fee escalation all reproduce the engine).
+- **Docs.** New `proforma_vietnam/MODEL_AUDIT.md` (audit pack: deliverable
+  inventory, self-audit mechanics, currency resolution, code-vs-doc
+  cross-check table, simplifications register, coverage). Fixed
+  ESCO_CONTRACT_MODEL_DESIGN.md internal inconsistency (strike escalation
+  "Default 0" → 0.04, matching code and its own New Inputs table).
+- Tests/checks run: full unittest suite (130 OK), Excel COM recalc on 6
+  workbooks (all PASS), engine-vs-baseline tie-out of the Honest Economics
+  table (identical).
+- Not committed this session (no commit requested). Open follow-ups unchanged:
+  case_6 financing sensitivity at 1,300 VND/kWh strikes; wire real
+  `direct_ownership`; move `evn_rates.py` tables to versioned defaults.
+
 # 2026-06-24 (later) - E2E Re-run of Factory A case_1..6 (post schema refactor)
 
 - User goal: archive the prior run's artifacts for the six Factory A cases, then

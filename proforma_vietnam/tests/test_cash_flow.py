@@ -417,3 +417,107 @@ class VietnamCashFlowTests(TestCase):
             summary["buyer_savings_lifetime_fraction"], savings_lifetime / bau_lifetime
         )
         self.assertAlmostEqual(summary["buyer_savings_10yr_usd"], savings_10yr)
+
+
+class CurrencyFinalizationTests(TestCase):
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[1000],
+            evn_energy_rates_vnd_per_kwh=[0.12],
+            bau_evn_bill_vnd=200000,
+            optimized_evn_bill_vnd=120000,
+            bau_demand_charge_vnd=40000,
+            optimized_demand_charge_vnd=20000,
+            pv_capex_vnd=1000000,
+            bess_capex_vnd=400000,
+            annual_om_vnd=10000,
+            esco_energy_discount_fraction=0.9,
+            project_years=3,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_without_exchange_rate_usd_aliases_equal_vnd_values(self):
+        result = self._run()
+
+        row = result["annual_cash_flows"][0]
+        self.assertEqual(row["esco_revenue_usd"], row["esco_revenue_vnd"])
+        summary = result["summary"]
+        self.assertEqual(summary["npv_usd"], summary["npv_vnd"])
+
+    def test_with_exchange_rate_vnd_keys_are_restated_at_fixed_rate(self):
+        base = self._run()
+        result = self._run(exchange_rate_vnd_per_usd=25000)
+
+        base_row = base["annual_cash_flows"][0]
+        row = result["annual_cash_flows"][0]
+        # _usd keeps the computed (model-currency) value...
+        self.assertEqual(row["esco_revenue_usd"], base_row["esco_revenue_vnd"])
+        self.assertEqual(row["equity_cash_flow_usd"], base_row["equity_cash_flow_vnd"])
+        # ...and _vnd is restated at the fixed contract rate.
+        self.assertEqual(row["esco_revenue_vnd"], base_row["esco_revenue_vnd"] * 25000)
+        self.assertEqual(
+            result["summary"]["npv_vnd"], base["summary"]["npv_vnd"] * 25000
+        )
+        # Non-currency metrics are untouched.
+        self.assertEqual(
+            result["summary"]["equity_irr_fraction"],
+            base["summary"]["equity_irr_fraction"],
+        )
+        self.assertEqual(
+            result["summary"]["buyer_savings_10yr_fraction"],
+            base["summary"]["buyer_savings_10yr_fraction"],
+        )
+
+    def test_derivation_block_echoes_inputs_and_year_one_bases(self):
+        result = self._run(exchange_rate_vnd_per_usd=25000)
+
+        derivation = result["derivation"]
+        self.assertEqual(derivation["structure"], "esco")
+        self.assertEqual(derivation["project_years"], 3)
+        self.assertEqual(derivation["exchange_rate_vnd_per_usd"], 25000)
+        self.assertEqual(derivation["pv_capex_usd"], 1000000)
+        self.assertEqual(derivation["bess_capex_usd"], 400000)
+        self.assertAlmostEqual(
+            derivation["base_energy_revenue_usd"], 1000 * 0.12 * 0.9
+        )
+        self.assertAlmostEqual(derivation["base_demand_savings_usd"], 20000)
+        self.assertEqual(derivation["cit"]["standard_rate"], 0.20)
+        self.assertEqual(derivation["cit"]["holiday_years"], 4)
+
+
+class FxSensitivityTests(TestCase):
+
+    def test_zero_depreciation_scenario_reproduces_base_metrics(self):
+        from proforma_vietnam.cash_flow import calculate_fx_sensitivity
+
+        result = calculate_vietnam_esco_cash_flow(
+            project_served_pv_kwh=[100000],
+            evn_energy_rates_vnd_per_kwh=[0.10],
+            bau_evn_bill_vnd=20000,
+            optimized_evn_bill_vnd=12000,
+            bau_demand_charge_vnd=4000,
+            optimized_demand_charge_vnd=2000,
+            pv_capex_vnd=50000,
+            bess_capex_vnd=20000,
+            annual_om_vnd=1000,
+            esco_energy_discount_fraction=0.9,
+            project_years=25,
+        )
+        table = calculate_fx_sensitivity(result)
+
+        self.assertEqual(table[0]["vnd_depreciation_rate"], 0.0)
+        self.assertAlmostEqual(
+            table[0]["equity_irr_fraction"],
+            result["summary"]["equity_irr_fraction"],
+            places=6,
+        )
+        self.assertAlmostEqual(
+            table[0]["npv_usd"], result["summary"]["npv_usd"], places=4
+        )
+        # Faster VND depreciation strictly erodes the USD-reported return.
+        irrs = [row["equity_irr_fraction"] for row in table]
+        self.assertEqual(irrs, sorted(irrs, reverse=True))
+        npvs = [row["npv_usd"] for row in table]
+        self.assertEqual(npvs, sorted(npvs, reverse=True))

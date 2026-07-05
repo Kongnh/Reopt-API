@@ -43,12 +43,32 @@ class RebuildReportTests(TestCase):
             "esco_energy_discount_fraction": 0.9,
             "debt_fraction": 0.7,
         }
+        case_config = {
+            "site": {"latitude": 10.82, "longitude": 106.63},
+            "load_profile": {"year": 2025, "path": "loads.csv"},
+            "technologies": {
+                "pv": {"max_kw": 6000, "installed_cost_per_kw": 480},
+                "storage": {"max_kw": 2000, "installed_cost_per_kwh": 250},
+            },
+        }
         (case_dir / "results.json").write_text(json.dumps(results), encoding="utf-8")
         (case_dir / "assumptions.json").write_text(json.dumps(assumptions), encoding="utf-8")
+        (case_dir / "case.json").write_text(json.dumps(case_config), encoding="utf-8")
 
         out_path = rebuild_report(case_dir)
 
         self.assertEqual(out_path.name, "vietnam_report_test-uuid-123.xlsx")
         workbook = load_workbook(out_path)
         self.assertIn("Executive Summary", workbook.sheetnames)
-        self.assertIn("Cash Flow", workbook.sheetnames)
+        self.assertIn("Pro Forma (Audit)", workbook.sheetnames)
+        self.assertIn("Technical Results", workbook.sheetnames)
+
+        # the full case definition lands on the Assumptions sheet
+        sheet = workbook["Assumptions"]
+        labels = {
+            sheet.cell(row=row, column=2).value
+            for row in range(1, sheet.max_row + 1)
+        }
+        self.assertIn("Site & Load Profile (case.json)", labels)
+        self.assertIn("PV Technology (case.json)", labels)
+        self.assertIn("Storage Technology (case.json)", labels)

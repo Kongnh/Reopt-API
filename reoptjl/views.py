@@ -425,7 +425,7 @@ def _vietnam_proforma_response(request, run_uuid, reopt_results):
     report_data = build_vietnam_report_data(reopt_results, cash_flow_result)
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
-        assumptions=assumptions,
+        assumptions={**assumptions, "run_uuid": str(run_uuid)},
         report_data=report_data,
     )
     output = io.BytesIO()

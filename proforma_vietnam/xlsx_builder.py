@@ -1,30 +1,17 @@
 from datetime import date
 
 from openpyxl import Workbook
-from openpyxl.chart import BarChart, LineChart, Reference
+from openpyxl.chart import BarChart, LineChart, Reference, Series
 from openpyxl.styles import Alignment, Font, PatternFill
 
+from proforma_vietnam import audit_sheets
 from proforma_vietnam import proforma_schema as schema
-from proforma_vietnam.structures import DPPA, ESCO
 
 # Proforma line-item columns (Cash Flow, Tax, Debt, DPPA Annual) and the
 # Summary / Developer Financials metric rows are derived from proforma_schema at
 # render time, filtered by structure. The remaining constants below describe
 # DPPA settlement breakouts and REopt-derived report data, which are not
 # proforma line-items.
-
-DPPA_CONFIG_ROWS = [
-    ("DPPA Type", "type"),
-    ("CfD Strike (VND/kWh)", "cfd_strike_per_kwh_vnd"),
-    ("CfD Strike Escalation Rate", "cfd_strike_escalation_rate"),
-    ("Transmission Loss Factor k", "transmission_loss_factor_k"),
-    ("Distribution Loss Factor K_pp", "distribution_loss_factor_kpp"),
-    ("Allocation Fraction delta", "allocation_fraction_delta"),
-    ("System Service Fee (VND/kWh)", "c_dppa_service_fee_vnd_per_kwh"),
-    ("Delta Settlement Adder (VND/kWh)", "c_cl_settlement_adder_vnd_per_kwh"),
-    ("Fee Escalation Rate", "fee_escalation_rate"),
-    ("FMP Series Path", "fmp_series_path"),
-]
 
 DPPA_HOURLY_COLUMNS = [
     ("Hour", "hour"),
@@ -98,25 +85,43 @@ RESULTS_COMPARISON_ROWS = [
     ("BAU Demand Charge (USD)", "bau_demand_charge_usd"),
     ("Optimized Demand Charge (USD)", "optimized_demand_charge_usd"),
     ("Demand Charge Savings (USD)", "demand_charge_savings_usd"),
-]
+]  # keys are genuinely USD (report_data._results_comparison)
 
 ANNUAL_PRODUCTION_ROWS = [
     ("PV to Load (kWh)", "pv_to_load_kwh"),
     ("PV to Storage (kWh)", "pv_to_storage_kwh"),
+    ("PV to Grid (kWh)", "pv_to_grid_kwh"),
     ("Storage to Load (kWh)", "storage_to_load_kwh"),
     ("Grid to Load (kWh)", "grid_to_load_kwh"),
     ("PV Curtailed (kWh)", "pv_curtailed_kwh"),
     ("Grid to Storage (kWh)", "grid_to_storage_kwh"),
 ]
 
+# Hourly dispatch table. "PV Generation Total" is the original PV output before
+# the dispatch split; the production factor is the hourly solar-resource signal
+# (REopt does not persist raw irradiance — see Model Basis).
 DISPATCH_COLUMNS = [
     ("Hour", "hour"),
     ("Load (kW)", "load_kw"),
-    ("Grid to Load (kW)", "grid_to_load_kw"),
+    ("PV Production Factor (kWh/kW) — irradiation proxy", "pv_production_factor"),
+    ("PV Generation Total (kW)", "pv_total_kw"),
     ("PV to Load (kW)", "pv_to_load_kw"),
+    ("PV to Storage (kW)", "pv_to_storage_kw"),
+    ("PV to Grid (kW)", "pv_to_grid_kw"),
+    ("PV Curtailed (kW)", "pv_curtailed_kw"),
+    ("Grid to Load (kW)", "grid_to_load_kw"),
+    ("Grid to Storage (kW)", "grid_to_storage_kw"),
     ("Storage to Load (kW)", "storage_to_load_kw"),
-    ("Storage Charge (kW)", "storage_charge_kw"),
 ]
+
+DISPATCH_CHART_SERIES = [
+    ("Load (kW)", 2),
+    ("PV Generation Total (kW)", 4),
+    ("Grid to Load (kW)", 9),
+    ("Storage to Load (kW)", 11),
+]
+
+HOURS_PER_WEEK = 168
 
 LOAD_DURATION_COLUMNS = [
     ("Rank", "rank"),
@@ -144,7 +149,16 @@ FORMAT_RATIO = "0.00"
 FORMAT_YEARS = "0.0"
 
 # Sheets that carry their own bespoke layout and column widths.
-CUSTOM_LAYOUT_SHEETS = {"Executive Summary", "Buyer Analysis", "Developer Returns"}
+CUSTOM_LAYOUT_SHEETS = {
+    "Cover",
+    "Executive Summary",
+    "Buyer Analysis",
+    "Developer Returns",
+    "Assumptions",
+    "Model Basis",
+    audit_sheets.PRO_FORMA_SHEET,
+    "FX Sensitivity",
+}
 
 BUYER_ANNUAL_COLUMNS = [
     ("Year", "year", None),
@@ -170,14 +184,35 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     report_data = report_data or {}
     assumptions = assumptions or {}
     dppa_config = _active_dppa_config(assumptions)
-    structure = DPPA if dppa_config is not None else ESCO
-    cash_flow_columns = schema.columns(schema.CASH_FLOW_VIEW, structure)
+    derivation = cash_flow_result.get("derivation")
 
     workbook = Workbook()
-    executive_sheet = workbook.active
-    executive_sheet.title = "Executive Summary"
+    cover_sheet = workbook.active
+    cover_sheet.title = "Cover"
     _write_executive_summary(
-        executive_sheet, cash_flow_result, assumptions, report_data, dppa_config
+        workbook.create_sheet("Executive Summary"),
+        cash_flow_result, assumptions, report_data, dppa_config,
+    )
+    audit_sheets.write_assumptions_sheet(
+        workbook.create_sheet("Assumptions"), workbook, assumptions, derivation
+    )
+    audit_sheets.write_model_basis_sheet(
+        workbook.create_sheet("Model Basis"), assumptions, derivation
+    )
+    check_ranges = []
+    if derivation:
+        proforma_refs = audit_sheets.write_pro_forma_audit_sheet(
+            workbook.create_sheet(audit_sheets.PRO_FORMA_SHEET),
+            cash_flow_result,
+            assumptions,
+        )
+        check_ranges.append((proforma_refs["sheet"], proforma_refs["status_range"]))
+        fx_refs = audit_sheets.write_fx_sensitivity_sheet(
+            workbook.create_sheet("FX Sensitivity"), cash_flow_result, proforma_refs
+        )
+        check_ranges.append((fx_refs["sheet"], fx_refs["status_range"]))
+    audit_sheets.write_cover_sheet(
+        cover_sheet, workbook, assumptions, derivation, check_ranges
     )
     _write_buyer_analysis(
         workbook.create_sheet("Buyer Analysis"), cash_flow_result, dppa_config
@@ -186,33 +221,16 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         workbook.create_sheet("Developer Returns"), cash_flow_result
     )
 
-    summary_sheet = workbook.create_sheet("Summary")
-    _write_summary_sheet(
-        summary_sheet,
-        schema.columns(schema.SUMMARY_VIEW, structure),
-        cash_flow_result.get("summary", {}),
+    # Per-year record tables (Summary, Cash Flow, Tax Schedule, Debt Service,
+    # Developer Financials, DPPA Annual Summary, DPPA Configuration) were
+    # consolidated: the Pro Forma (Audit) sheet carries every line-item with
+    # engine tie-out rows, and Assumptions carries the full DPPA configuration.
+    _write_technical_results(
+        workbook.create_sheet("Technical Results"), report_data
     )
-    _write_key_value_sheet(
-        workbook.create_sheet("System Sizing"),
-        SYSTEM_SIZING_ROWS,
-        report_data.get("system_sizing", {}),
-    )
-    _write_key_value_sheet(
-        workbook.create_sheet("Results Comparison"),
-        RESULTS_COMPARISON_ROWS,
-        report_data.get("results_comparison", {}),
-    )
-    _write_key_value_sheet(
-        workbook.create_sheet("Annual Production"),
-        ANNUAL_PRODUCTION_ROWS,
-        report_data.get("annual_production", {}),
-        chart_title="Annual Electricity Production Breakdown",
-    )
-    _write_table_sheet(
+    _write_dispatch_sheet(
         workbook.create_sheet("Dispatch Profile"),
-        DISPATCH_COLUMNS,
         report_data.get("dispatch_profile", []),
-        chart_title="Dispatch Profile",
     )
     _write_table_sheet(
         workbook.create_sheet("Load Duration"),
@@ -220,39 +238,13 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         report_data.get("load_duration", []),
         chart_title="Load Duration Curve",
     )
-    _write_table_sheet(
-        workbook.create_sheet("Cash Flow"),
-        cash_flow_columns,
-        cash_flow_result.get("annual_cash_flows", []),
-    )
-    _write_table_sheet(
-        workbook.create_sheet("Tax Schedule"),
-        schema.columns(schema.TAX_SCHEDULE_VIEW, structure),
-        cash_flow_result.get("annual_cash_flows", []),
-    )
-    _write_table_sheet(
-        workbook.create_sheet("Debt Service"),
-        schema.columns(schema.DEBT_SERVICE_VIEW, structure),
-        cash_flow_result.get("annual_cash_flows", []),
-    )
-    _write_key_value_sheet(
-        workbook.create_sheet("Developer Financials"),
-        schema.columns(schema.DEVELOPER_FINANCIAL_VIEW, structure),
-        report_data.get("developer_financial_performance", cash_flow_result.get("summary", {})),
-        chart_title="Developer Financial Performance",
-    )
-    _write_assumptions_sheet(workbook.create_sheet("Assumptions"), assumptions)
 
     if dppa_config is not None:
-        _write_key_value_sheet(
-            workbook.create_sheet("DPPA Configuration"),
-            DPPA_CONFIG_ROWS,
-            dppa_config,
-        )
-        _write_table_sheet(
-            workbook.create_sheet("Hourly Settlement"),
-            DPPA_HOURLY_COLUMNS,
-            report_data.get("dppa_hourly_breakout", []),
+        _write_bau_vs_dppa_sheet(
+            workbook.create_sheet("Year 1 BAU vs DPPA"),
+            cash_flow_result,
+            report_data,
+            assumptions,
         )
         _write_table_sheet(
             workbook.create_sheet("Monthly Settlement"),
@@ -260,15 +252,9 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
             report_data.get("dppa_monthly_breakout", []),
         )
         _write_table_sheet(
-            workbook.create_sheet("DPPA Annual Summary"),
-            schema.columns(schema.DPPA_ANNUAL_VIEW, structure),
-            cash_flow_result.get("annual_cash_flows", []),
-        )
-        _write_bau_vs_dppa_sheet(
-            workbook.create_sheet("Year 1 BAU vs DPPA"),
-            cash_flow_result,
-            report_data,
-            assumptions,
+            workbook.create_sheet("Hourly Settlement"),
+            DPPA_HOURLY_COLUMNS,
+            report_data.get("dppa_hourly_breakout", []),
         )
 
     for worksheet in workbook.worksheets:
@@ -435,8 +421,8 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         ),
         "Vietnam CIT: 4-year exemption + 9-year 50% reduction from first profitable year; "
         "5-year tax-loss carryforward.",
-        "All USD figures at the fixed contract exchange rate; FX drift between VND revenue "
-        "and USD reporting is not modelled.",
+        "All USD figures at the fixed contract exchange rate (see Assumptions); FX drift "
+        "between VND revenue and USD reporting is quantified on the FX Sensitivity sheet.",
     ]
     for note in notes:
         row += 1
@@ -657,8 +643,16 @@ def _write_bau_vs_dppa_sheet(worksheet, cash_flow_result, report_data, assumptio
     pv_to_storage_kwh = annual_production.get("pv_to_storage_kwh") or 0.0
     storage_to_load_kwh = annual_production.get("storage_to_load_kwh") or 0.0
     pv_to_grid_effective_kwh = annual_production.get("pv_to_grid_effective_kwh") or 0.0
+    # Quantity conversion generator meter -> customer side uses K_pp only
+    # (k is price-only, CD7 Ví dụ 1); settlement always emits q_adj_kw, the
+    # fallback recomputes it from the configured K_pp for older breakouts.
+    kpp = (assumptions.get("dppa") or {}).get("distribution_loss_factor_kpp") or 1.0
     q_re_meter_kwh = _sum_hourly("q_re_meter_kw")
-    q_adj_kwh = sum((row.get("q_adj_kw") or row.get("q_re_meter_kw", 0.0) / (1.026 * 1.027263)) for row in hourly)
+    q_adj_kwh = sum(
+        (row.get("q_adj_kw") if row.get("q_adj_kw") is not None
+         else (row.get("q_re_meter_kw", 0.0) or 0.0) / kpp)
+        for row in hourly
+    )
     q_khc_kwh = sum(
         (row.get("q_khc_kw") if row.get("q_khc_kw") is not None
          else min(row.get("load_kw", 0.0) or 0.0, row.get("q_adj_kw", 0.0) or 0.0))
@@ -727,41 +721,105 @@ def _active_dppa_config(assumptions):
     return dppa
 
 
-def _write_summary_sheet(worksheet, rows, summary):
-    for row_index, (label, key) in enumerate(rows, start=1):
-        worksheet.cell(row=row_index, column=1, value=label)
-        value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(summary, key))
-        number_format = _number_format_for(key)
-        if number_format:
-            value_cell.number_format = number_format
-
-    worksheet.column_dimensions["A"].width = 28
-    worksheet.column_dimensions["B"].width = 18
-
-
 def _number_format_for(key):
     return schema.number_format(key)
 
 
-def _write_key_value_sheet(worksheet, rows, values, chart_title=None):
+def _write_technical_results(worksheet, report_data):
+    """System sizing, year-1 energy balance and bill comparison in one sheet."""
+    sections = [
+        ("System Sizing", SYSTEM_SIZING_ROWS, report_data.get("system_sizing", {})),
+        ("Annual Energy Balance (Year 1)", ANNUAL_PRODUCTION_ROWS,
+         report_data.get("annual_production", {})),
+        ("Year-1 Utility Bill Comparison", RESULTS_COMPARISON_ROWS,
+         report_data.get("results_comparison", {})),
+    ]
+
     worksheet.cell(row=1, column=1, value="Metric").font = HEADER_FONT
     worksheet.cell(row=1, column=2, value="Value").font = HEADER_FONT
     worksheet.cell(row=1, column=1).fill = HEADER_FILL
     worksheet.cell(row=1, column=2).fill = HEADER_FILL
 
-    for row_index, (label, key) in enumerate(rows, start=2):
-        worksheet.cell(row=row_index, column=1, value=label)
-        value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(values, key))
-        number_format = _number_format_for(key)
-        if number_format:
-            value_cell.number_format = number_format
+    row_index = 2
+    production_bounds = None
+    for title, rows, values in sections:
+        for column in (1, 2):
+            worksheet.cell(row=row_index, column=column).fill = SECTION_FILL
+        worksheet.cell(row=row_index, column=1, value=title).font = SECTION_FONT
+        row_index += 1
+        first_data_row = row_index
+        for label, key in rows:
+            worksheet.cell(row=row_index, column=1, value=label)
+            value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(values, key))
+            number_format = _number_format_for(key)
+            if number_format:
+                value_cell.number_format = number_format
+            row_index += 1
+        if title.startswith("Annual Energy Balance"):
+            production_bounds = (first_data_row, row_index - 1)
+        row_index += 1
 
-    worksheet.freeze_panes = "A2"
     worksheet.column_dimensions["A"].width = 34
     worksheet.column_dimensions["B"].width = 18
 
-    if chart_title and rows:
-        _add_bar_chart(worksheet, chart_title, 2, len(rows) + 1)
+    if production_bounds:
+        first_row, last_row = production_bounds
+        chart = BarChart()
+        chart.title = "Annual Electricity Production Breakdown (kWh)"
+        data = Reference(worksheet, min_col=2, min_row=first_row, max_row=last_row)
+        categories = Reference(worksheet, min_col=1, min_row=first_row, max_row=last_row)
+        chart.add_data(data, titles_from_data=False)
+        chart.set_categories(categories)
+        chart.height = 8
+        chart.width = 16
+        worksheet.add_chart(chart, "D2")
+
+
+def _write_dispatch_sheet(worksheet, rows):
+    """Hourly dispatch with the original PV generation split and a peak-week chart."""
+    for column_index, (header, _key) in enumerate(DISPATCH_COLUMNS, start=1):
+        cell = worksheet.cell(row=1, column=column_index, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+
+    for row_index, row in enumerate(rows, start=2):
+        for column_index, (_header, key) in enumerate(DISPATCH_COLUMNS, start=1):
+            cell = worksheet.cell(row=row_index, column=column_index, value=_lookup(row, key))
+            if key == "pv_production_factor":
+                cell.number_format = "0.000"
+            elif key != "hour":
+                cell.number_format = FORMAT_AMOUNT
+
+    worksheet.freeze_panes = "A2"
+    worksheet.column_dimensions["C"].width = 22
+
+    if not rows:
+        return
+    # Chart one representative week only — the week containing the annual peak
+    # load — instead of all 8760 hours.
+    peak_index = max(range(len(rows)), key=lambda i: rows[i].get("load_kw") or 0)
+    week_start = (peak_index // HOURS_PER_WEEK) * HOURS_PER_WEEK
+    week_end = min(week_start + HOURS_PER_WEEK, len(rows))
+    first_row = 2 + week_start
+    last_row = 1 + week_end
+
+    chart = LineChart()
+    chart.title = (
+        f"Dispatch — Peak-Load Week (hours {week_start + 1}-{week_end})"
+    )
+    for series_title, column in DISPATCH_CHART_SERIES:
+        values = Reference(
+            worksheet, min_col=column, min_row=first_row, max_row=last_row
+        )
+        series = Series(values, title=series_title)
+        chart.series.append(series)
+    categories = Reference(
+        worksheet, min_col=1, min_row=first_row, max_row=last_row
+    )
+    chart.set_categories(categories)
+    chart.height = 9
+    chart.width = 24
+    worksheet.add_chart(chart, "M2")
 
 
 def _write_table_sheet(worksheet, columns, rows, chart_title=None):
@@ -783,32 +841,16 @@ def _write_table_sheet(worksheet, columns, rows, chart_title=None):
         _add_line_chart(worksheet, chart_title, len(columns), len(rows) + 1)
 
 
-def _write_assumptions_sheet(worksheet, assumptions):
-    worksheet.cell(row=1, column=1, value="Assumption").font = HEADER_FONT
-    worksheet.cell(row=1, column=2, value="Value").font = HEADER_FONT
-    worksheet.cell(row=1, column=1).fill = HEADER_FILL
-    worksheet.cell(row=1, column=2).fill = HEADER_FILL
-
-    flat = {
-        key: value
-        for key, value in assumptions.items()
-        if not isinstance(value, (dict, list))
-    }
-    for row_index, (key, value) in enumerate(flat.items(), start=2):
-        worksheet.cell(row=row_index, column=1, value=key)
-        worksheet.cell(row=row_index, column=2, value=value)
-
-    worksheet.freeze_panes = "A2"
-
-
 def _autosize_columns(worksheet):
     for column_cells in worksheet.columns:
-        width = max(
+        lengths = [
             len(str(cell.value))
             for cell in column_cells
             if cell.value is not None
-        )
-        worksheet.column_dimensions[column_cells[0].column_letter].width = min(width + 2, 40)
+        ]
+        if not lengths:
+            continue
+        worksheet.column_dimensions[column_cells[0].column_letter].width = min(max(lengths) + 2, 40)
 
 
 def _lookup(values, key):
@@ -817,18 +859,6 @@ def _lookup(values, key):
     if key.endswith("_usd"):
         return values.get(f"{key[:-4]}_vnd")
     return values.get(key)
-
-
-def _add_bar_chart(worksheet, title, first_row, last_row):
-    chart = BarChart()
-    chart.title = title
-    data = Reference(worksheet, min_col=2, min_row=1, max_row=last_row)
-    categories = Reference(worksheet, min_col=1, min_row=first_row, max_row=last_row)
-    chart.add_data(data, titles_from_data=True)
-    chart.set_categories(categories)
-    chart.height = 7
-    chart.width = 14
-    worksheet.add_chart(chart, "D2")
 
 
 def _add_line_chart(worksheet, title, max_col, last_row):

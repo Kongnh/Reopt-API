@@ -2,6 +2,12 @@ from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
 from proforma_vietnam.structures import DPPA, resolve_structure
 from proforma_vietnam.tax_model import (
     BESS_DEPRECIATION_YEARS,
+    CIT_HOLIDAY_YEARS,
+    CIT_INCENTIVE_START_CAP_INDEX,
+    CIT_LOSS_CARRYFORWARD_YEARS,
+    CIT_REDUCED_RATE_FRACTION,
+    CIT_REDUCED_RATE_YEARS,
+    CIT_STANDARD_RATE,
     PV_DEPRECIATION_YEARS,
     calculate_cit,
     straight_line_depreciation_schedule,
@@ -48,6 +54,7 @@ def calculate_vietnam_esco_cash_flow(
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
+    exchange_rate_vnd_per_usd=None,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
@@ -225,22 +232,24 @@ def calculate_vietnam_esco_cash_flow(
                 else None
             ),
         })
-        _add_usd_aliases(row)
+        _finalize_currencies(row, exchange_rate_vnd_per_usd)
         annual_cash_flows.append(row)
         project_cash_flows.append(cash_available_for_debt_service_vnd)
         equity_cash_flows.append(equity_cash_flow_vnd)
 
+    # Sums read the _usd keys: after _finalize_currencies those always hold the
+    # model-currency (computed) value, whether or not an FX rate was supplied.
     buyer_savings_10yr_vnd = sum(
-        row["offtaker_savings_vnd"] for row in annual_cash_flows[:10]
+        row["offtaker_savings_usd"] for row in annual_cash_flows[:10]
     )
     bau_bill_10yr_vnd = sum(
-        row["bau_evn_bill_vnd"] for row in annual_cash_flows[:10]
+        row["bau_evn_bill_usd"] for row in annual_cash_flows[:10]
     )
     buyer_savings_lifetime_vnd = sum(
-        row["offtaker_savings_vnd"] for row in annual_cash_flows
+        row["offtaker_savings_usd"] for row in annual_cash_flows
     )
     bau_bill_lifetime_vnd = sum(
-        row["bau_evn_bill_vnd"] for row in annual_cash_flows
+        row["bau_evn_bill_usd"] for row in annual_cash_flows
     )
 
     summary = {
@@ -273,11 +282,63 @@ def calculate_vietnam_esco_cash_flow(
             else None
         ),
     }
-    _add_usd_aliases(summary)
+    _finalize_currencies(summary, exchange_rate_vnd_per_usd)
+
+    derivation = {
+        "structure": structure,
+        "project_years": project_years,
+        "exchange_rate_vnd_per_usd": exchange_rate_vnd_per_usd,
+        "pv_capex_usd": pv_capex_vnd,
+        "bess_capex_usd": bess_capex_vnd,
+        "other_capex_usd": other_capex_vnd,
+        "annual_om_year1_usd": annual_om_vnd,
+        "replacement_costs_by_year_usd": list(replacement_costs_by_year),
+        "base_energy_revenue_usd": base_energy_revenue_vnd,
+        "base_served_retail_value_usd": base_served_retail_value_vnd,
+        "base_demand_savings_usd": base_demand_savings_vnd,
+        "base_grid_arbitrage_revenue_usd": base_grid_arbitrage_revenue_vnd,
+        "bau_evn_bill_year1_usd": bau_evn_bill_vnd,
+        "optimized_evn_bill_year1_usd": optimized_evn_bill_vnd,
+        "bau_demand_charge_year1_usd": bau_demand_charge_vnd,
+        "optimized_demand_charge_year1_usd": optimized_demand_charge_vnd,
+        "esco_energy_discount_fraction": esco_energy_discount_fraction,
+        "esco_demand_savings_share": esco_demand_savings_share,
+        "esco_grid_arbitrage_share": esco_grid_arbitrage_share,
+        "evn_energy_escalation_rate": evn_energy_escalation_rate,
+        "evn_capacity_escalation_rate": evn_capacity_escalation_rate,
+        "om_escalation_rate": om_escalation_rate,
+        "pv_degradation_rate": pv_degradation_rate,
+        "owner_discount_rate_fraction": owner_discount_rate_fraction,
+        "debt_fraction": debt_fraction,
+        "debt_interest_rate_fraction": debt_interest_rate_fraction,
+        "debt_term_years": debt_term_years,
+        "pv_depreciation_years": pv_depreciation_years,
+        "bess_depreciation_years": BESS_DEPRECIATION_YEARS,
+        "cit": {
+            "standard_rate": CIT_STANDARD_RATE,
+            "holiday_years": CIT_HOLIDAY_YEARS,
+            "reduced_rate_years": CIT_REDUCED_RATE_YEARS,
+            "reduced_rate_fraction": CIT_REDUCED_RATE_FRACTION,
+            "loss_carryforward_years": CIT_LOSS_CARRYFORWARD_YEARS,
+            "incentive_start_cap_index": CIT_INCENTIVE_START_CAP_INDEX,
+        },
+    }
+    if dppa_settlement is not None:
+        year_one = dppa_settlement["year_one"]
+        derivation["dppa_year_one_usd"] = {
+            key: year_one.get(f"{key}_vnd", 0.0)
+            for key in (
+                "c_dn", "c_dppa", "c_cl", "c_bl",
+                "cfd_strike_revenue", "cfd_fmp_offset",
+                "generator_fmp_revenue", "matched_retail_value",
+            )
+        }
+        derivation["dppa_escalation"] = dict(dppa_settlement.get("escalation", {}))
 
     result = {
         "annual_cash_flows": annual_cash_flows,
         "summary": summary,
+        "derivation": derivation,
     }
     if dppa_settlement is not None:
         result["dppa_hourly_breakout"] = dppa_settlement.get("hourly_breakout", [])
@@ -285,10 +346,61 @@ def calculate_vietnam_esco_cash_flow(
     return result
 
 
-def _add_usd_aliases(values):
+DEFAULT_FX_SENSITIVITY_VND_DEPRECIATION_RATES = (0.00, 0.01, 0.02, 0.03)
+
+
+def calculate_fx_sensitivity(
+    cash_flow_result,
+    vnd_depreciation_rates=DEFAULT_FX_SENSITIVITY_VND_DEPRECIATION_RATES,
+):
+    """USD-reported equity returns under annual VND depreciation against USD.
+
+    The proforma holds the contract FX rate flat for the full analysis period,
+    so its USD metrics assume zero FX drift. Project revenue is VND-denominated
+    (EVN tariff / DPPA settlement); if the VND depreciates at ``d`` per year,
+    the year-``t`` USD cash flow shrinks by ``(1 + d)^t``. Debt is assumed
+    VND-denominated (local ESCO financing), so DSCR is unaffected — only the
+    USD-reported equity return moves. NPV keeps the owner discount rate.
+    """
+    summary = cash_flow_result["summary"]
+    derivation = cash_flow_result.get("derivation", {})
+    discount_rate = derivation.get("owner_discount_rate_fraction", 0.10)
+    equity_cash_flows = [-summary["equity_investment_usd"]] + [
+        row["equity_cash_flow_usd"]
+        for row in cash_flow_result["annual_cash_flows"]
+    ]
+
+    rows = []
+    for rate in vnd_depreciation_rates:
+        adjusted = [
+            cash_flow / ((1 + rate) ** year_index)
+            for year_index, cash_flow in enumerate(equity_cash_flows)
+        ]
+        rows.append({
+            "vnd_depreciation_rate": rate,
+            "equity_irr_fraction": _irr(adjusted),
+            "npv_usd": _npv(discount_rate, adjusted),
+        })
+    return rows
+
+
+def _finalize_currencies(values, exchange_rate_vnd_per_usd=None):
+    """Emit the ``_vnd``/``_usd`` pair for every currency key.
+
+    The engine computes in the currency of its inputs — USD in the production
+    pipeline, where ``esco_pro_forma`` normalizes all money to USD before
+    calling. Historically the computed value sat on the ``_vnd`` key with the
+    ``_usd`` alias copying it verbatim (USD == VND numerically, no FX applied).
+    When ``exchange_rate_vnd_per_usd`` is supplied the pair becomes real:
+    ``_usd`` keeps the computed (USD) value and ``_vnd`` is restated at that
+    fixed contract rate. Without a rate the legacy aliasing is preserved for
+    callers that feed native-VND inputs directly.
+    """
     for key, value in list(values.items()):
         if key.endswith("_vnd"):
             values[f"{key[:-4]}_usd"] = value
+            if exchange_rate_vnd_per_usd and value is not None:
+                values[key] = value * exchange_rate_vnd_per_usd
 
 
 def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years):

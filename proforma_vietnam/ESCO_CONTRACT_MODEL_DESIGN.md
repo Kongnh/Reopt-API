@@ -405,7 +405,8 @@ C_BL[year]       = C_BL[year_1]   * (1 + evn_energy_escalation_rate)^(year - 1)
 
 `dppa.cfd_strike_escalation_rate` is signed. Positive values model an
 escalating strike. Negative values model a strike that ratchets down annually
-per the PPA negotiation. Default 0.
+per the PPA negotiation. Default 0.04 (matching the implementation's
+`DEFAULT_CFD_STRIKE_ESCALATION_RATE` and the New Inputs table below).
 
 Default for `dppa.fee_escalation_rate` is the existing
 `evn_energy_escalation_rate` (4 percent per year).
