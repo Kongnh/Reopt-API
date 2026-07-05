@@ -227,6 +227,14 @@ def _dppa_inputs(dppa_config, voltage_key, tariff_config):
             f"dppa.type must be one of {{'none', '{DPPA_TYPE_GRID_CFD}'}}, got '{dppa_type}'."
         )
 
+    # Grid-connected CfD DPPA eligibility (ND57 Art. 16) is a voltage-level
+    # check; unchanged by Decree 243/2026. Decree 243 instead expands who may
+    # participate in DPPA overall -- data centers, EV charging/battery-swap
+    # stations, urban zones/clusters, retail electricity units in zones &
+    # clusters, and trilateral models (RE genco -> retail unit -> large
+    # consumer) -- and removes the price ceiling for private-wire (physical)
+    # DPPA. Those changes don't touch the voltage eligibility validated here;
+    # they're tracked as scope for a future physical-DPPA contract type.
     if voltage_key not in DPPA_VOLTAGE_ELIGIBLE_GRID_CFD:
         raise ValueError(
             f"dppa.type='{DPPA_TYPE_GRID_CFD}' requires a voltage_level in "

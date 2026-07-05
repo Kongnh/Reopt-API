@@ -25,5 +25,15 @@
     "pv_depreciation_years_min": 7,
     "pv_depreciation_years_max": 20,
     "bess_depreciation_years": 8
+  },
+  "surplus_export": {
+    "description": "Decree 243/2026/ND-CP (2026-06-26) amending Decree 58/2025: rooftop surplus sold to EVN, cap 50% of output (>50% negotiable until 2030-12-31 under grid-absorption conditions). Price = prior-year average electricity market price, capped at Decision 988/QD-BCT ground-mounted-solar (no storage) regional ceiling, excl. VAT.",
+    "cap_fraction_of_output": 0.50,
+    "prior_year_avg_market_price_vnd_per_kwh": 1426.6,
+    "price_ceiling_vnd_per_kwh_by_region": {
+      "north": 1382.7,
+      "central": 1107.1,
+      "south": 1012.0
+    }
   }
 }

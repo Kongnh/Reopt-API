@@ -17,6 +17,7 @@ with open(_PATH, encoding="utf-8") as _f:
 VERSION = _DEFAULTS["version"]
 FINANCIAL_DEFAULTS = _DEFAULTS["financial"]
 TAX_DEFAULTS = _DEFAULTS["tax"]
+SURPLUS_EXPORT_DEFAULTS = _DEFAULTS["surplus_export"]
 
 _EVN_TARIFF_PATH = os.path.join(os.path.dirname(__file__), "evn_tariff_rates.json")
 
@@ -49,3 +50,23 @@ def dppa_regulatory_for_year(year):
         )
     vintage_year = max(eligible_years)
     return vintage_year, vintages[str(vintage_year)]
+
+
+def surplus_export_price_vnd_per_kwh(region):
+    """Rooftop surplus-export price for ``region`` under Decree 243/2026.
+
+    Returns the lesser of the prior-year average electricity market price and
+    the region's Decision 988/QD-BCT ground-mounted-solar (no storage)
+    ceiling, per SURPLUS_EXPORT_DEFAULTS. ``region`` is matched
+    case-insensitively against "north", "central", "south".
+    """
+    ceilings = SURPLUS_EXPORT_DEFAULTS["price_ceiling_vnd_per_kwh_by_region"]
+    region_key = region.lower()
+    if region_key not in ceilings:
+        raise ValueError(
+            "Unknown surplus-export region '{}'; expected one of {}.".format(
+                region, sorted(ceilings)
+            )
+        )
+    prior_year_avg = SURPLUS_EXPORT_DEFAULTS["prior_year_avg_market_price_vnd_per_kwh"]
+    return min(prior_year_avg, ceilings[region_key])

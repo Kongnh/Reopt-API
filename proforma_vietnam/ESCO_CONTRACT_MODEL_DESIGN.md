@@ -308,7 +308,9 @@ Included in Phase 3:
 
 Excluded from Phase 3 (deferred):
 
-- Private-wire DPPA (Điều 25).
+- Private-wire DPPA (Điều 25). Still deferred; note Decree 243/2026 (2026-06-26)
+  removed the price ceiling for directly-traded (private-wire) volume, which a
+  forthcoming `PHYSICAL_DPPA` structure will model.
 - Factory-side BESS configuration.
 - REopt optimizer alignment with FMP.
 - Spot-price stochastics, REC accounting, congestion pricing.

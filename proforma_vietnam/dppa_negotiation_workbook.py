@@ -190,7 +190,14 @@ def _write_matrix(sheet, study, key, heatmap=False):
 def _write_methodology(sheet, study):
     rows = [
         ("Fixed technical baseline", str(study.get("baseline_sources", {}))),
-        ("Scenario grid", "CfD strike 1400-2200 VND/kWh x contract volume 70%-100%."),
+        (
+            "Scenario grid",
+            "CfD strike 1400-2200 VND/kWh x contract volume 70%-100%. Since Decree "
+            "243/2026 (2026-06-26), the directly-traded DPPA price is freely "
+            "negotiated -- no regulatory ceiling applies to it; only surplus sold "
+            "to EVN remains ceiling-capped (Decision 988/QD-BCT). The strike grid "
+            "below is therefore an analytical choice, not a regulatory bound.",
+        ),
         ("Buyer gate", "Cumulative savings versus EVN-only BAU >= 0% over both the first 10 years and the full project lifetime."),
         ("Seller gate", "Equity IRR >= 12%."),
         ("Lender gate", "Minimum DSCR in debt-service years >= 1.20x."),

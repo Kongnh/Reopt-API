@@ -1,6 +1,11 @@
 from copy import deepcopy
 
 
+# Since Decree 243/2026 (2026-06-26), the directly-traded DPPA price is freely
+# negotiated -- no regulatory ceiling applies to it (only surplus sold to EVN
+# remains ceiling-capped, per Decision 988/QD-BCT). This grid is therefore an
+# analytical sweep, not a regulatory bound; do not change these values -- cases
+# were swept with them.
 DEFAULT_STRIKES_VND_PER_KWH = tuple(range(1400, 2201, 100))
 DEFAULT_VOLUME_FRACTIONS = (0.70, 0.80, 0.90, 1.00)
 # Buyer gate evaluates the first 10 years AND the full project lifetime
