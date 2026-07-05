@@ -1,5 +1,5 @@
 from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
-from proforma_vietnam.structures import DPPA, resolve_structure
+from proforma_vietnam.structures import DPPA, PHYSICAL_DPPA, resolve_structure
 from proforma_vietnam.tax_model import (
     BESS_DEPRECIATION_YEARS,
     CIT_HOLIDAY_YEARS,
@@ -59,6 +59,7 @@ def calculate_vietnam_esco_cash_flow(
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
+    physical_dppa=None,
     exchange_rate_vnd_per_usd=None,
     cit_regime=None,
     surplus_export_kwh_year1=None,
@@ -69,7 +70,7 @@ def calculate_vietnam_esco_cash_flow(
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
 
-    structure = resolve_structure(dppa_settlement)
+    structure = resolve_structure(dppa_settlement, physical_dppa)
 
     # Decree 243/2026 rooftop surplus-export revenue (ESCO only). Primitives are
     # pre-resolved by esco_pro_forma (year-1 sold kWh already capped, USD price).
@@ -136,6 +137,20 @@ def calculate_vietnam_esco_cash_flow(
         base_energy_revenue_vnd = 0
         base_grid_arbitrage_revenue_vnd = 0
 
+    ppa_price_escalation_rate = 0.0
+    matched_kwh_year1 = None
+    ppa_price_usd_per_kwh = None
+    if structure == PHYSICAL_DPPA:
+        # ND57 Điều 25 private wire: the buyer pays the freely negotiated PPA
+        # price for matched (project-served) energy instead of the discount-to-
+        # EVN charge; the developer earns the same. Demand savings, surplus,
+        # costs, debt and tax all reuse the ESCO code path unchanged — only the
+        # energy line and its escalation basis differ.
+        matched_kwh_year1 = physical_dppa["matched_kwh_year1"]
+        ppa_price_usd_per_kwh = physical_dppa["ppa_price_usd_per_kwh"]
+        ppa_price_escalation_rate = physical_dppa.get("ppa_price_escalation_rate", 0.0)
+        base_energy_revenue_vnd = matched_kwh_year1 * ppa_price_usd_per_kwh
+
     preliminary_rows = []
     taxable_income_by_year = []
 
@@ -144,9 +159,17 @@ def calculate_vietnam_esco_cash_flow(
         capacity_multiplier = (1 + evn_capacity_escalation_rate) ** year_index
         degradation_multiplier = (1 - pv_degradation_rate) ** year_index
 
-        esco_energy_revenue_vnd = (
-            base_energy_revenue_vnd * energy_multiplier * degradation_multiplier
-        )
+        if structure == PHYSICAL_DPPA:
+            # PPA price escalates at its own negotiated rate (flat by default),
+            # not the EVN tariff escalation; volume degrades with PV output.
+            ppa_multiplier = (1 + ppa_price_escalation_rate) ** year_index
+            esco_energy_revenue_vnd = (
+                base_energy_revenue_vnd * ppa_multiplier * degradation_multiplier
+            )
+        else:
+            esco_energy_revenue_vnd = (
+                base_energy_revenue_vnd * energy_multiplier * degradation_multiplier
+            )
         demand_charge_savings_vnd = base_demand_savings_vnd * capacity_multiplier
         esco_demand_revenue_vnd = demand_charge_savings_vnd * esco_demand_savings_share
         esco_grid_arbitrage_revenue_vnd = base_grid_arbitrage_revenue_vnd * energy_multiplier
@@ -204,6 +227,12 @@ def calculate_vietnam_esco_cash_flow(
         if surplus_enabled:
             row["surplus_export_kwh"] = surplus_export_kwh
             row["surplus_export_revenue_vnd"] = surplus_export_revenue_vnd
+        if structure == PHYSICAL_DPPA:
+            # Presentation split: the developer's energy line is the PPA payment
+            # (same value the ESCO branch keeps in esco_energy_revenue_vnd, which
+            # still drives esco_revenue/offtaker cost), shown under its own key.
+            row["ppa_matched_kwh"] = matched_kwh_year1 * degradation_multiplier
+            row["ppa_energy_revenue_vnd"] = esco_energy_revenue_vnd
         if dppa_year is not None:
             row.update(dppa_year)
         preliminary_rows.append(row)
@@ -389,6 +418,14 @@ def calculate_vietnam_esco_cash_flow(
             "price_escalation_rate": surplus_price_escalation_rate,
             "cap_fraction": surplus_cap_fraction,
         }
+    if structure == PHYSICAL_DPPA:
+        # Self-describing PPA config so the audit sheet can rebuild the energy
+        # line from named cells (matched kWh year 1, USD price, escalation).
+        derivation["physical_dppa"] = {
+            "matched_kwh_year1": matched_kwh_year1,
+            "ppa_price_usd_per_kwh": ppa_price_usd_per_kwh,
+            "ppa_price_escalation_rate": ppa_price_escalation_rate,
+        }
     if dppa_settlement is not None:
         year_one = dppa_settlement["year_one"]
         derivation["dppa_year_one_usd"] = {
@@ -453,13 +490,14 @@ def calculate_fx_sensitivity(
 def _resolve_cit_regime(cit_regime, structure):
     """Resolve the CIT regime for a run.
 
-    An explicit ``cit_regime`` wins; otherwise a DPPA structure (a licensed RE
-    generator) defaults to the Law 67/2025 ``re_producer`` incentive and every
-    other structure to the conservative ``standard_with_holiday`` regime.
+    An explicit ``cit_regime`` wins; otherwise either DPPA structure (a licensed
+    RE generator selling electricity — grid CfD or private wire) defaults to the
+    Law 67/2025 ``re_producer`` incentive and every other structure to the
+    conservative ``standard_with_holiday`` regime.
     """
     if cit_regime is None:
         return (
-            CIT_REGIME_RE_PRODUCER if structure == DPPA
+            CIT_REGIME_RE_PRODUCER if structure in (DPPA, PHYSICAL_DPPA)
             else CIT_REGIME_STANDARD_WITH_HOLIDAY
         )
     if cit_regime not in CIT_REGIMES:

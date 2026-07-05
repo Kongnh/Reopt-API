@@ -6,6 +6,9 @@ from proforma_vietnam.defaults import DPPA_REGULATORY
 
 DPPA_TYPE_NONE = "none"
 DPPA_TYPE_GRID_CFD = "grid_dppa_cfd"
+# ND57 Điều 25 private-wire (physical) DPPA: no EVN grid settlement chain, so no
+# settle_dppa_year_one path — esco_pro_forma resolves it into PPA primitives.
+DPPA_TYPE_PHYSICAL_PRIVATE_WIRE = "physical_private_wire"
 
 # The regulatory constants (loss factors, settlement fee adders) come from the
 # latest vintage in defaults/dppa_regulatory.json; regulatory provenance lives

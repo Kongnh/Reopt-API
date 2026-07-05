@@ -91,6 +91,33 @@ def _esco_surplus_result():
     )
 
 
+def _physical_result():
+    # ND57 Điều 25 private-wire DPPA with the surplus leg enabled, so the audit
+    # sheet exercises both the live PPA revenue formula and the nested surplus
+    # cells. matched kWh = 1000 kW × 8760 h to match the project-served basis.
+    return _esco_result(
+        physical_dppa={
+            "matched_kwh_year1": 8_760_000.0,
+            "ppa_price_usd_per_kwh": 0.07,
+            "ppa_price_escalation_rate": 0.02,
+        },
+        surplus_export_kwh_year1=500000.0,
+        surplus_export_price_usd_per_kwh=0.04,
+        surplus_price_escalation_rate=0.04,
+        surplus_cap_fraction=0.5,
+    )
+
+
+PHYSICAL_ASSUMPTIONS = {
+    **{
+        "case_name": "Audit Test",
+        "exchange_rate_vnd_per_usd": 25000,
+        "run_uuid": "test-uuid",
+    },
+    "dppa": {"type": "physical_private_wire", "ppa_price_vnd_per_kwh": 1750.0},
+}
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -253,6 +280,60 @@ class SurplusExportAuditTests(TestCase):
         revenue_row = labels["Total developer revenue"]
         revenue_formula = sheet.cell(row=revenue_row, column=4).value
         self.assertIn(f"D{surplus_row}", revenue_formula)
+
+
+class PhysicalDppaAuditTests(TestCase):
+
+    def test_esco_workbook_has_no_ppa_named_cells_or_row(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("PPA_PRICE", "PPA_ESC", "PPA_MATCHED_KWH_Y1"):
+            self.assertNotIn(name, workbook.defined_names, name)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = [sheet.cell(row=row, column=1).value for row in range(1, sheet.max_row + 1)]
+        self.assertNotIn("PPA energy revenue (matched × price)", labels)
+
+    def test_physical_workbook_defines_ppa_named_cells(self):
+        workbook = build_vietnam_esco_workbook(
+            _physical_result(), assumptions=PHYSICAL_ASSUMPTIONS
+        )
+
+        for name in ("PPA_PRICE", "PPA_ESC", "PPA_MATCHED_KWH_Y1"):
+            self.assertIn(name, workbook.defined_names, name)
+        # Nested surplus cells are defined by the shared 3a machinery.
+        for name in ("SURPLUS_KWH_Y1", "SURPLUS_PRICE", "SURPLUS_ESC", "SURPLUS_CAP"):
+            self.assertIn(name, workbook.defined_names, name)
+
+    def test_physical_workbook_adds_live_ppa_revenue_row(self):
+        workbook = build_vietnam_esco_workbook(
+            _physical_result(), assumptions=PHYSICAL_ASSUMPTIONS
+        )
+        sheet = workbook["Pro Forma (Audit)"]
+
+        labels = {
+            sheet.cell(row=row, column=1).value: row
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value
+        }
+        # The private wire replaces the ESCO energy line with the PPA line.
+        self.assertNotIn("ESCO energy revenue (discount-to-EVN)", labels)
+        ppa_row = labels["PPA energy revenue (matched × price)"]
+        year1_formula = sheet.cell(row=ppa_row, column=4).value
+        self.assertIn("PPA_MATCHED_KWH_Y1", year1_formula)
+        self.assertIn("PPA_PRICE", year1_formula)
+        self.assertIn("PPA_ESC", year1_formula)
+
+        # Total developer revenue must fold in the PPA energy line.
+        revenue_formula = sheet.cell(row=labels["Total developer revenue"], column=4).value
+        self.assertIn(f"D{ppa_row}", revenue_formula)
+
+    def test_physical_workbook_omits_cfd_settlement_sheets(self):
+        workbook = build_vietnam_esco_workbook(
+            _physical_result(), assumptions=PHYSICAL_ASSUMPTIONS
+        )
+        # The Year 1 BAU vs DPPA / Settlement sheets are grid-CfD only.
+        for sheet_name in ("Year 1 BAU vs DPPA", "Monthly Settlement", "Hourly Settlement"):
+            self.assertNotIn(sheet_name, workbook.sheetnames)
 
 
 class CitRegimeAuditTests(TestCase):

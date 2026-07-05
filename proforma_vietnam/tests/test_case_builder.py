@@ -646,6 +646,148 @@ class VietnamCaseBuilderTests(TestCase):
 
         self.assertIn("dppa.type", str(context.exception))
 
+    def test_physical_private_wire_populates_dppa_block_and_round_trips(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "dppa": {
+                    "type": "physical_private_wire",
+                    "ppa_price_vnd_per_kwh": 1850.0,
+                    "ppa_price_escalation_rate": 0.02,
+                },
+            }
+        )
+
+        dppa = case["assumptions"]["dppa"]
+        self.assertEqual(dppa["type"], "physical_private_wire")
+        self.assertEqual(dppa["ppa_price_vnd_per_kwh"], 1850.0)
+        self.assertEqual(dppa["ppa_price_escalation_rate"], 0.02)
+        # Private wire has no ND57 loss-factor / fee regulatory vintage.
+        self.assertNotIn("dppa_regulatory_vintage_year", case["assumptions"])
+
+    def test_physical_private_wire_requires_ppa_price(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "dppa": {"type": "physical_private_wire"},
+                }
+            )
+
+        self.assertIn("ppa_price_vnd_per_kwh", str(context.exception))
+
+    def test_physical_private_wire_accepts_any_voltage_level(self):
+        # Grid CfD requires ≥22kV; the private wire has no such restriction.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "<6kv"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "dppa": {
+                    "type": "physical_private_wire",
+                    "ppa_price_vnd_per_kwh": 1850.0,
+                },
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["dppa"]["type"], "physical_private_wire")
+
+    def test_physical_private_wire_rejects_grid_cfd_fields(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "dppa": {
+                        "type": "physical_private_wire",
+                        "ppa_price_vnd_per_kwh": 1850.0,
+                        "cfd_strike_per_kwh_vnd": 1700.0,
+                    },
+                }
+            )
+
+        self.assertIn("cfd_strike_per_kwh_vnd", str(context.exception))
+
+    def test_physical_private_wire_forces_can_grid_charge_false(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {
+                    "esco_energy_discount_fraction": 0.9,
+                    "grid_charging_enabled": True,
+                },
+                "technologies": {
+                    "storage": {"max_kw": 500.0, "max_kwh": 2000.0, "can_grid_charge": True},
+                },
+                "dppa": {
+                    "type": "physical_private_wire",
+                    "ppa_price_vnd_per_kwh": 1850.0,
+                },
+            }
+        )
+
+        self.assertEqual(case["payload"]["ElectricStorage"]["can_grid_charge"], False)
+
+    def test_physical_private_wire_carries_nested_surplus_block(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "dppa": {
+                    "type": "physical_private_wire",
+                    "ppa_price_vnd_per_kwh": 1850.0,
+                    "surplus_export": {"enabled": True, "region": "south"},
+                },
+            }
+        )
+
+        surplus = case["assumptions"]["dppa"]["surplus_export"]
+        self.assertEqual(surplus["enabled"], True)
+        self.assertEqual(surplus["region"], "south")
+
+    def test_physical_private_wire_rejects_unknown_nested_surplus_region(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError):
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "dppa": {
+                        "type": "physical_private_wire",
+                        "ppa_price_vnd_per_kwh": 1850.0,
+                        "surplus_export": {"enabled": True, "region": "east"},
+                    },
+                }
+            )
+
     def test_surplus_export_block_absent_when_not_configured(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

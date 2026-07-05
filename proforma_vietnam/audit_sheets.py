@@ -32,7 +32,11 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
 from proforma_vietnam.cash_flow import calculate_fx_sensitivity
-from proforma_vietnam.structures import DPPA
+from proforma_vietnam.dppa_settlement import (
+    DPPA_TYPE_GRID_CFD,
+    DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
+)
+from proforma_vietnam.structures import DPPA, PHYSICAL_DPPA
 
 NAVY = "1F3864"
 ACCENT = "2E74B5"
@@ -123,8 +127,13 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     """
     derivation = derivation or {}
     dppa = assumptions.get("dppa") if assumptions else None
+    # is_dppa is strictly the grid-CfD settlement (drives the CfD assumption
+    # rows / labels). The private wire is its own branch.
     is_dppa = derivation.get("structure") == DPPA or bool(
-        dppa and dppa.get("type", "none") != "none"
+        dppa and dppa.get("type", "none") == DPPA_TYPE_GRID_CFD
+    )
+    is_physical = derivation.get("structure") == PHYSICAL_DPPA or bool(
+        dppa and dppa.get("type", "none") == DPPA_TYPE_PHYSICAL_PRIVATE_WIRE
     )
 
     worksheet.sheet_view.showGridLines = False
@@ -179,10 +188,16 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
             return value
         return assumptions.get(alt or key)
 
+    if is_dppa:
+        structure_label = "Grid DPPA with CfD (ND57/2025)"
+    elif is_physical:
+        structure_label = "Physical (private-wire) DPPA (ND57 Điều 25; Decree 243/2026)"
+    else:
+        structure_label = "ESCO discount-to-EVN (behind-the-meter)"
+
     section("Project & Run")
     entry("Case name", assumptions.get("case_name", "Vietnam case"), source="case.json")
-    entry("Financing structure",
-          "Grid DPPA with CfD (ND57/2025)" if is_dppa else "ESCO discount-to-EVN (behind-the-meter)",
+    entry("Financing structure", structure_label,
           source="proforma_vietnam.structures")
     if assumptions.get("run_uuid"):
         entry("REopt run UUID", assumptions["run_uuid"], source="REopt API")
@@ -298,10 +313,26 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
             entry("FMP / CFMP price series", dppa.get("fmp_series_path"),
                   source="case.json dppa.fmp_series_path (8760-hour VND/kWh)")
 
+    physical = d.get("physical_dppa")
+    if physical:
+        # ND57 Điều 25 private wire. Gated on the engine derivation so ESCO /
+        # grid-CfD cases carry no PPA names or rows.
+        section("Physical DPPA (Private Wire — ND57 Điều 25)")
+        entry("PPA price (matched energy)", physical.get("ppa_price_usd_per_kwh"),
+              unit="USD/kWh",
+              source="case.json dppa.ppa_price_vnd_per_kwh (freely negotiated; "
+                     "Decree 243/2026 removed the ceiling) at contract FX",
+              name="PPA_PRICE", fmt="#,##0.00000")
+        entry("PPA price escalation", physical.get("ppa_price_escalation_rate"),
+              unit="per year",
+              source="case.json dppa.ppa_price_escalation_rate (default: flat PPA)",
+              name="PPA_ESC", fmt=FMT_PERCENT)
+
     surplus = d.get("surplus_export")
     if surplus:
-        # Decree 243/2026 rooftop surplus-export (ESCO only). Gated on the engine
-        # derivation so disabled cases carry no surplus names or rows.
+        # Decree 243/2026 rooftop surplus-export (ESCO + physical private wire).
+        # Gated on the engine derivation so disabled cases carry no surplus names
+        # or rows.
         section("Surplus Export (Decree 243/2026)")
         entry("Year-1 surplus sold to EVN", surplus.get("sold_kwh_year1"),
               unit="kWh/yr",
@@ -431,6 +462,15 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
         entry("Year-1 matched-energy retail value", dp.get("matched_retail_value"),
               unit="USD", source="Σ Q_Khc × EVN TOU rate (degradation repurchase)",
               name="DPPA_MATCHED_RETAIL_Y1", fmt=FMT_AMOUNT)
+    elif is_physical:
+        entry("Year-1 matched energy (PPA volume)",
+              (physical or {}).get("matched_kwh_year1"), unit="kWh/yr",
+              source="Σ project-served kWh (PV→load + battery→load)",
+              name="PPA_MATCHED_KWH_Y1", fmt=FMT_AMOUNT)
+        entry("Year-1 grid arbitrage base", d.get("base_grid_arbitrage_revenue_usd", 0),
+              unit="USD", source="REopt net grid arbitrage × ESCO share "
+                                 "(0 under a private wire)",
+              name="BASE_GRID_ARB", fmt=FMT_AMOUNT)
     else:
         entry("Year-1 ESCO energy revenue base", d.get("base_energy_revenue_usd"),
               unit="USD", source="Σ served kWh × EVN TOU rate × ESCO discount",
@@ -617,6 +657,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     annual = cash_flow_result["annual_cash_flows"]
     years = d["project_years"]
     is_dppa = d["structure"] == DPPA
+    is_physical = d["structure"] == PHYSICAL_DPPA
     w = _ProFormaWriter(worksheet, years)
 
     worksheet.sheet_view.showGridLines = False
@@ -681,6 +722,14 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         r_energy_rev = w.line(
             "energy_rev", "Generator revenue (FMP + CfD net)", "USD",
             formula=lambda y, c: f"={c}{r_fmp_rev}+{c}{r_cfd_net}", bold=True)
+    elif is_physical:
+        # ND57 Điều 25 private wire: matched energy × freely negotiated PPA price;
+        # price escalates at its own rate (flat by default), volume degrades.
+        r_energy_rev = w.line(
+            "energy_rev", "PPA energy revenue (matched × price)", "USD",
+            formula=lambda y, c:
+                f"=PPA_MATCHED_KWH_Y1*PPA_PRICE*(1+PPA_ESC)^({year_ref(c)}-1)"
+                f"*{c}{r_fac_deg}")
     else:
         r_energy_rev = w.line(
             "energy_rev", "ESCO energy revenue (discount-to-EVN)", "USD",
@@ -1200,9 +1249,59 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
 # Model Basis
 # ---------------------------------------------------------------------------
 
+def _settlement_title_suffix(is_dppa, is_physical):
+    if is_dppa:
+        return " — ND57/2025 grid DPPA with CfD"
+    if is_physical:
+        return " — ND57 Điều 25 physical (private-wire) DPPA"
+    return " — ESCO discount-to-EVN"
+
+
+def _settlement_bullets(is_dppa, is_physical):
+    if is_dppa:
+        return [
+            "Q_adj[h] = Q_re_meter[h] / K_pp × delta — quantity conversion generator→customer uses "
+            "K_pp only (CD7 Ví dụ 1); k is price-only.",
+            "Q_Khc[h] = min(load[h], Q_adj[h]) — the buyer settles only matched consumption; surplus "
+            "stays with the generator at FMP and is never billed to the buyer.",
+            "C_DN = Q_Khc × CFMP × K_pp with CFMP = FMP × k;  C_DPPA = Q_Khc × f_dppa;  C_CL = Q_Khc × f_cl;  "
+            "C_BL = shortfall × EVN TOU retail.",
+            "CfD settles on min(Q_c, Q_Khc) per CD7 Ví dụ 4: CfD[h] = (P_c − FMP[h]) × Q_cfd[h]. The strike "
+            "leg escalates at the contracted strike escalation; the market legs at the fee escalation.",
+            "Curtailed PV from the self-consumption REopt run is credited as grid export at FMP (the "
+            "generator does not curtail under DPPA).",
+            "Year-1 settlement is computed hourly; later years scale the year-1 totals by the escalation "
+            "and degradation factors shown on the Pro Forma (Audit) sheet.",
+        ]
+    if is_physical:
+        return [
+            "The generator sells matched (project-served) energy — PV→load plus battery→load — directly "
+            "to the factory over a private line at a freely negotiated PPA price; Decree 243/2026 removed "
+            "the ceiling for the directly-traded volume.",
+            "No EVN grid settlement chain applies to the contracted energy (no k/K_pp, CFMP, f_dppa/f_cl, "
+            "or C_BL decomposition) — the private wire bypasses the grid.",
+            "Surplus (PV→grid + would-be-curtailed) is sold to EVN at the Decree 243 market price, capped "
+            "at the Decision 988 regional ceiling and at 50% of PV output — the same machinery as the "
+            "ESCO surplus leg.",
+            "Demand-charge savings vs BAU are shared with the developer at the contracted share, as in the "
+            "ESCO case: the factory's grid demand falls identically under a private wire.",
+            "Year-1 volumes come from the 8760-hour REopt dispatch; the PPA leg escalates at its own "
+            "negotiated rate (flat by default), the surplus/residual legs at EVN escalation, and all volumes "
+            "degrade with PV, per the factors on the Pro Forma (Audit) sheet.",
+        ]
+    return [
+        "The ESCO is paid a contracted fraction of the time-specific EVN tariff for project-served "
+        "energy (PV→load, plus battery→load when the battery cannot grid-charge).",
+        "Demand-charge savings vs BAU are split between ESCO and offtaker at the contracted share.",
+        "Year-1 revenue is computed from the 8760-hour REopt dispatch × TOU rates; later years scale "
+        "by EVN escalation and PV degradation factors shown on the Pro Forma (Audit) sheet.",
+    ]
+
+
 def write_model_basis_sheet(worksheet, assumptions, derivation):
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
+    is_physical = derivation.get("structure") == PHYSICAL_DPPA
     fx = derivation.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
 
     if derivation.get("cit", {}).get("regime") == "re_producer":
@@ -1247,28 +1346,8 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "regulatory quantities, not conversions.",
             "Debt is assumed VND-denominated (local bank), so DSCR is FX-neutral.",
         ]),
-        ("3. Settlement math" + (" — ND57/2025 grid DPPA with CfD" if is_dppa else " — ESCO discount-to-EVN"), (
-            [
-                "Q_adj[h] = Q_re_meter[h] / K_pp × delta — quantity conversion generator→customer uses "
-                "K_pp only (CD7 Ví dụ 1); k is price-only.",
-                "Q_Khc[h] = min(load[h], Q_adj[h]) — the buyer settles only matched consumption; surplus "
-                "stays with the generator at FMP and is never billed to the buyer.",
-                "C_DN = Q_Khc × CFMP × K_pp with CFMP = FMP × k;  C_DPPA = Q_Khc × f_dppa;  C_CL = Q_Khc × f_cl;  "
-                "C_BL = shortfall × EVN TOU retail.",
-                "CfD settles on min(Q_c, Q_Khc) per CD7 Ví dụ 4: CfD[h] = (P_c − FMP[h]) × Q_cfd[h]. The strike "
-                "leg escalates at the contracted strike escalation; the market legs at the fee escalation.",
-                "Curtailed PV from the self-consumption REopt run is credited as grid export at FMP (the "
-                "generator does not curtail under DPPA).",
-                "Year-1 settlement is computed hourly; later years scale the year-1 totals by the escalation "
-                "and degradation factors shown on the Pro Forma (Audit) sheet.",
-            ] if is_dppa else [
-                "The ESCO is paid a contracted fraction of the time-specific EVN tariff for project-served "
-                "energy (PV→load, plus battery→load when the battery cannot grid-charge).",
-                "Demand-charge savings vs BAU are split between ESCO and offtaker at the contracted share.",
-                "Year-1 revenue is computed from the 8760-hour REopt dispatch × TOU rates; later years scale "
-                "by EVN escalation and PV degradation factors shown on the Pro Forma (Audit) sheet.",
-            ]
-        )),
+        ("3. Settlement math" + _settlement_title_suffix(is_dppa, is_physical),
+         _settlement_bullets(is_dppa, is_physical)),
         ("4. Multi-year mechanics", [
             "PV degradation compounds on generation-linked terms; energy lost to degradation is repurchased "
             "from EVN at retail (added to the buyer's residual bill / C_BL).",
@@ -1339,6 +1418,7 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
                       check_ranges=None):
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
+    is_physical = derivation.get("structure") == PHYSICAL_DPPA
     case_name = (assumptions or {}).get("case_name", "Vietnam ESCO / DPPA Case")
 
     worksheet.sheet_view.showGridLines = False
@@ -1348,10 +1428,12 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
     title.font = Font(bold=True, color="FFFFFF", size=15)
     worksheet.row_dimensions[2].height = 30
 
-    subtitle = (
-        "Grid-connected DPPA with CfD (ND57/2025)" if is_dppa
-        else "ESCO discount-to-EVN tariff (behind-the-meter)"
-    )
+    if is_dppa:
+        subtitle = "Grid-connected DPPA with CfD (ND57/2025)"
+    elif is_physical:
+        subtitle = "Physical (private-wire) DPPA — ND57 Điều 25 (Decree 243/2026)"
+    else:
+        subtitle = "ESCO discount-to-EVN tariff (behind-the-meter)"
     worksheet.cell(
         row=3, column=2,
         value=f"{subtitle}  ·  prepared {date.today().isoformat()}  ·  "

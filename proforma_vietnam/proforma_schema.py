@@ -16,7 +16,13 @@ formats are never repeated, only referenced.
 
 from dataclasses import dataclass, field
 
-from proforma_vietnam.structures import ALL_STRUCTURES, DPPA, ESCO
+from proforma_vietnam.structures import (
+    ALL_STRUCTURES,
+    DIRECT_OWNERSHIP,
+    DPPA,
+    ESCO,
+    PHYSICAL_DPPA,
+)
 
 
 @dataclass(frozen=True)
@@ -33,13 +39,22 @@ class RowSpec:
 _ROWS = [
     # --- identity / per-year cash flow ---
     RowSpec("year", "Year", currency=False),
-    RowSpec("esco_energy_revenue", "ESCO Energy Revenue"),
+    # ESCO discount-to-EVN / grid-CfD generator energy line. Hidden under the
+    # physical private wire, which presents its PPA energy line instead.
+    RowSpec("esco_energy_revenue", "ESCO Energy Revenue",
+            applies_to=(ESCO, DPPA, DIRECT_OWNERSHIP)),
+    # ND57 Điều 25 private-wire PPA energy line (physical DPPA only).
+    RowSpec("ppa_matched_kwh", "PPA Matched Energy (kWh)", currency=False,
+            applies_to=(PHYSICAL_DPPA,)),
+    RowSpec("ppa_energy_revenue", "PPA Energy Revenue", applies_to=(PHYSICAL_DPPA,)),
     RowSpec("esco_demand_revenue", "ESCO Demand Revenue"),
     RowSpec("esco_grid_arbitrage_revenue", "ESCO Grid Arbitrage Revenue"),
-    # Decree 243/2026 rooftop surplus-export (ESCO only; under DPPA the export
-    # energy is already monetized at FMP).
-    RowSpec("surplus_export_kwh", "Surplus Export (kWh)", currency=False, applies_to=(ESCO,)),
-    RowSpec("surplus_export_revenue", "Surplus Export Revenue", applies_to=(ESCO,)),
+    # Decree 243/2026 rooftop surplus-export (ESCO and physical private wire;
+    # under grid DPPA the export energy is already monetized at FMP).
+    RowSpec("surplus_export_kwh", "Surplus Export (kWh)", currency=False,
+            applies_to=(ESCO, PHYSICAL_DPPA)),
+    RowSpec("surplus_export_revenue", "Surplus Export Revenue",
+            applies_to=(ESCO, PHYSICAL_DPPA)),
     RowSpec("esco_revenue", "ESCO Revenue"),
     RowSpec("annual_om", "O&M"),
     RowSpec("replacement_cost", "Replacement Cost"),
@@ -84,9 +99,12 @@ PROFORMA_ROWS = {row.key: row for row in _ROWS}
 CASH_FLOW_VIEW = [
     "year",
     "esco_energy_revenue",
+    # Physical private-wire PPA energy lines (hidden under ESCO/grid DPPA):
+    "ppa_matched_kwh",
+    "ppa_energy_revenue",
     "esco_demand_revenue",
     "esco_grid_arbitrage_revenue",
-    # ESCO-only surplus-export lines (hidden under DPPA):
+    # Surplus-export lines (ESCO + physical private wire; hidden under grid DPPA):
     "surplus_export_kwh",
     "surplus_export_revenue",
     "esco_revenue",

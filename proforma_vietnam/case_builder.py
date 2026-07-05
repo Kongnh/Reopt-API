@@ -16,6 +16,7 @@ from proforma_vietnam.dppa_settlement import (
     DISTRIBUTION_LOSS_FACTOR_KPP_BY_VOLTAGE,
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_NONE,
+    DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
     load_cfmp_series,
     load_fmp_series,
 )
@@ -234,9 +235,14 @@ def _dppa_inputs(dppa_config, voltage_key, tariff_config):
     dppa_type = dppa_config.get("type", DPPA_TYPE_NONE)
     if dppa_type == DPPA_TYPE_NONE:
         return {"type": DPPA_TYPE_NONE}
+    if dppa_type == DPPA_TYPE_PHYSICAL_PRIVATE_WIRE:
+        # ND57 Điều 25 private wire: all voltage levels eligible (no ≥22kV
+        # check), so it is resolved before the grid-CfD voltage gate below.
+        return _physical_dppa_inputs(dppa_config)
     if dppa_type != DPPA_TYPE_GRID_CFD:
         raise ValueError(
-            f"dppa.type must be one of {{'none', '{DPPA_TYPE_GRID_CFD}'}}, got '{dppa_type}'."
+            f"dppa.type must be one of {{'none', '{DPPA_TYPE_GRID_CFD}', "
+            f"'{DPPA_TYPE_PHYSICAL_PRIVATE_WIRE}'}}, got '{dppa_type}'."
         )
 
     # Grid-connected CfD DPPA eligibility (ND57 Art. 16) is a voltage-level
@@ -246,7 +252,8 @@ def _dppa_inputs(dppa_config, voltage_key, tariff_config):
     # clusters, and trilateral models (RE genco -> retail unit -> large
     # consumer) -- and removes the price ceiling for private-wire (physical)
     # DPPA. Those changes don't touch the voltage eligibility validated here;
-    # they're tracked as scope for a future physical-DPPA contract type.
+    # the private-wire path (type='physical_private_wire') is handled above with
+    # no voltage restriction.
     if voltage_key not in DPPA_VOLTAGE_ELIGIBLE_GRID_CFD:
         raise ValueError(
             f"dppa.type='{DPPA_TYPE_GRID_CFD}' requires a voltage_level in "
@@ -305,6 +312,42 @@ def _dppa_inputs(dppa_config, voltage_key, tariff_config):
         "fmp_series_vnd_per_kwh": fmp_series,
         "cfmp_series_vnd_per_kwh": cfmp_series,
     }
+
+
+def _physical_dppa_inputs(dppa_config):
+    """Validate the ND57 Điều 25 private-wire (physical) DPPA block.
+
+    The directly-traded volume has no price ceiling (Decree 243/2026) and no
+    voltage-eligibility restriction, so only a positive negotiated PPA price is
+    required. Grid-CfD settlement fields are meaningless here and are rejected.
+    The optional surplus-to-EVN leg is nested and validated with Task 3a's
+    rules; it stays capped per Decision 988.
+    """
+    price = dppa_config.get("ppa_price_vnd_per_kwh")
+    if price is None:
+        raise ValueError(
+            f"dppa.ppa_price_vnd_per_kwh is required when "
+            f"dppa.type='{DPPA_TYPE_PHYSICAL_PRIVATE_WIRE}'."
+        )
+    if price <= 0:
+        raise ValueError("dppa.ppa_price_vnd_per_kwh must be positive.")
+    for forbidden in ("cfd_strike_per_kwh_vnd", "cfd_contract_volume_kwh_per_hour"):
+        if dppa_config.get(forbidden) is not None:
+            raise ValueError(
+                f"dppa.{forbidden} is a grid-CfD field and cannot be combined "
+                f"with dppa.type='{DPPA_TYPE_PHYSICAL_PRIVATE_WIRE}'."
+            )
+
+    inputs = {
+        "type": DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
+        "ppa_price_vnd_per_kwh": price,
+    }
+    if dppa_config.get("ppa_price_escalation_rate") is not None:
+        inputs["ppa_price_escalation_rate"] = dppa_config["ppa_price_escalation_rate"]
+    surplus = _surplus_export_config(dppa_config.get("surplus_export"))
+    if surplus is not None:
+        inputs["surplus_export"] = surplus
+    return inputs
 
 
 def _surplus_export_config(surplus_config):
@@ -401,13 +444,15 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         assumptions["surplus_export"] = surplus_export
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         assumptions["dppa"] = dppa_inputs
-        # Disclose which DPPA regulatory vintage (loss factors, fee adders)
-        # applies to this case, resolved for the same year as the tariff —
-        # audit metadata mirroring rate_vintage_year/rate_vintage_source above.
-        # ESCO-only cases (no active DPPA block) must not carry these keys.
-        dppa_vintage_year, dppa_vintage = dppa_regulatory_for_year(tariff_config["year"])
-        assumptions["dppa_regulatory_vintage_year"] = dppa_vintage_year
-        assumptions["dppa_regulatory_source"] = dppa_vintage["source"]
+        if dppa_inputs["type"] == DPPA_TYPE_GRID_CFD:
+            # Disclose which DPPA regulatory vintage (loss factors, fee adders)
+            # applies to this case, resolved for the same year as the tariff —
+            # audit metadata mirroring rate_vintage_year/rate_vintage_source
+            # above. Only grid-CfD settlement uses those factors; ESCO-only and
+            # private-wire cases must not carry these keys.
+            dppa_vintage_year, dppa_vintage = dppa_regulatory_for_year(tariff_config["year"])
+            assumptions["dppa_regulatory_vintage_year"] = dppa_vintage_year
+            assumptions["dppa_regulatory_source"] = dppa_vintage["source"]
     if tariff_config.get("two_component_pilot_enabled"):
         # Disclose the pilot's official eligibility signal (MOIT: production
         # customers averaging >=200,000 kWh/month at >=22kV). Selection into

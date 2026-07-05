@@ -306,11 +306,25 @@ Included in Phase 3:
 - BESS co-located with the RE generator only.
 - Single-entity model where the ESCO is also the renewable generator.
 
+Implemented (Task 3b) — Private-wire (physical) DPPA, `PHYSICAL_DPPA`:
+
+- ND57 Điều 25: the generator sells matched energy directly to the factory over
+  a private line, so none of the grid-CfD settlement chain applies (no k/K_pp,
+  CFMP, f_dppa/f_cl, or C_BL decomposition).
+- Matched energy is the project-served series REopt produces (PV→load plus
+  battery→load — the same basis as the ESCO energy stream); the buyer pays it at
+  a freely negotiated PPA price (Decree 243/2026 removed the ceiling for the
+  directly-traded volume), flat by default with an optional escalator. All
+  voltage levels are eligible (no ≥22kV restriction).
+- Surplus to EVN (PV→grid + would-be-curtailed) reuses the Task 3a machinery,
+  ceiling-capped per Decision 988; it is optional and nested inside the block.
+- Demand-charge savings are retained with the ESCO 80/20 share (the factory's
+  grid demand falls exactly as in the ESCO case under a private wire); the
+  developer is the asset owner and defaults to the `re_producer` CIT regime.
+- The physical-PPA price negotiation sweep remains CfD-only (follow-up).
+
 Excluded from Phase 3 (deferred):
 
-- Private-wire DPPA (Điều 25). Still deferred; note Decree 243/2026 (2026-06-26)
-  removed the price ceiling for directly-traded (private-wire) volume, which a
-  forthcoming `PHYSICAL_DPPA` structure will model.
 - Factory-side BESS configuration.
 - REopt optimizer alignment with FMP.
 - Spot-price stochastics, REC accounting, congestion pricing.
@@ -320,8 +334,9 @@ Excluded from Phase 3 (deferred):
 ### Contract Type Enum
 
 ```text
-dppa.type = "none"           # Phase 2 behavior (default)
-dppa.type = "grid_dppa_cfd"  # Grid-connected DPPA per ND57 Điều 14-18
+dppa.type = "none"                  # Phase 2 behavior (default)
+dppa.type = "grid_dppa_cfd"         # Grid-connected DPPA per ND57 Điều 14-18
+dppa.type = "physical_private_wire" # Private-wire (physical) DPPA per ND57 Điều 25
 ```
 
 Eligibility for `grid_dppa_cfd` (ND57 Điều 16):
@@ -329,6 +344,10 @@ Eligibility for `grid_dppa_cfd` (ND57 Điều 16):
 ```text
 voltage_level in {"110kv_and_above", "22_to_110kv"}
 ```
+
+`physical_private_wire` has no voltage-eligibility restriction (all levels legal)
+and requires a positive `ppa_price_vnd_per_kwh`; grid-CfD settlement fields
+(`cfd_strike_per_kwh_vnd`, `cfd_contract_volume_kwh_per_hour`) must not be set.
 
 ### BESS Configuration
 

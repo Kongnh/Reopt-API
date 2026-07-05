@@ -13,9 +13,11 @@ import unittest
 
 from proforma_vietnam.tests.test_audit_sheets import (
     ESCO_ASSUMPTIONS,
+    PHYSICAL_ASSUMPTIONS,
     _dppa_result,
     _esco_result,
     _esco_surplus_result,
+    _physical_result,
 )
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
@@ -108,6 +110,20 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _esco_surplus_result(), assumptions=ESCO_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "esco_surplus.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_physical_dppa_fixture_workbook_passes(self):
+        # ND57 Điều 25 private wire: the live PPA revenue formula (matched ×
+        # price × PPA escalation × degradation) plus the nested surplus line must
+        # reproduce the engine so the per-year CFADS/equity/CIT checks stay PASS.
+        workbook = build_vietnam_esco_workbook(
+            _physical_result(), assumptions=PHYSICAL_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "physical_dppa.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)

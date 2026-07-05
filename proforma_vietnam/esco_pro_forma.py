@@ -6,6 +6,7 @@ from proforma_vietnam.defaults import (
 from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_NONE,
+    DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
     settle_dppa_year_one,
 )
 
@@ -104,7 +105,23 @@ def calculate_esco_pro_forma_from_reopt_results(
 
     cash_flow_inputs.update(cash_flow_overrides)
 
-    if dppa_inputs is not None and dppa_inputs.get("type", DPPA_TYPE_NONE) == DPPA_TYPE_GRID_CFD:
+    is_physical = (
+        dppa_inputs is not None
+        and dppa_inputs.get("type") == DPPA_TYPE_PHYSICAL_PRIVATE_WIRE
+    )
+    if is_physical:
+        # ND57 Điều 25 private wire: no grid-CfD settlement. The surplus leg is
+        # nested inside the physical block, so the standalone 3a top-level
+        # surplus_export config is not accepted here (it stays ESCO-only).
+        if surplus_export is not None:
+            raise ValueError(
+                "top-level surplus_export config is ESCO-only; under a physical "
+                "private-wire DPPA the surplus rides inside the physical_dppa block."
+            )
+        _apply_physical_dppa(
+            cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rate_vnd_per_usd
+        )
+    elif dppa_inputs is not None and dppa_inputs.get("type", DPPA_TYPE_NONE) == DPPA_TYPE_GRID_CFD:
         evn_rates_vnd = _money_series(
             tariff_inputs.get("tou_energy_rates_per_kwh", []),
             exchange_rate_vnd_per_usd,
@@ -153,6 +170,42 @@ def calculate_esco_pro_forma_from_reopt_results(
     cash_flow_inputs.setdefault("exchange_rate_vnd_per_usd", exchange_rate_vnd_per_usd)
 
     return calculate_vietnam_esco_cash_flow(**cash_flow_inputs)
+
+
+def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rate_vnd_per_usd):
+    """Resolve ND57 Điều 25 private-wire DPPA primitives into the cash flow.
+
+    Matched energy is the project-served series REopt already produced
+    (PV→load, plus battery→load when the battery cannot grid-charge — the same
+    basis as the ESCO energy stream); the buyer pays it at the freely negotiated
+    PPA price (Decree 243/2026 removed the ceiling), converted VND→USD at the
+    contract FX. A nested, optional ``surplus_export`` sub-block monetizes the
+    export leg with Task 3a's cap/pricing machinery.
+    """
+    ppa_price_vnd = dppa_inputs.get("ppa_price_vnd_per_kwh")
+    if ppa_price_vnd is None:
+        raise ValueError(
+            "physical_private_wire DPPA requires 'ppa_price_vnd_per_kwh'."
+        )
+    # The PPA price is a VND/kWh contract quantity; the cash flow runs in the
+    # contract-FX model currency, so convert like every other VND money input.
+    ppa_price_usd = (
+        ppa_price_vnd / exchange_rate_vnd_per_usd
+        if exchange_rate_vnd_per_usd
+        else ppa_price_vnd
+    )
+    matched_kwh_year1 = sum(cash_flow_inputs["project_served_pv_kwh"])
+    cash_flow_inputs["physical_dppa"] = {
+        "matched_kwh_year1": matched_kwh_year1,
+        "ppa_price_usd_per_kwh": ppa_price_usd,
+        "ppa_price_escalation_rate": dppa_inputs.get("ppa_price_escalation_rate", 0.0),
+    }
+
+    nested_surplus = dppa_inputs.get("surplus_export")
+    if nested_surplus is not None and nested_surplus.get("enabled"):
+        _apply_surplus_export(
+            cash_flow_inputs, nested_surplus, pv_outputs, exchange_rate_vnd_per_usd
+        )
 
 
 def _apply_surplus_export(cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd):

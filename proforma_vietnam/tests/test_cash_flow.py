@@ -750,6 +750,144 @@ class SurplusExportTests(TestCase):
         self.assertEqual(row["surplus_export_revenue_vnd"], 2000.0 * 25000)
 
 
+class PhysicalDppaTests(TestCase):
+    """ND57 Điều 25 private-wire DPPA: matched energy paid at a freely
+    negotiated PPA price, surplus to EVN, no grid-CfD settlement chain.
+
+    cash_flow receives pre-resolved primitives (matched kWh year 1, USD price,
+    escalation); esco_pro_forma extracts the series and converts the price.
+    """
+
+    def _run(self, physical_dppa=None, **overrides):
+        physical = {
+            "matched_kwh_year1": 1000.0,
+            "ppa_price_usd_per_kwh": 2.0,
+            "ppa_price_escalation_rate": 0.0,
+        }
+        if physical_dppa is not None:
+            physical.update(physical_dppa)
+        inputs = dict(
+            project_served_pv_kwh=[100.0, 100.0],
+            evn_energy_rates_vnd_per_kwh=[10.0, 10.0],
+            bau_evn_bill_vnd=100000.0,
+            optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=0.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.0,
+            project_years=2,
+            physical_dppa=physical,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    def test_resolve_structure_returns_physical_dppa(self):
+        from proforma_vietnam.structures import PHYSICAL_DPPA, resolve_structure
+
+        self.assertEqual(resolve_structure(physical_dppa={"x": 1}), PHYSICAL_DPPA)
+        self.assertEqual(self._run()["derivation"]["structure"], PHYSICAL_DPPA)
+
+    def test_mutual_exclusion_physical_and_cfd_raises(self):
+        with self.assertRaises(ValueError):
+            self._run(dppa_settlement={"year_one": {}, "escalation": {}})
+
+    def test_developer_ppa_energy_revenue_is_matched_kwh_times_price(self):
+        row = self._run()["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["ppa_matched_kwh"], 1000.0)
+        self.assertAlmostEqual(row["ppa_energy_revenue_vnd"], 2000.0)
+        # The PPA payment is the developer's energy line and its whole revenue
+        # (no demand/arbitrage/surplus configured here).
+        self.assertAlmostEqual(row["esco_energy_revenue_vnd"], 2000.0)
+        self.assertAlmostEqual(row["esco_revenue_vnd"], 2000.0)
+
+    def test_buyer_cost_adds_ppa_payment_to_residual_evn_bill(self):
+        row = self._run()["annual_cash_flows"][0]
+        # optimized residual EVN bill (60000) + PPA payment (2000); no demand.
+        self.assertAlmostEqual(row["offtaker_post_project_cost_vnd"], 62000.0)
+        self.assertAlmostEqual(row["offtaker_savings_vnd"], 100000.0 - 62000.0)
+
+    def test_ppa_price_escalates_at_its_own_rate(self):
+        rows = self._run(physical_dppa={"ppa_price_escalation_rate": 0.05})["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["ppa_energy_revenue_vnd"], 2000.0)
+        self.assertAlmostEqual(rows[1]["ppa_energy_revenue_vnd"], 2000.0 * 1.05)
+
+    def test_ppa_energy_ignores_evn_energy_escalation(self):
+        # Flat PPA must NOT drift with the EVN tariff escalation — proves no
+        # discount-to-EVN / CfD escalation leaks into the private-wire energy line.
+        rows = self._run(evn_energy_escalation_rate=0.10)["annual_cash_flows"]
+        self.assertAlmostEqual(rows[1]["ppa_energy_revenue_vnd"], 2000.0)
+
+    def test_matched_energy_and_revenue_degrade_with_pv(self):
+        rows = self._run(pv_degradation_rate=0.10)["annual_cash_flows"]
+        self.assertAlmostEqual(rows[1]["ppa_matched_kwh"], 900.0)
+        self.assertAlmostEqual(rows[1]["ppa_energy_revenue_vnd"], 1800.0)
+
+    def test_degradation_repurchase_grows_buyer_residual_bill(self):
+        # Energy lost to degradation is repurchased from EVN at retail, exactly
+        # as the ESCO branch does. base served retail = 100*10 + 100*10 = 2000.
+        rows = self._run(pv_degradation_rate=0.10)["annual_cash_flows"]
+        self.assertAlmostEqual(rows[1]["optimized_evn_bill_vnd"], 60000.0 + 2000.0 * 0.10)
+
+    def test_cit_regime_defaults_to_re_producer(self):
+        cit = self._run()["derivation"]["cit"]
+        self.assertEqual(cit["regime"], "re_producer")
+        self.assertIn("preferential_rate", cit)
+
+    def test_derivation_carries_physical_dppa_block(self):
+        physical = self._run(physical_dppa={"ppa_price_escalation_rate": 0.03})["derivation"]["physical_dppa"]
+        self.assertAlmostEqual(physical["matched_kwh_year1"], 1000.0)
+        self.assertAlmostEqual(physical["ppa_price_usd_per_kwh"], 2.0)
+        self.assertAlmostEqual(physical["ppa_price_escalation_rate"], 0.03)
+
+    def test_surplus_leg_reuses_esco_machinery_without_double_counting(self):
+        row = self._run(
+            surplus_export_kwh_year1=500.0,
+            surplus_export_price_usd_per_kwh=1.0,
+        )["annual_cash_flows"][0]
+        # Matched (PV/battery→load) and surplus (PV→grid + curtailed) are disjoint
+        # series: developer revenue = PPA 2000 + surplus 500, no overlap.
+        self.assertAlmostEqual(row["surplus_export_revenue_vnd"], 500.0)
+        self.assertAlmostEqual(row["esco_revenue_vnd"], 2500.0)
+        # Surplus goes to EVN, not the factory: buyer cost is unchanged.
+        self.assertAlmostEqual(row["offtaker_post_project_cost_vnd"], 62000.0)
+
+    def test_no_cfd_settlement_keys_leak_into_physical_rows(self):
+        row = self._run()["annual_cash_flows"][0]
+        for leaked in ("c_dn_vnd", "c_bl_vnd", "cfd_net_vnd",
+                       "generator_revenue_vnd", "dppa_offtaker_cost_vnd"):
+            self.assertNotIn(leaked, row)
+
+    def test_physical_keys_absent_and_esco_unchanged_without_block(self):
+        # An ESCO run (no physical_dppa) must not gain PPA keys or a derivation.
+        esco = calculate_vietnam_esco_cash_flow(
+            project_served_pv_kwh=[100.0, 100.0],
+            evn_energy_rates_vnd_per_kwh=[10.0, 10.0],
+            bau_evn_bill_vnd=100000.0,
+            optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=0.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            debt_fraction=0.0,
+            project_years=2,
+        )
+        self.assertNotIn("ppa_energy_revenue_vnd", esco["annual_cash_flows"][0])
+        self.assertNotIn("ppa_matched_kwh", esco["annual_cash_flows"][0])
+        self.assertNotIn("physical_dppa", esco["derivation"])
+
+    def test_ppa_revenue_restated_to_vnd_with_exchange_rate(self):
+        row = self._run(exchange_rate_vnd_per_usd=25000)["annual_cash_flows"][0]
+        self.assertAlmostEqual(row["ppa_energy_revenue_usd"], 2000.0)
+        self.assertAlmostEqual(row["ppa_energy_revenue_vnd"], 2000.0 * 25000)
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):

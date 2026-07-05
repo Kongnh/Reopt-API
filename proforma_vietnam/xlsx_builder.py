@@ -6,6 +6,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from proforma_vietnam import audit_sheets
 from proforma_vietnam import proforma_schema as schema
+from proforma_vietnam.dppa_settlement import DPPA_TYPE_GRID_CFD
 
 # Proforma line-item columns (Cash Flow, Tax, Debt, DPPA Annual) and the
 # Summary / Developer Financials metric rows are derived from proforma_schema at
@@ -715,8 +716,12 @@ def _write_bau_vs_dppa_sheet(worksheet, cash_flow_result, report_data, assumptio
 
 
 def _active_dppa_config(assumptions):
+    # Only the grid-CfD settlement drives the CfD-specific sheets (Year 1 BAU vs
+    # DPPA, Monthly/Hourly Settlement) and the CfD summary rows. The physical
+    # private wire has no settlement chain — the standard ESCO-style Buyer
+    # Analysis / Executive Summary cover it — so it is not an "active" DPPA here.
     dppa = assumptions.get("dppa") if assumptions else None
-    if not dppa or dppa.get("type", "none") == "none":
+    if not dppa or dppa.get("type", "none") != DPPA_TYPE_GRID_CFD:
         return None
     return dppa
 

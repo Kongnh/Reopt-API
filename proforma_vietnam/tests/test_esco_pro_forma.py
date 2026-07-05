@@ -441,6 +441,120 @@ class VietnamSurplusExportAdapterTests(TestCase):
             )
 
 
+class VietnamPhysicalDppaAdapterTests(TestCase):
+    """ND57 Điều 25 private-wire DPPA config resolution: matched-energy series,
+    VND→USD PPA price, nested surplus, and the top-level-surplus rejection."""
+
+    def _physical_results(self):
+        # PV: 1000 to load, 400 to grid, 200 curtailed, 400 to storage per hour
+        # over 2 hours; storage_to_load [3, 4] from the fake results.
+        results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        results["outputs"]["PV"] = {
+            "size_kw": 100,
+            "installed_cost_per_kw": 1000,
+            "electric_to_load_series_kw": [1000, 1000],
+            "electric_to_grid_series_kw": [400, 400],
+            "electric_curtailed_series_kw": [200, 200],
+            "electric_to_storage_series_kw": [400, 400],
+        }
+        return results
+
+    def _physical_inputs(self, **overrides):
+        inputs = {"type": "physical_private_wire", "ppa_price_vnd_per_kwh": 2500.0}
+        inputs.update(overrides)
+        return inputs
+
+    def test_matched_energy_is_project_served_series(self):
+        # PV→load [1,2] + battery→load [3,4] (can_grid_charge False) -> 10 kWh.
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            dppa_inputs=self._physical_inputs(),
+        )
+        self.assertEqual(result["derivation"]["structure"], "physical_dppa")
+        physical = result["derivation"]["physical_dppa"]
+        self.assertAlmostEqual(physical["matched_kwh_year1"], 10.0)
+
+    def test_ppa_price_converted_vnd_to_usd_at_contract_fx(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            dppa_inputs=self._physical_inputs(),
+        )
+        physical = result["derivation"]["physical_dppa"]
+        self.assertAlmostEqual(physical["ppa_price_usd_per_kwh"], 2500.0 / 25000)
+        # matched 10 kWh × 0.1 USD/kWh = 1.0 USD PPA revenue in year 1.
+        self.assertAlmostEqual(
+            result["annual_cash_flows"][0]["ppa_energy_revenue_usd"], 1.0
+        )
+
+    def test_ppa_price_required(self):
+        with self.assertRaises(ValueError):
+            calculate_esco_pro_forma_from_reopt_results(
+                _fake_reopt_results(can_grid_charge=False),
+                esco_energy_discount_fraction=0.9,
+                project_years=1,
+                exchange_rate_vnd_per_usd=25000,
+                dppa_inputs={"type": "physical_private_wire"},
+            )
+
+    def test_escalation_carried_through(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            dppa_inputs=self._physical_inputs(ppa_price_escalation_rate=0.03),
+        )
+        self.assertAlmostEqual(
+            result["derivation"]["physical_dppa"]["ppa_price_escalation_rate"], 0.03
+        )
+
+    def test_nested_surplus_resolves_and_monetizes(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._physical_results(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            dppa_inputs=self._physical_inputs(
+                surplus_export={"enabled": True, "region": "south"}
+            ),
+        )
+        # surplus = grid 800 + curtailed 400 = 1200; cap 0.5 × 4000 output = 2000
+        # -> uncapped, sold 1200.
+        self.assertAlmostEqual(
+            result["derivation"]["surplus_export"]["sold_kwh_year1"], 1200.0
+        )
+        self.assertIn("surplus_export_revenue_usd", result["annual_cash_flows"][0])
+
+    def test_disabled_nested_surplus_not_monetized(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._physical_results(),
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            exchange_rate_vnd_per_usd=25000,
+            dppa_inputs=self._physical_inputs(
+                surplus_export={"enabled": False, "region": "south"}
+            ),
+        )
+        self.assertNotIn("surplus_export", result["derivation"])
+
+    def test_top_level_surplus_config_rejected_with_physical(self):
+        with self.assertRaises(ValueError):
+            calculate_esco_pro_forma_from_reopt_results(
+                self._physical_results(),
+                esco_energy_discount_fraction=0.9,
+                project_years=1,
+                exchange_rate_vnd_per_usd=25000,
+                dppa_inputs=self._physical_inputs(),
+                surplus_export={"enabled": True, "region": "south"},
+            )
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

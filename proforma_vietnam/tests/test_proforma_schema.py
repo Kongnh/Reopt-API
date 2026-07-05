@@ -2,7 +2,7 @@ from unittest import TestCase
 
 from proforma_vietnam import proforma_schema as schema
 from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
-from proforma_vietnam.structures import DPPA, ESCO
+from proforma_vietnam.structures import DPPA, ESCO, PHYSICAL_DPPA
 
 
 def _esco_result():
@@ -60,6 +60,33 @@ def _dppa_result():
     )
 
 
+def _physical_result():
+    # Physical private-wire DPPA with surplus enabled so the PHYSICAL-scoped
+    # PPA lines and the surplus lines the schema presents both exist in the
+    # compute output the single-source-of-truth test checks against.
+    return calculate_vietnam_esco_cash_flow(
+        project_served_pv_kwh=[1000, 1000],
+        evn_energy_rates_vnd_per_kwh=[2000, 2000],
+        bau_evn_bill_vnd=5_000_000,
+        optimized_evn_bill_vnd=3_000_000,
+        bau_demand_charge_vnd=1_000_000,
+        optimized_demand_charge_vnd=600_000,
+        pv_capex_vnd=10_000_000,
+        bess_capex_vnd=4_000_000,
+        annual_om_vnd=200_000,
+        esco_energy_discount_fraction=0.9,
+        debt_fraction=0.7,
+        project_years=2,
+        physical_dppa={
+            "matched_kwh_year1": 2000.0,
+            "ppa_price_usd_per_kwh": 1500.0,
+            "ppa_price_escalation_rate": 0.0,
+        },
+        surplus_export_kwh_year1=5_000,
+        surplus_export_price_usd_per_kwh=1_000,
+    )
+
+
 # Per-year sheet views are validated against an annual cash-flow row; summary
 # views against the summary dict.
 ANNUAL_VIEWS = [
@@ -108,6 +135,15 @@ class SchemaIsSingleSourceOfTruthTests(TestCase):
         for view in SUMMARY_VIEWS:
             self._assert_view_keys_present(view, DPPA, summary)
 
+    def test_physical_dppa_presented_keys_exist_in_compute_output(self):
+        result = _physical_result()
+        annual = result["annual_cash_flows"][0]
+        summary = result["summary"]
+        for view in ANNUAL_VIEWS:
+            self._assert_view_keys_present(view, PHYSICAL_DPPA, annual)
+        for view in SUMMARY_VIEWS:
+            self._assert_view_keys_present(view, PHYSICAL_DPPA, summary)
+
 
 class StructureFilteringTests(TestCase):
     def test_dppa_only_lines_are_hidden_under_esco(self):
@@ -129,3 +165,28 @@ class StructureFilteringTests(TestCase):
         dppa_keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DPPA)}
         self.assertNotIn("surplus_export_kwh", dppa_keys)
         self.assertNotIn("surplus_export_revenue_usd", dppa_keys)
+
+    def test_physical_ppa_lines_appear_under_physical_only(self):
+        physical_keys = {
+            key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, PHYSICAL_DPPA)
+        }
+        self.assertIn("ppa_matched_kwh", physical_keys)
+        self.assertIn("ppa_energy_revenue_usd", physical_keys)
+        # The physical private wire presents its PPA line, not the ESCO line.
+        self.assertNotIn("esco_energy_revenue_usd", physical_keys)
+        # Surplus rides on the physical private wire too.
+        self.assertIn("surplus_export_kwh", physical_keys)
+        self.assertIn("surplus_export_revenue_usd", physical_keys)
+
+    def test_physical_ppa_lines_are_hidden_under_esco_and_dppa(self):
+        for structure in (ESCO, DPPA):
+            keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, structure)}
+            self.assertNotIn("ppa_matched_kwh", keys)
+            self.assertNotIn("ppa_energy_revenue_usd", keys)
+
+    def test_cfd_only_lines_are_hidden_under_physical(self):
+        physical_keys = {
+            key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, PHYSICAL_DPPA)
+        }
+        self.assertNotIn("generator_revenue_usd", physical_keys)
+        self.assertNotIn("dppa_offtaker_cost_usd", physical_keys)
