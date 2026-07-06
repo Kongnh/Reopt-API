@@ -1362,9 +1362,17 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         f"+IFERROR(-INDEX({w.col(0)}{r_cum}:{w.last_col}{r_cum},$C${r_pay_match})"
         f"/INDEX({w.year_range(r_eq)},$C${r_pay_match}),0))",
         FMT_YEARS, note="years")
+    # Task 4f: when input VAT is on, the year-0 equity cell already carries the
+    # true equity outlay (EQUITY_INVESTMENT plus the VAT paid net of any
+    # year-0 refund), so the denominator ties to that cell instead of the
+    # VAT-exclusive EQUITY_INVESTMENT named range — otherwise a refund landing
+    # in an operating year (included in the SUM) would be credited against
+    # capital the denominator never charged. No-VAT workbooks keep the
+    # original formula byte-for-byte.
+    roi_denominator = f"-{w.col(0)}{r_eq}" if r_vat_paid else "EQUITY_INVESTMENT"
     r_roi = w.metric(
         "m_roi", "ROI (cumulative equity CF / equity)",
-        f"=SUM({w.year_range(r_eq)})/EQUITY_INVESTMENT", FMT_PERCENT)
+        f"=SUM({w.year_range(r_eq)})/{roi_denominator}", FMT_PERCENT)
     r_sav10 = w.metric(
         "m_savings_10yr", "Buyer savings, years 1-10 (% of BAU)",
         f"=SUM({w.year_range(r_savings, 1, ten)})/SUM({w.year_range(r_bau, 1, ten)})",

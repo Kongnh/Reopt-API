@@ -757,8 +757,8 @@ def calculate_vietnam_esco_cash_flow(
         ]),
         "simple_payback_years": _simple_payback(equity_cash_flows),
         "roi_fraction": (
-            sum(equity_cash_flows[1:]) / equity_investment_vnd
-            if equity_investment_vnd
+            sum(equity_cash_flows[1:]) / -equity_cash_flows[0]
+            if equity_cash_flows[0]
             else None
         ),
     }

@@ -2337,6 +2337,16 @@ class VatOnCapexTests(TestCase):
             base["summary"]["equity_irr_fraction"],
         )
 
+        # ROI's denominator is the TRUE year-0 equity outlay (equity investment
+        # plus the VAT paid), not the VAT-exclusive equity_investment_vnd — the
+        # refund (in rows[1], included in the numerator) is capital the investor
+        # actually put up, so it must be charged for in the denominator too.
+        expected_roi = (
+            sum(row["equity_cash_flow_vnd"] for row in rows)
+            / (base["summary"]["equity_investment_vnd"] + 100_000.0)
+        )
+        self.assertAlmostEqual(vat["summary"]["roi_fraction"], expected_roi)
+
     def test_refund_in_year0_is_net_zero_timing(self):
         base = self._run()
         vat = self._run(vat_rate_fraction=0.10, vat_refund_year=0)
