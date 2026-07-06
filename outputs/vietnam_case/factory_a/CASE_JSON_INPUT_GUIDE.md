@@ -49,6 +49,14 @@ python -m proforma_vietnam.run_case --case outputs\vietnam_case\factory_a\case_2
 
 `--out` is still accepted for backward compatibility but defaults to the directory containing `--case`. A shared PVWatts cache lives at `outputs/pvwatts_cache/` and is reused across scenarios with the same lat/lon and PVWatts params.
 
+Without a running REopt API you can still regenerate everything downstream of the optimization. `--dry-run` rebuilds `payload.json` + `assumptions.json` from `case.json`; the rebuild command recomputes the pro forma and workbook from the saved `results.json`; the validate command opens the workbook in real Excel, forces a full recalculation, and checks the Cover tie-outs:
+
+```powershell
+python -m proforma_vietnam.run_case --case outputs\vietnam_case\factory_a\case_2\case.json --dry-run
+python -m proforma_vietnam.rebuild_report --case-dir outputs\vietnam_case\factory_a\case_2
+python -m proforma_vietnam.validate_workbook outputs\vietnam_case\factory_a\case_2
+```
+
 Expected outputs (written into the same folder as `--case`):
 
 - `payload.json`: REopt V3 optimizer payload.
@@ -80,10 +88,10 @@ Expected outputs (written into the same folder as `--case`):
 
 | Field | Example | Options | Meaning |
 | --- | ---: | --- | --- |
-| `tariff.year` | `2025` | Supported configured years | EVN tariff table year. |
+| `tariff.year` | `2025` | Any year ≥ the earliest configured vintage | EVN tariff table year. Years without their own configured rate table resolve to the latest tariff decision at or before that year (e.g. 2026 resolves to the 2025 vintage); the resolved vintage is disclosed in `assumptions.json` as `rate_vintage_year` / `rate_vintage_source`. |
 | `tariff.voltage_level` | `22-110kV` | `>=110kV`, `22-110kV`, `6-22kV`, `<6kV` | Customer voltage level used to select the EVN tariff. |
 | `tariff.currency` | `usd` | `usd` for this sample | Currency sent to REopt for hourly energy rates and demand charges. Use USD for this sample so all optimizer money inputs are consistent. |
-| `tariff.exchange_rate_vnd_per_usd` | `25000` | Positive number | Exchange rate used to convert EVN VND tariff inputs, or any explicitly VND-denominated override, into USD. The report workbook remains USD-based. |
+| `tariff.exchange_rate_vnd_per_usd` | `26300` | Positive number | Exchange rate used to convert EVN VND tariff inputs, or any explicitly VND-denominated override, into USD. The report workbook remains USD-based. ~26,300 VND/USD is the verified market rate as of June 2026 and the model default in `proforma_vietnam/defaults/vietnam_defaults.json`. |
 | `tariff.tou_schedule` | `current` | `current`, `decision_963` | Time-of-use hour structure. `current` uses the current EVN peak/off-peak pattern. `decision_963` uses the Decision 963-style schedule encoded in the tariff builder. |
 | `tariff.two_component_pilot_enabled` | `false` | `true`, `false` | `false` uses standard energy-only TOU tariff. `true` uses the configured two-component pilot with hourly energy rates plus monthly demand rates. |
 | `tariff.evn_energy_escalation_rate` | `0.04` | Decimal fraction | Annual escalation for EVN energy tariff in the ESCO cash flow. `0.04` means 4% per year. |
@@ -100,6 +108,34 @@ Expected outputs (written into the same folder as `--case`):
 | `financial.debt_term_years` | `10` | Debt repayment term in years. |
 
 `financial.annual_om_usd` is intentionally omitted in the sample. When it is omitted, the Vietnam workbook uses REopt's calculated year-one O&M output. Add it only when you want to override REopt's O&M result with a single ESCO O&M value.
+
+### Optional lender-grade financing inputs (July-2026 model)
+
+All of these default OFF (omitting them reproduces the legacy behavior), except `battery_replacement_treatment`, whose default is now `capitalize`.
+
+| Field | Example | Meaning |
+| --- | ---: | --- |
+| `financial.debt_currency` | `"VND"` | `"VND"` (default; 8.5% default rate) or `"USD"` (~5% default rate; debt service becomes FX-exposed — see the workbook FX Sensitivity sheet). An explicit `debt_interest_rate_fraction` overrides either currency default. |
+| `financial.construction_months` | `12` | 0–36 (default 0 = overnight build). Enables a construction period; interest during construction (IDC) is debt-funded and capitalized into the depreciable base. |
+| `financial.principal_grace_years` | `1` | Principal grace period (< `debt_term_years`): interest-only during grace, then annuity over the remaining term. |
+| `financial.target_min_dscr` | `1.3` | Lender sizing constraint. Debt is sized as min(`debt_fraction`-based, DSCR-supported). Omitted = fraction-based sizing only. |
+| `financial.battery_replacement_treatment` | `"capitalize"` | `"capitalize"` (default: the REopt-scheduled battery replacement is capitalized and depreciated over the 8-year BESS class per Circular 45/2013) or `"expense"` (legacy expense-in-year). Cash flows identical; only CIT timing differs. |
+| `financial.contract_years` | `15` | ESCO contract tenor (ESCO cases only; must be ≥ `debt_term_years`). Operations stop at the tenor; the asset transfers to the host with an NBV-based disposal gain/loss through the CIT regime in the transfer year. |
+| `financial.contract_residual_value_usd` | `500000` | Contractual asset-transfer payment the host pays at the end of `contract_years`. Requires `contract_years`. |
+| `financial.vat_rate_fraction` | `0.10` | Input VAT on capex (VAT Law 48/2024/QH15; no statutory rate is baked in). Year-0 equity outflow = rate × total capex, refunded in `vat_refund_year`. Equity-side only — no CFADS/DSCR/CIT/debt-sizing effect. |
+| `financial.vat_refund_year` | `1` | Year the capex input-VAT refund is received (default 1 when the rate is set; 0 = refunded within the COD year). |
+
+CIT regime is not a direct input for ESCO/DPPA cases: the schedule defaults by structure per CIT Law 67/2025 — ESCO uses `standard_with_holiday` (20% base, 4-year holiday + 9-year half-rate), DPPA generation uses `re_producer` (10% preferential base: 0%/5%/10%/20% schedule), and direct ownership uses `standard_flat`. `direct_ownership.cit_regime` is the only override knob.
+
+## Structure Blocks (optional, top-level)
+
+The default structure is the ESCO contract. Three optional top-level blocks change or extend it:
+
+| Block | Keys | Meaning |
+| --- | --- | --- |
+| `surplus_export` | `enabled`, `region` (`north`/`central`/`south`) or `price_vnd_per_kwh`, optional `cap_fraction` | ESCO cases: monetize surplus PV sold to EVN per Decree 243/2026 (cap defaults to 50% of annual output). Regional pricing = min(prior-year average market price, Decision 988 regional ceiling). |
+| `dppa` | `type` = `grid_dppa_cfd` (requires `cfd_strike_per_kwh_vnd`, `cfd_contract_volume_kwh_per_hour[8760]`; optional `cfd_strike_escalation_rate`, loss factors, service fees — see `case_5`/`case_6`) or `physical_private_wire` (requires `ppa_price_vnd_per_kwh`; optional `ppa_price_escalation_rate`, nested `surplus_export`; price-ceiling-free per Decree 243/2026) | Replaces the ESCO structure with a Decree-57 DPPA. |
+| `direct_ownership` | `enabled`, optional `assume_profitable_host`, optional `cit_regime` | Factory self-invest benchmark (no ESCO/DPPA counterparty; full avoided bill accrues to the factory). Mutually exclusive with a `dppa` block. |
 
 ## PV
 
@@ -193,7 +229,7 @@ Storage replacement is supported by core REopt through storage replacement field
 | `technologies.storage.battery_replacement_year` | Project year for energy-capacity replacement. |
 | `technologies.storage.cost_constant_replacement_year` | Project year for fixed replacement cost. |
 
-The Vietnam pro forma currently reads REopt result costs and allows explicit capex/O&M overrides, but the first Vietnam cash-flow slice does not yet create a separate manually controlled replacement schedule unless replacement costs are passed into the cash-flow model. Use the REopt replacement fields for optimizer economics, then verify whether the generated workbook reflects the replacement timing you expect.
+The Vietnam pro forma reads the REopt-scheduled replacement costs and reflects them in the cash flow at their scheduled years. By default the replacement is capitalized and depreciated over the 8-year BESS class per Circular 45/2013 (`financial.battery_replacement_treatment = "capitalize"`); set `"expense"` for the legacy expense-in-year treatment. Cash flows are identical under both — only the CIT timing differs.
 
 ## Common Edits
 
@@ -207,3 +243,12 @@ The Vietnam pro forma currently reads REopt result costs and allows explicit cap
 | Force fixed system sizes | Set each min equal to its max. |
 | Change ESCO discount | Adjust `esco_contract.esco_energy_discount_fraction`. |
 | Change financing | Adjust `debt_fraction`, `debt_interest_rate_fraction`, and `debt_term_years`. |
+| USD-denominated debt | Set `financial.debt_currency = "USD"` (FX Sensitivity sheet shows the exposure). |
+| Lender-style debt sizing | Set `financial.target_min_dscr` (e.g. `1.3`). |
+| Construction period + IDC | Set `financial.construction_months` (and optionally `principal_grace_years`). |
+| ESCO tenor with asset transfer | Set `financial.contract_years` (+ `contract_residual_value_usd`). |
+| Capex input VAT timing | Set `financial.vat_rate_fraction` (+ `vat_refund_year`). |
+| Sell surplus PV to EVN (Decree 243) | Add a top-level `surplus_export` block. |
+| Switch to a DPPA structure | Add a top-level `dppa` block (`grid_dppa_cfd` or `physical_private_wire`). |
+| Factory self-invest benchmark | Add a top-level `direct_ownership` block. |
+| Find the ESCO discount for a target IRR | `python -m proforma_vietnam.run_esco_discount_solver --case-dir <case_dir> --target-irr 0.12` |

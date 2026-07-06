@@ -4,9 +4,11 @@
   "tariff_year": 2025,
   "voltage_level": "22-110kV",
   "tou_schedule": "decision_963",
-  "exchange_rate_vnd_per_usd": 25000,
+  "exchange_rate_vnd_per_usd": 26300,
   "evn_energy_escalation_rate": 0.04,
   "evn_capacity_escalation_rate": 0.05,
+  "rate_vintage_year": 2025,
+  "rate_vintage_source": "EVN two-component pilot tariff, EVNNPC ref. 7646/BCT-\u0110L (2025-10-09); official pilot billing from 2026-07 for selected \u2265200,000 kWh/month \u226522kV customers",
   "esco_energy_discount_fraction": 0.9,
   "demand_savings_esco_share": 0.8,
   "grid_charging_enabled": false,
@@ -14,5 +16,7 @@
   "debt_fraction": 0.7,
   "debt_interest_rate_fraction": 0.085,
   "debt_term_years": 10,
-  "battery_replacement_year": 11
+  "battery_replacement_year": 11,
+  "two_component_avg_monthly_kwh": 778341.0,
+  "two_component_eligible": true
 }

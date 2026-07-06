@@ -17,7 +17,7 @@
       "tariff.currency": [
         "usd"
       ],
-      "tariff.exchange_rate_vnd_per_usd": "Required when tariff.currency is usd. It converts EVN VND tariff inputs, or any field explicitly named VND, into USD. The optimizer and Vietnam pro forma report use USD values.",
+      "tariff.exchange_rate_vnd_per_usd": "Required when tariff.currency is usd. It converts EVN VND tariff inputs, or any field explicitly named VND, into USD. The optimizer and Vietnam pro forma report use USD values. Current verified market rate is ~26,300 VND/USD (June 2026), which is also the model default in proforma_vietnam/defaults/vietnam_defaults.json.",
       "tariff.tou_schedule": [
         "current",
         "decision_963"
@@ -43,12 +43,28 @@
       "technologies.storage.replacement_costs": "Replacement fields are optimizer inputs. Use replace_cost_per_kw, replace_cost_per_kwh, and replace_cost_constant with their corresponding replacement year fields.",
       "esco_contract.esco_energy_discount_fraction": "Multiplier applied to EVN time-specific energy tariff for ESCO energy revenue, e.g. 0.90 means ESCO charges 90% of EVN energy tariff.",
       "esco_contract.demand_savings_esco_share": "Share of demand-charge savings allocated to ESCO, e.g. 0.80 means ESCO keeps 80% and offtaker keeps 20%.",
-      "esco_contract.grid_charging_enabled": "false for base PV-charged battery case; true only for grid-charging scenario analysis."
+      "esco_contract.grid_charging_enabled": "false for base PV-charged battery case; true only for grid-charging scenario analysis.",
+      "tariff.year": "EVN tariff table year. Years without their own configured rate table resolve to the latest tariff decision at or before that year (e.g. 2026 resolves to the 2025 vintage); the resolved vintage is disclosed in assumptions.json and on the Assumptions sheet as rate_vintage_year / rate_vintage_source.",
+      "financial.debt_currency": "Optional. \"VND\" (default; 8.5% default rate) or \"USD\" (~5% default rate; debt service becomes FX-exposed - see the workbook FX Sensitivity sheet). An explicit financial.debt_interest_rate_fraction overrides either currency default.",
+      "financial.construction_months": "Optional, 0-36 (default 0 = overnight build). Enables a construction period; interest during construction (IDC) is debt-funded and capitalized into the depreciable base.",
+      "financial.principal_grace_years": "Optional principal grace period in years (must be < debt_term_years): interest-only during grace, then annuity amortization over the remaining term.",
+      "financial.target_min_dscr": "Optional lender sizing constraint (e.g. 1.3). Debt is sized as min(debt_fraction-based, DSCR-supported). Omitted = fraction-based sizing only (legacy behavior).",
+      "financial.battery_replacement_treatment": "\"capitalize\" (default: the REopt-scheduled battery replacement is capitalized and depreciated over the 8-year BESS class per Circular 45/2013) or \"expense\" (legacy expense-in-year treatment). Cash flows are identical; only CIT timing differs.",
+      "financial.contract_years": "Optional ESCO contract tenor in years (ESCO cases only; must be >= debt_term_years). Operations stop at the tenor and the asset transfers to the host; the NBV-based disposal gain/loss flows through the CIT regime in the transfer year.",
+      "financial.contract_residual_value_usd": "Contractual asset-transfer payment (USD) the host pays the ESCO at the end of contract_years. Requires contract_years.",
+      "financial.vat_rate_fraction": "Optional input VAT on capex as a fraction (e.g. 0.10 under VAT Law 48/2024/QH15; the model has no baked-in statutory rate). Year-0 equity outflow = rate x total capex, refunded in vat_refund_year. Equity-side only: no CFADS/DSCR/CIT/debt-sizing effect.",
+      "financial.vat_refund_year": "Year the capex input-VAT refund is received (default 1 when vat_rate_fraction is set; 0 = refunded within the COD year, net-zero timing).",
+      "cit_regime": "Not a direct case input for ESCO/DPPA: the CIT schedule defaults by structure per CIT Law 67/2025 - ESCO uses standard_with_holiday (20% base with 4-year holiday + 9-year half-rate), DPPA generation uses re_producer (10% preferential base: 0%/5%/10%/20% schedule), direct ownership uses standard_flat. direct_ownership.cit_regime is the only override knob.",
+      "surplus_export": "Optional top-level block (ESCO cases) monetizing surplus PV sold to EVN per Decree 243/2026: {\"enabled\": true, \"region\": \"north\"|\"central\"|\"south\" OR \"price_vnd_per_kwh\": <VND>, optional \"cap_fraction\" (default 0.50 of annual output)}. Regional pricing = min(prior-year average market price, Decision 988 regional ceiling).",
+      "direct_ownership": "Optional top-level block for the factory self-invest benchmark (no ESCO/DPPA counterparty): {\"enabled\": true, optional \"assume_profitable_host\": true|false, optional \"cit_regime\"}. Mutually exclusive with a dppa block; the ESCO discount fraction is ignored.",
+      "dppa": "Optional top-level block replacing the ESCO structure. type=\"grid_dppa_cfd\" (ND57 virtual CfD; requires cfd_strike_per_kwh_vnd and cfd_contract_volume_kwh_per_hour[8760]; optional cfd_strike_escalation_rate, loss factors, service fees - see case_5/case_6) or type=\"physical_private_wire\" (ND57 Art. 25 private wire; requires ppa_price_vnd_per_kwh, optional ppa_price_escalation_rate and a nested surplus_export block; price-ceiling-free per Decree 243/2026)."
     },
     "commands": {
-      "create_scenario": "mkdir outputs\u000bietnam_case\factory_a\\case_1 && copy outputs\u000bietnam_case\factory_a\\case.json outputs\u000bietnam_case\factory_a\\case_1\\case.json",
-      "dry_run": "python -m proforma_vietnam.run_case --case outputs\u000bietnam_case\factory_a\\case_1\\case.json --dry-run",
-      "full_e2e": "python -m proforma_vietnam.run_case --case outputs\u000bietnam_case\factory_a\\case_1\\case.json --poll-seconds 5 --max-polls 120"
+      "create_scenario": "mkdir outputs/vietnam_case/factory_a/case_<n>, copy this case.json into it, then edit the copy",
+      "dry_run": "python -m proforma_vietnam.run_case --case outputs/vietnam_case/factory_a/case_<n>/case.json --dry-run",
+      "full_e2e": "python -m proforma_vietnam.run_case --case outputs/vietnam_case/factory_a/case_<n>/case.json --poll-seconds 5 --max-polls 120 (requires a running REopt API, e.g. docker-compose up -d; REOPT_API_URL overrides http://localhost:8000/v3)",
+      "offline_rebuild": "python -m proforma_vietnam.rebuild_report --case-dir outputs/vietnam_case/factory_a/case_<n> (recomputes the pro forma and workbook from saved results.json + assumptions.json; no API or re-optimization)",
+      "validate_workbook": "python -m proforma_vietnam.validate_workbook outputs/vietnam_case/factory_a/case_<n> (opens the workbook in real Excel, full recalc, checks the Cover tie-outs read ALL CHECKS PASS)"
     },
     "expected_outputs": [
       "<case_folder>/payload.json",
@@ -72,7 +88,7 @@
     "year": 2025,
     "voltage_level": "22-110kV",
     "currency": "usd",
-    "exchange_rate_vnd_per_usd": 25000,
+    "exchange_rate_vnd_per_usd": 26300,
     "tou_schedule": "current",
     "two_component_pilot_enabled": false,
     "evn_energy_escalation_rate": 0.04,
