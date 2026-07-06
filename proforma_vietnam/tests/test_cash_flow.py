@@ -1779,6 +1779,51 @@ class UsdDebtFxSensitivityTests(TestCase):
             expected = [cf / (1 + d) ** i for i, cf in enumerate(equity)]
             self.assertAlmostEqual(row["equity_irr_fraction"], _irr(expected))
 
+    def test_usd_debt_d0_row_reproduces_base_with_tenor_residual_and_vat(self):
+        # Regression (final review, ledger 4b): the USD-debt d=0 row must
+        # reproduce the base equity cash flow exactly, by construction. The
+        # pre-fix formula rebuilt the adjusted flow from CFADS alone, dropping
+        # every equity-side item outside CFADS — the year-T asset-transfer
+        # residual (Task 4e) and the VAT refund (Task 4f) — so d=0 diverged from
+        # the base summary (equity IRR 0.5548 base vs 0.5162 d=0). The fix
+        # deflates the full equity leg, netting fixed USD debt service.
+        from proforma_vietnam.cash_flow import calculate_fx_sensitivity
+
+        result = calculate_vietnam_esco_cash_flow(
+            project_served_pv_kwh=[100000.0],
+            evn_energy_rates_vnd_per_kwh=[10.0],
+            bau_evn_bill_vnd=2_000_000.0,
+            optimized_evn_bill_vnd=1_400_000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=2_000_000.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            cit_regime="standard_flat",
+            project_years=25,
+            debt_fraction=0.5,
+            debt_term_years=10,
+            debt_currency="USD",
+            contract_years=15,
+            contract_residual_value_usd=500_000.0,
+            vat_rate_fraction=0.10,
+            vat_refund_year=2,
+        )
+        table = calculate_fx_sensitivity(result, vnd_depreciation_rates=(0.0,))
+
+        self.assertEqual(table[0]["vnd_depreciation_rate"], 0.0)
+        self.assertAlmostEqual(
+            table[0]["equity_irr_fraction"],
+            result["summary"]["equity_irr_fraction"],
+            places=9,
+        )
+        self.assertAlmostEqual(
+            table[0]["npv_usd"], result["summary"]["npv_usd"], places=4
+        )
+
 
 class BatteryReplacementCapitalizationTests(TestCase):
     """Circular 45 battery-replacement capitalization (default). Each replacement

@@ -735,6 +735,10 @@ class UsdDebtAuditTests(TestCase):
         # The three disclosed conventions: fixed USD debt service under FX drift,
         # CIT not recomputed, and no VAS FX revaluation on outstanding principal.
         self.assertIn("revaluation", text.lower())
+        # The Currency & FX section must not carry the stale VND-debt sentence
+        # (ledger 4b-Minor-2): a USD-debt workbook states DSCR is FX-exposed.
+        self.assertNotIn("DSCR is FX-neutral", text)
+        self.assertIn("DSCR is FX-exposed", text)
 
     def test_vnd_default_model_basis_omits_usd_debt_disclosures(self):
         workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)

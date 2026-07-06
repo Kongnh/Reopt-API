@@ -1236,8 +1236,10 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         y0="=-TOTAL_CAPEX",
         formula=lambda y, c: f"={c}{r_cfads}")
     # Task 4e: the host's end-of-term buyout lands in the developer's year-T
-    # equity cash flow as its own disclosed line (CFADS and the unlevered project
-    # cash flow are unchanged — the residual is an equity-side terminal value).
+    # equity cash flow as its own disclosed line — an equity-side terminal value,
+    # so the PROCEEDS leave CFADS and the unlevered project cash flow unchanged.
+    # The disposal gain's tax effect is separate: it enters year-T taxable
+    # income, so CIT (and thus CFADS and the project cash flow) already carry it.
     r_transfer = None
     if contract_term:
         r_transfer = w.line(
@@ -1631,9 +1633,12 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
             col = get_column_letter(2 + year)
             proforma_col = get_column_letter(3 + year)
             if is_usd_debt and year >= 1:
-                # USD debt service is FX-fixed; only VND CFADS deflates.
+                # USD debt service is FX-fixed; the whole VND equity leg (equity
+                # cash flow + debt service — i.e. CFADS plus the equity-side
+                # residual / VAT refund) deflates, then debt service is netted.
                 value = (
-                    f"=({sheet_ref}!{proforma_col}{cfads_row}"
+                    f"=(({sheet_ref}!{proforma_col}{eq_row}"
+                    f"+{sheet_ref}!{proforma_col}{ds_row})"
                     f"/(1+$A{table_row})^{col}${year_header_row})"
                     f"-{sheet_ref}!{proforma_col}{ds_row}"
                 )
@@ -1949,7 +1954,10 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "taken through T) enters year-T taxable income through the case's CIT regime and "
             "loss-carryforward machinery — no separate disposal-tax computation. Depreciation "
             "beyond T is not taken; the undepreciated remainder is recovered via the disposal, "
-            "not written off separately (see the Pro Forma NBV tie-out)."
+            "not written off separately (see the Pro Forma NBV tie-out). Asymmetry: the transfer "
+            "proceeds are equity-side (out of CFADS/DSCR) while this disposal tax flows through CIT "
+            "into CFADS and the project cash flow, so the year-T DSCR bears the tax without the "
+            "offsetting proceeds — a lender may normalize that year."
         )
         contract_register_bullets.append(
             "Asset-disposal tax convention: Vietnamese CIT generally taxes asset-disposal gains at "
@@ -2060,6 +2068,9 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "returns under 0-3%/yr VND depreciation.",
             "Sheets that show VND amounts (Hourly/Monthly Settlement, DPPA fee inputs) are VND-native "
             "regulatory quantities, not conversions.",
+            "Debt is USD-denominated (international financing), so DSCR is FX-exposed — see the FX "
+            "Sensitivity sheet."
+            if usd_debt else
             "Debt is assumed VND-denominated (local bank), so DSCR is FX-neutral.",
         ]),
         ("3. Settlement math" + _settlement_title_suffix(is_dppa, is_physical, is_direct),

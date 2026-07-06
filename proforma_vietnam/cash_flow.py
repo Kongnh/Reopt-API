@@ -619,9 +619,11 @@ def calculate_vietnam_esco_cash_flow(
         )
         equity_cash_flow_vnd = cash_available_for_debt_service_vnd - debt_service_vnd
         # ESCO contract tenor: the host's residual/buyout payment lands in the
-        # developer's year-T equity cash flow (its own disclosed line; CFADS and
-        # the project cash flow are unchanged — the residual is an equity-side
-        # terminal value).
+        # developer's year-T equity cash flow as its own disclosed line — an
+        # equity-side terminal value, so the PROCEEDS leave CFADS and the project
+        # cash flow unchanged. The disposal gain's tax effect is separate: it
+        # enters year-T taxable income in _derive_for_principal, so CIT (and thus
+        # CFADS, the project cash flow and DSCR sizing) already carry it.
         asset_transfer_proceeds_vnd = 0.0
         if contract_term is not None and year_index == contract_term["contract_years"] - 1:
             asset_transfer_proceeds_vnd = contract_residual_value_usd
@@ -938,9 +940,12 @@ def calculate_fx_sensitivity(
     * VND debt (default): debt service is VND-denominated too, so the whole
       equity cash flow deflates by ``(1 + d)^t`` and DSCR is FX-neutral
       (constant across ``d`` — the documented legacy behaviour).
-    * USD debt: only debt service is FX-fixed; the rest of the equity flow
-      (VND revenue net of VND O&M / replacement / CIT — i.e. CFADS) deflates:
-      ``adjusted_t = CFADS_t/(1+d)^t − debt_service_t`` and
+    * USD debt: only debt service is FX-fixed; the whole VND equity leg
+      deflates — CFADS plus the equity-side items outside CFADS (the tenor
+      residual and any VAT refund) — then fixed USD debt service is netted:
+      ``adjusted_t = (equity_cf_t + debt_service_t)/(1+d)^t − debt_service_t``.
+      This reduces to ``CFADS_t/(1+d)^t − debt_service_t`` when there are no
+      equity-side extras, since ``equity_cf_t = CFADS_t − debt_service_t`` then.
       ``dscr_t(d) = (CFADS_t/(1+d)^t)/debt_service_t`` — both erode with ``d``.
 
     Each row carries ``min_dscr`` (minimum over the debt term, years with debt
@@ -974,8 +979,13 @@ def calculate_fx_sensitivity(
             debt_service = row["debt_service_usd"]
             cfads = row["cash_available_for_debt_service_usd"]
             if usd_debt:
-                # USD debt service is FX-fixed; VND CFADS deflates.
-                adjusted.append(cfads / deflator - debt_service)
+                # USD debt service is FX-fixed; the whole VND equity leg (CFADS
+                # plus equity-side items outside CFADS — the tenor residual and
+                # any VAT refund) deflates, then fixed debt service is netted.
+                adjusted.append(
+                    (row["equity_cash_flow_usd"] + debt_service) / deflator
+                    - debt_service
+                )
                 if debt_service:
                     dscrs.append((cfads / deflator) / debt_service)
             else:
