@@ -74,7 +74,7 @@ CURATED_ASSUMPTION_KEYS = {
     "bess_capex_usd", "om_escalation_rate", "pv_degradation_rate",
     "pv_depreciation_years", "debt_fraction", "debt_interest_rate_fraction",
     "debt_term_years", "construction_months", "principal_grace_years",
-    "target_min_dscr",
+    "target_min_dscr", "contract_years", "contract_residual_value_usd",
     "owner_discount_rate_fraction", "analysis_years",
     "case_config", "dppa",
 }
@@ -504,6 +504,23 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
           unit="years", source="Circular 45/2013/TT-BTC",
           name="BESS_DEP_YEARS", fmt="0")
 
+    contract_term = d.get("contract_term")
+    if contract_term:
+        # ESCO contract tenor + end-of-term asset transfer (Task 4e). Gated on
+        # the engine derivation so full-horizon (default) cases carry no tenor
+        # names or rows and stay byte-identical.
+        section("Contract Tenor & Asset Transfer (Task 4e)")
+        entry("Contract tenor (asset-transfer year T)",
+              contract_term.get("contract_years"), unit="years",
+              source="case.json financial.contract_years (operations cease at "
+                     "end of year T; asset transfers to the host)",
+              name="CONTRACT_YEARS", fmt="0")
+        entry("Contractual residual / buyout value",
+              contract_term.get("residual_value_usd"), unit="USD",
+              source="case.json financial.contract_residual_value_usd (host's "
+                     "end-of-term transfer payment, at contract FX)",
+              name="RESIDUAL_VALUE", fmt=FMT_AMOUNT)
+
     section("Year-1 Engine Outputs (hardcoded — dispatch × tariff, not derivable in-sheet)")
     entry("Year-1 BAU EVN bill", d.get("bau_evn_bill_year1_usd"), unit="USD",
           source="REopt ElectricTariff.year_one_bill_before_tax_bau",
@@ -757,6 +774,10 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     # replacement is actually capitalized; the legacy "expense" flag and
     # no-replacement cases carry no block and render the legacy expensed formulas.
     battery_replacement = d.get("battery_replacement")
+    # ESCO contract tenor + end-of-term asset transfer (Task 4e). Present only
+    # when contract_years is set; drives operating-line truncation beyond year T,
+    # the NBV disposal block and the year-T transfer proceeds.
+    contract_term = d.get("contract_term")
     w = _ProFormaWriter(worksheet, years)
 
     worksheet.sheet_view.showGridLines = False
@@ -781,6 +802,15 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
 
     def year_ref(col):
         return f"{col}${r_year}"
+
+    def trunc(c, expr):
+        # ESCO contract tenor (Task 4e): every ESCO operating line is zero for
+        # years beyond the contract tenor T (the asset has transferred to the
+        # host). No-op when no tenor is set, so non-tenor workbooks stay
+        # byte-identical.
+        if contract_term is None:
+            return expr
+        return f"IF({year_ref(c)}<=CONTRACT_YEARS,{expr},0)"
 
     r_fac_energy = w.line(
         "fac_energy", "EVN energy escalation factor", "index",
@@ -843,7 +873,8 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     else:
         r_energy_rev = w.line(
             "energy_rev", "ESCO energy revenue (discount-to-EVN)", "USD",
-            formula=lambda y, c: f"=BASE_ENERGY_REV*{c}{r_fac_energy}*{c}{r_fac_deg}")
+            formula=lambda y, c: "=" + trunc(
+                c, f"BASE_ENERGY_REV*{c}{r_fac_energy}*{c}{r_fac_deg}"))
     if is_direct:
         # Bill savings already folds in demand + any grid arbitrage (BAU/optimized
         # are the total EVN bills), so there is no separate demand-share or
@@ -868,7 +899,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
             formula=lambda y, c: f"=BASE_DEMAND_SAVINGS*{c}{r_fac_capacity}")
         r_dem_rev = w.line(
             "dem_rev", "ESCO share of demand savings", "USD",
-            formula=lambda y, c: f"={c}{r_dem_savings}*DEMAND_SHARE")
+            formula=lambda y, c: "=" + trunc(c, f"{c}{r_dem_savings}*DEMAND_SHARE"))
         if is_dppa:
             r_arb_rev = None
             r_revenue = w.line(
@@ -877,7 +908,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         else:
             r_arb_rev = w.line(
                 "arb_rev", "Grid arbitrage revenue", "USD",
-                formula=lambda y, c: f"=BASE_GRID_ARB*{c}{r_fac_energy}")
+                formula=lambda y, c: "=" + trunc(c, f"BASE_GRID_ARB*{c}{r_fac_energy}"))
             surplus = d.get("surplus_export")
             if surplus:
                 # Volume degrades with PV output (r_fac_deg); the price escalates
@@ -885,9 +916,10 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
                 # surplus_export_revenue exactly so the tie-out holds.
                 r_surplus = w.line(
                     "surplus_rev", "Surplus export revenue (Decree 243)", "USD",
-                    formula=lambda y, c:
-                        f"=SURPLUS_KWH_Y1*{c}{r_fac_deg}*SURPLUS_PRICE"
-                        f"*(1+SURPLUS_ESC)^({year_ref(c)}-1)")
+                    formula=lambda y, c: "=" + trunc(
+                        c,
+                        f"SURPLUS_KWH_Y1*{c}{r_fac_deg}*SURPLUS_PRICE"
+                        f"*(1+SURPLUS_ESC)^({year_ref(c)}-1)"))
                 r_revenue = w.line(
                     "revenue", "Total developer revenue", "USD",
                     formula=lambda y, c:
@@ -904,7 +936,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     w.section("OPERATING COSTS (USD)")
     r_om = w.line(
         "om", "O&M", "USD",
-        formula=lambda y, c: f"=OM_YEAR1*{c}{r_fac_om}")
+        formula=lambda y, c: "=" + trunc(c, f"OM_YEAR1*{c}{r_fac_om}"))
     replacement = list(d.get("replacement_costs_by_year_usd") or [])
     replacement_by_year = [0.0] + replacement + [0.0] * years
     r_repl = w.line(
@@ -964,23 +996,25 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         # existing schedule — ties out to the engine's IDC-inclusive bases.
         r_dep_pv = w.line(
             "dep_pv", "PV depreciation (straight-line)", "USD",
-            formula=lambda y, c:
-                f"=IF({year_ref(c)}<=PV_DEP_YEARS,"
-                f"(PV_CAPEX+IDC*PV_CAPEX/(PV_CAPEX+BESS_CAPEX))/PV_DEP_YEARS,0)")
+            formula=lambda y, c: "=" + trunc(
+                c,
+                f"IF({year_ref(c)}<=PV_DEP_YEARS,"
+                f"(PV_CAPEX+IDC*PV_CAPEX/(PV_CAPEX+BESS_CAPEX))/PV_DEP_YEARS,0)"))
         r_dep_bess = w.line(
             "dep_bess", "BESS depreciation (straight-line)", "USD",
-            formula=lambda y, c:
-                f"=IF({year_ref(c)}<=BESS_DEP_YEARS,"
-                f"(BESS_CAPEX+IDC*BESS_CAPEX/(PV_CAPEX+BESS_CAPEX))/BESS_DEP_YEARS,0)")
+            formula=lambda y, c: "=" + trunc(
+                c,
+                f"IF({year_ref(c)}<=BESS_DEP_YEARS,"
+                f"(BESS_CAPEX+IDC*BESS_CAPEX/(PV_CAPEX+BESS_CAPEX))/BESS_DEP_YEARS,0)"))
     else:
         r_dep_pv = w.line(
             "dep_pv", "PV depreciation (straight-line)", "USD",
-            formula=lambda y, c:
-                f"=IF({year_ref(c)}<=PV_DEP_YEARS,PV_CAPEX/PV_DEP_YEARS,0)")
+            formula=lambda y, c: "=" + trunc(
+                c, f"IF({year_ref(c)}<=PV_DEP_YEARS,PV_CAPEX/PV_DEP_YEARS,0)"))
         r_dep_bess = w.line(
             "dep_bess", "BESS depreciation (straight-line)", "USD",
-            formula=lambda y, c:
-                f"=IF({year_ref(c)}<=BESS_DEP_YEARS,BESS_CAPEX/BESS_DEP_YEARS,0)")
+            formula=lambda y, c: "=" + trunc(
+                c, f"IF({year_ref(c)}<=BESS_DEP_YEARS,BESS_CAPEX/BESS_DEP_YEARS,0)"))
     # Circular 45 replacement capitalization (default). Each replacement asset is
     # depreciated straight-line over the BESS class life from its in-service year;
     # the live formula reads the replacement cost off the engine schedule row and
@@ -995,27 +1029,86 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
             repl_dep_rows.append(w.line(
                 f"dep_repl_{in_service}",
                 f"Replacement depreciation (in-service yr {in_service})", "USD",
-                formula=lambda y, c, r=in_service, cost=cost_cell:
-                    f"=IF(AND({year_ref(c)}>={r},{year_ref(c)}<={r}+BESS_DEP_YEARS-1),"
-                    f"{cost}/BESS_DEP_YEARS,0)"))
+                formula=lambda y, c, r=in_service, cost=cost_cell: "=" + trunc(
+                    c,
+                    f"IF(AND({year_ref(c)}>={r},{year_ref(c)}<={r}+BESS_DEP_YEARS-1),"
+                    f"{cost}/BESS_DEP_YEARS,0)")))
     r_dep = w.line(
         "dep", "Total depreciation", "USD",
         formula=lambda y, c: "=" + "+".join(
             [f"{c}{r_dep_pv}", f"{c}{r_dep_bess}"]
             + [f"{c}{row}" for row in repl_dep_rows]
         ))
+    # Task 4e asset transfer at the end of contract year T: net book value of
+    # every asset class = capitalized cost − cumulative straight-line
+    # depreciation through year T (charges beyond T are not taken; the remainder
+    # is recovered here, not written off). Disposal gain/(loss) = residual − NBV
+    # enters year-T taxable income below (EBT), routed through the case's regime.
+    # Gated on the engine derivation so full-horizon cases carry no NBV rows.
+    r_disposal = None
+    if contract_term:
+        w.section("ASSET TRANSFER AT CONTRACT END (Task 4e)")
+        if construction:
+            pv_basis = "(PV_CAPEX+IDC*PV_CAPEX/(PV_CAPEX+BESS_CAPEX))"
+            bess_basis = "(BESS_CAPEX+IDC*BESS_CAPEX/(PV_CAPEX+BESS_CAPEX))"
+        else:
+            pv_basis = "PV_CAPEX"
+            bess_basis = "BESS_CAPEX"
+        r_nbv_pv = w.metric(
+            "nbv_pv", "NBV of initial PV at transfer",
+            f"={pv_basis}-{pv_basis}/PV_DEP_YEARS*MIN(CONTRACT_YEARS,PV_DEP_YEARS)",
+            FMT_AMOUNT, note="capitalized cost − cumulative depreciation through T")
+        r_nbv_bess = w.metric(
+            "nbv_bess", "NBV of initial BESS at transfer",
+            f"={bess_basis}-{bess_basis}/BESS_DEP_YEARS"
+            "*MIN(CONTRACT_YEARS,BESS_DEP_YEARS)",
+            FMT_AMOUNT)
+        nbv_rows = [r_nbv_pv, r_nbv_bess]
+        if battery_replacement:
+            # Each capitalized replacement (Task 4d) contributes its undepreciated
+            # remainder: cost − annual charge × charges taken through T.
+            for schedule in battery_replacement["schedules"]:
+                in_service = schedule["in_service_year"]
+                cost_cell = f"${w.col(in_service)}${r_repl}"
+                nbv_rows.append(w.metric(
+                    f"nbv_repl_{in_service}",
+                    f"NBV of replacement (in-service yr {in_service}) at transfer",
+                    f"={cost_cell}-{cost_cell}/BESS_DEP_YEARS"
+                    f"*(MIN(CONTRACT_YEARS,{in_service}+BESS_DEP_YEARS-1)"
+                    f"-{in_service}+1)",
+                    FMT_AMOUNT))
+        r_nbv_total = w.metric(
+            "nbv_total", "Net book value at transfer (total)",
+            "=" + "+".join(f"$C${r}" for r in nbv_rows), FMT_AMOUNT)
+        r_disposal = w.metric(
+            "disposal_gain", "Disposal gain/(loss) at transfer (residual − NBV)",
+            f"=RESIDUAL_VALUE-$C${r_nbv_total}", FMT_AMOUNT,
+            note="enters year-T taxable income (EBT)")
+        w.skip()
+
+    def disposal_term(c):
+        # Year-T only: the disposal gain/(loss) joins taxable income through the
+        # existing regime/carryforward machinery. Empty when no tenor is set.
+        if r_disposal is None:
+            return ""
+        return f"+IF({year_ref(c)}=CONTRACT_YEARS,$C${r_disposal},0)"
+
     if battery_replacement:
         # Capitalize mode: EBITDA already subtracted the replacement cash cost, so
         # add it back and deduct the capitalized depreciation instead (total
         # depreciation above now includes the replacement schedules).
         r_ebt = w.line(
             "ebt", "Taxable income before loss relief (EBT)", "USD",
-            formula=lambda y, c: f"={c}{r_ebitda}+{c}{r_repl}-{c}{r_dep}-{c}{r_interest}",
+            formula=lambda y, c:
+                f"={c}{r_ebitda}+{c}{r_repl}-{c}{r_dep}-{c}{r_interest}"
+                + disposal_term(c),
             bold=True)
     else:
         r_ebt = w.line(
             "ebt", "Taxable income before loss relief (EBT)", "USD",
-            formula=lambda y, c: f"={c}{r_ebitda}-{c}{r_dep}-{c}{r_interest}", bold=True)
+            formula=lambda y, c:
+                f"={c}{r_ebitda}-{c}{r_dep}-{c}{r_interest}" + disposal_term(c),
+            bold=True)
     if is_direct and assume_profitable_host:
         # Profitable-host convention (DIRECT_OWNERSHIP default): the factory has
         # other taxable profits, so the project's deductions offset them at the
@@ -1123,10 +1216,21 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         "project_cf", "Project cash flow (unlevered, post-tax)", "USD",
         y0="=-TOTAL_CAPEX",
         formula=lambda y, c: f"={c}{r_cfads}")
+    # Task 4e: the host's end-of-term buyout lands in the developer's year-T
+    # equity cash flow as its own disclosed line (CFADS and the unlevered project
+    # cash flow are unchanged — the residual is an equity-side terminal value).
+    r_transfer = None
+    if contract_term:
+        r_transfer = w.line(
+            "transfer_proceeds", "Asset transfer proceeds (host buyout)", "USD",
+            formula=lambda y, c: f"=IF({year_ref(c)}=CONTRACT_YEARS,RESIDUAL_VALUE,0)")
     r_eq = w.line(
         "equity_cf", "Equity cash flow", "USD",
         y0="=-EQUITY_INVESTMENT",
-        formula=lambda y, c: f"={c}{r_cfads}-{c}{r_ds}", bold=True)
+        formula=lambda y, c: (
+            f"={c}{r_cfads}-{c}{r_ds}+{c}{r_transfer}" if r_transfer
+            else f"={c}{r_cfads}-{c}{r_ds}"
+        ), bold=True)
     r_cum = w.line(
         "cum_equity", "Cumulative equity cash flow", "USD",
         y0=f"={w.col(0)}{r_eq}",
@@ -1769,6 +1873,51 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "Battery replacement is expensed in the replacement year, not capitalized and re-depreciated.",
         ]
 
+    # ESCO contract tenor + end-of-term asset transfer (Task 4e). When active the
+    # "no terminal/residual value" register line is replaced by the modeled
+    # treatment; default (no tenor) keeps that line byte-for-byte.
+    contract_term = derivation.get("contract_term")
+    contract_basis_bullets = []
+    contract_register_bullets = []
+    if contract_term:
+        tenor = contract_term.get("contract_years")
+        contract_basis_bullets.append(
+            f"ESCO contract tenor: operations run for {tenor} years, then the PV/BESS asset "
+            "transfers to the host at a contractual residual/buyout value. Every ESCO-side line "
+            "(energy / demand / arbitrage / surplus revenue, O&M, battery replacement and "
+            "depreciation) is zero beyond year T; REopt-scheduled replacements after T are not "
+            "incurred (the asset has transferred). The residual payment lands in the developer's "
+            "year-T equity cash flow as its own disclosed line."
+        )
+        contract_basis_bullets.append(
+            "Asset-transfer tax: the disposal gain/(loss) = residual − net book value at year T "
+            "(each asset class's capitalized cost, IDC included, minus straight-line depreciation "
+            "taken through T) enters year-T taxable income through the case's CIT regime and "
+            "loss-carryforward machinery — no separate disposal-tax computation. Depreciation "
+            "beyond T is not taken; the undepreciated remainder is recovered via the disposal, "
+            "not written off separately (see the Pro Forma NBV tie-out)."
+        )
+        contract_register_bullets.append(
+            "Asset-disposal tax convention: Vietnamese CIT generally taxes asset-disposal gains at "
+            "the standard rate outside preferential regimes; routing the transfer gain/(loss) "
+            "through the case's CIT regime (rather than the standard rate) is a modeling convention."
+        )
+        contract_register_bullets.append(
+            "Post-transfer economics are out of scope: the Buyer Analysis covers the contract term "
+            "as-is; no continued-merchant-ESCO alternative, no balloon refinancing (the tenor is "
+            "required to be at least the debt term), and no salvage/disposal costs are modelled."
+        )
+        terminal_value_register_line = (
+            "No working-capital or DSRA is modelled; an ESCO contract tenor with end-of-term asset "
+            "transfer at a residual/buyout value IS modelled (operations truncated at year T, "
+            "NBV-based disposal gain/(loss) through the CIT regime — see the asset-transfer bullets "
+            "and the Pro Forma NBV tie-out)."
+        )
+    else:
+        terminal_value_register_line = (
+            "No working-capital, DSRA, or terminal/residual value is modelled."
+        )
+
     if derivation.get("cit", {}).get("regime") == "re_producer":
         cit_regime_text = (
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
@@ -1843,6 +1992,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "Straight-line depreciation: PV over the configured life within the 7-20y band of Circular "
             "45/2013/TT-BTC; BESS over its own life.",
             *replacement_basis_bullets,
+            *contract_basis_bullets,
         ]),
         ("5. Simplifications register (disclosed for audit)", [
             "Fixed FX over the analysis period — quantified on the FX Sensitivity sheet.",
@@ -1850,8 +2000,9 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             *usd_debt_register_bullets,
             *debt_sizing_register_bullets,
             *replacement_register_bullets,
+            *contract_register_bullets,
             "VAT is out of scope (pass-through assumed for both parties).",
-            "No working-capital, DSRA, or terminal/residual value is modelled.",
+            terminal_value_register_line,
             "A single dispatch year (8760 h) is escalated; no re-dispatch in later years.",
             "REopt sizing is optimizer output and can vary slightly between solver versions; the financial "
             "post-processing is deterministic given results.json.",

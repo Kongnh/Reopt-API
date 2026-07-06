@@ -19,6 +19,7 @@ from proforma_vietnam.tests.test_audit_sheets import (
     _direct_result,
     _dppa_result,
     _dscr_sized_result,
+    _esco_contract_term_result,
     _esco_result,
     _esco_surplus_result,
     _physical_result,
@@ -207,6 +208,23 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _dscr_sized_result(), assumptions=ESCO_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "dscr_sized.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_contract_term_fixture_workbook_passes(self):
+        # Task 4e ESCO contract tenor (T=12) + residual buyout: operations
+        # truncate at year 12, the year-12 equity CF carries the residual, and
+        # the year-12 taxable income carries the NBV-based disposal gain. Under
+        # real Excel recalc the truncated per-year CFADS/equity/CIT tie-out, the
+        # live NBV disposal formula and the transfer-proceeds row must all
+        # reproduce the engine so every check stays PASS.
+        workbook = build_vietnam_esco_workbook(
+            _esco_contract_term_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "contract_term.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)

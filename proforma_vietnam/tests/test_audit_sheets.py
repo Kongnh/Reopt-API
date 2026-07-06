@@ -173,6 +173,16 @@ def _esco_expense_result():
     return _esco_result(battery_replacement_treatment="expense")
 
 
+def _esco_contract_term_result():
+    # Task 4e ESCO contract tenor (T=12) with an end-of-term asset transfer at a
+    # residual value on the ESCO base. The year-11 replacement (inherited from
+    # _esco_result) is before T, so its undepreciated remainder rides the NBV
+    # disposal; operations truncate at year 12. Exercises the CONTRACT_YEARS /
+    # RESIDUAL_VALUE named cells, the NBV disposal block, the year-T EBT gain and
+    # transfer-proceeds row, and must tie out under Excel recalc.
+    return _esco_result(contract_years=12, contract_residual_value_usd=1_200_000.0)
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -921,6 +931,142 @@ class BatteryReplacementCapitalizationAuditTests(TestCase):
         total_dep = sheet.cell(row=labels["Total depreciation"], column=4).value
         self.assertEqual(total_dep.count("+"), 1)
         self.assertIn("expensed in the replacement year", self._model_basis_text(workbook))
+
+
+class ContractTenorAuditTests(TestCase):
+    """Task 4e ESCO contract tenor + asset transfer on the audit workbook. The
+    default (no tenor) workbook stays byte-identical (no named cells, no NBV /
+    transfer rows, the original register line); the tenor workbook adds the
+    CONTRACT_YEARS / RESIDUAL_VALUE cells, the live-formula NBV disposal block,
+    the year-T taxable-income gain, the transfer-proceeds row and the disclosed
+    register/Model Basis text.
+    """
+
+    @staticmethod
+    def _named_cell(workbook, name):
+        destination = next(iter(workbook.defined_names[name].destinations))
+        sheet_name, coord = destination
+        return workbook[sheet_name][coord]
+
+    @staticmethod
+    def _proforma_labels(workbook):
+        sheet = workbook["Pro Forma (Audit)"]
+        return [
+            sheet.cell(row=row, column=1).value
+            for row in range(1, sheet.max_row + 1)
+        ]
+
+    @staticmethod
+    def _model_basis_text(workbook):
+        sheet = workbook["Model Basis"]
+        return "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+
+    def test_disabled_leaves_no_named_cells_rows_or_disclosure(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("CONTRACT_YEARS", "RESIDUAL_VALUE"):
+            self.assertNotIn(name, workbook.defined_names, name)
+        labels = self._proforma_labels(workbook)
+        self.assertNotIn("Net book value at transfer (total)", labels)
+        self.assertNotIn("Asset transfer proceeds (host buyout)", labels)
+        text = self._model_basis_text(workbook)
+        self.assertIn(
+            "No working-capital, DSRA, or terminal/residual value is modelled.", text
+        )
+        self.assertNotIn("ESCO contract tenor:", text)
+
+    def test_enabled_defines_named_cells(self):
+        result = _esco_contract_term_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("CONTRACT_YEARS", "RESIDUAL_VALUE"):
+            self.assertIn(name, workbook.defined_names, name)
+        block = result["derivation"]["contract_term"]
+        self.assertEqual(
+            self._named_cell(workbook, "CONTRACT_YEARS").value, block["contract_years"]
+        )
+        self.assertAlmostEqual(
+            self._named_cell(workbook, "RESIDUAL_VALUE").value,
+            block["residual_value_usd"],
+        )
+
+    def test_enabled_adds_live_nbv_disposal_and_transfer_rows(self):
+        result = _esco_contract_term_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = self._proforma_labels(workbook)
+
+        for label in (
+            "NBV of initial PV at transfer",
+            "NBV of initial BESS at transfer",
+            "Net book value at transfer (total)",
+            "Disposal gain/(loss) at transfer (residual − NBV)",
+            "Asset transfer proceeds (host buyout)",
+        ):
+            self.assertIn(label, labels, label)
+
+        # NBV of initial PV is a live formula off the named cells, not a constant.
+        nbv_pv_row = labels.index("NBV of initial PV at transfer") + 1
+        self.assertTrue(
+            str(sheet.cell(row=nbv_pv_row, column=3).value).startswith(
+                "=PV_CAPEX-PV_CAPEX/PV_DEP_YEARS*MIN(CONTRACT_YEARS,PV_DEP_YEARS)"
+            )
+        )
+        # Disposal gain = RESIDUAL_VALUE − NBV total (live).
+        disposal_row = labels.index(
+            "Disposal gain/(loss) at transfer (residual − NBV)"
+        ) + 1
+        self.assertTrue(
+            str(sheet.cell(row=disposal_row, column=3).value).startswith(
+                "=RESIDUAL_VALUE-"
+            )
+        )
+        # Transfer proceeds live only in year T (= column 3 + contract_years).
+        transfer_row = labels.index("Asset transfer proceeds (host buyout)") + 1
+        formula = sheet.cell(row=transfer_row, column=3 + 12).value
+        self.assertIn("=IF(", str(formula))
+        self.assertIn("=CONTRACT_YEARS,RESIDUAL_VALUE,0)", str(formula))
+
+    def test_enabled_ebt_carries_year_T_disposal_gain_and_truncates(self):
+        result = _esco_contract_term_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = self._proforma_labels(workbook)
+
+        ebt_row = labels.index("Taxable income before loss relief (EBT)") + 1
+        # Year-12 (col 3 + 12) EBT includes the disposal gain term.
+        self.assertIn(
+            "=CONTRACT_YEARS,$C$",
+            str(sheet.cell(row=ebt_row, column=3 + 12).value),
+        )
+        # Revenue truncates beyond T: year-13 ESCO energy revenue is IF-gated.
+        rev_row = labels.index("ESCO energy revenue (discount-to-EVN)") + 1
+        self.assertTrue(
+            str(sheet.cell(row=rev_row, column=3 + 13).value).startswith(
+                "=IF("
+            )
+        )
+        self.assertIn(
+            "<=CONTRACT_YEARS", str(sheet.cell(row=rev_row, column=3 + 13).value)
+        )
+
+    def test_enabled_model_basis_and_register_disclose_the_transfer(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_contract_term_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        text = self._model_basis_text(workbook)
+        self.assertIn("ESCO contract tenor:", text)
+        self.assertIn("Asset-transfer tax:", text)
+        # The "no terminal/residual value" register line is replaced.
+        self.assertNotIn(
+            "No working-capital, DSRA, or terminal/residual value is modelled.", text
+        )
+        self.assertIn("asset-disposal tax convention", text.lower())
 
 
 class CoverSheetTests(TestCase):
