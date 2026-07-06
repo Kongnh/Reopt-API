@@ -991,9 +991,14 @@ class DirectOwnershipTests(TestCase):
     def test_negative_taxable_income_yields_negative_cit_shield(self):
         # Year-1 replacement expense drives EBT negative; the profitable host
         # takes an immediate shield (negative CIT), then pays on the year-2 profit.
+        # Pinned to the legacy expense treatment: this fixture uses the full
+        # in-year replacement deduction as the lever for the CIT-shield path.
         cit = [
             row["cit_vnd"]
-            for row in self._run(replacement_costs_by_year=[80000.0])["annual_cash_flows"]
+            for row in self._run(
+                replacement_costs_by_year=[80000.0],
+                battery_replacement_treatment="expense",
+            )["annual_cash_flows"]
         ]
         self.assertAlmostEqual(cit[0], -8000.0)   # (40000 − 80000) × 0.20
         self.assertAlmostEqual(cit[1], 8000.0)    # 40000 × 0.20
@@ -1006,6 +1011,7 @@ class DirectOwnershipTests(TestCase):
             for row in self._run(
                 direct_ownership={"assume_profitable_host": False},
                 replacement_costs_by_year=[80000.0],
+                battery_replacement_treatment="expense",
             )["annual_cash_flows"]
         ]
         self.assertAlmostEqual(cit[0], 0.0)
@@ -1031,6 +1037,7 @@ class DirectOwnershipTests(TestCase):
                 cit_regime="re_producer",
                 replacement_costs_by_year=[0.0, 0.0, 80000.0, 0.0, 0.0],
                 project_years=5,
+                battery_replacement_treatment="expense",
             )["annual_cash_flows"]
         ]
         # Year 1 (index 0): within the 4-year holiday (clock starts at the
@@ -1771,3 +1778,215 @@ class UsdDebtFxSensitivityTests(TestCase):
             d = row["vnd_depreciation_rate"]
             expected = [cf / (1 + d) ** i for i, cf in enumerate(equity)]
             self.assertAlmostEqual(row["equity_irr_fraction"], _irr(expected))
+
+
+class BatteryReplacementCapitalizationTests(TestCase):
+    """Circular 45 battery-replacement capitalization (default). Each replacement
+    year spawns a BESS-class fixed asset depreciated straight-line over its
+    8-year life from the in-service year, truncated at the horizon; the CIT
+    deduction is the replacement depreciation, not the in-year expense. Cash is
+    unchanged in both modes; the legacy ``"expense"`` flag restores the full
+    in-year deduction and leaks no derivation block.
+
+    The fixture is a factory self-invest (DIRECT_OWNERSHIP) case with flat 20%
+    CIT and the profitable-host shield on, so CIT == taxable income x 20% every
+    year (positive or negative) and totals reduce to 0.20 x total taxable income
+    — hand-computable timing shifts.
+    """
+
+    RATE = 0.20
+    SAVINGS = 40000.0  # bau 100000 - optimized 60000, flat (no escalation/degradation)
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100.0],
+            evn_energy_rates_vnd_per_kwh=[10.0],
+            bau_evn_bill_vnd=100000.0,
+            optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=0.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.0,
+            project_years=15,
+            direct_ownership={},  # standard_flat + profitable host -> flat 20%/yr
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    @staticmethod
+    def _cit(result):
+        return [row["cit_vnd"] for row in result["annual_cash_flows"]]
+
+    def test_capitalize_spreads_replacement_over_the_bess_life(self):
+        cost = 80000.0
+        capitalize = self._run(replacement_costs_by_year=[0.0, 0.0, cost])
+        expense = self._run(
+            replacement_costs_by_year=[0.0, 0.0, cost],
+            battery_replacement_treatment="expense",
+        )
+
+        block = capitalize["derivation"]["battery_replacement"]
+        self.assertEqual(block["treatment"], "capitalize")
+        self.assertEqual(len(block["schedules"]), 1)
+        schedule = block["schedules"][0]
+        self.assertEqual(schedule["in_service_year"], 3)
+        self.assertAlmostEqual(schedule["cost_usd"], cost)
+        self.assertEqual(schedule["life_years"], 8)
+        self.assertAlmostEqual(schedule["annual_charge_usd"], cost / 8)
+        # In-service year 3 -> depreciation years 3..10 (8 charges, full life).
+        self.assertEqual(schedule["depreciation_years"], [3, 4, 5, 6, 7, 8, 9, 10])
+
+        cap_cit, exp_cit = self._cit(capitalize), self._cit(expense)
+        # Depreciation cost/8 in years 3..10: taxable there is savings - cost/8.
+        for index in range(2, 10):
+            self.assertAlmostEqual(cap_cit[index], (self.SAVINGS - cost / 8) * self.RATE)
+        # Year-R taxable income is higher by cost - cost/8 than in expense mode.
+        self.assertAlmostEqual((cap_cit[2] - exp_cit[2]) / self.RATE, cost - cost / 8)
+        # Timing shift only: full 8-year life fits the horizon, so the total
+        # deduction (and hence total CIT) is identical to expensing.
+        self.assertAlmostEqual(sum(cap_cit), sum(exp_cit))
+
+    def test_cash_lines_are_unchanged_between_modes(self):
+        cost = 80000.0
+        capitalize = self._run(replacement_costs_by_year=[0.0, 0.0, cost])
+        expense = self._run(
+            replacement_costs_by_year=[0.0, 0.0, cost],
+            battery_replacement_treatment="expense",
+        )
+        # The replacement cash outflow and pre-tax operating lines are booked
+        # identically; only CIT (and the CFADS/equity it nets) differ.
+        for cap, exp in zip(capitalize["annual_cash_flows"], expense["annual_cash_flows"]):
+            self.assertAlmostEqual(cap["replacement_cost_vnd"], exp["replacement_cost_vnd"])
+            self.assertAlmostEqual(cap["esco_revenue_vnd"], exp["esco_revenue_vnd"])
+            self.assertAlmostEqual(cap["annual_om_vnd"], exp["annual_om_vnd"])
+        self.assertAlmostEqual(
+            capitalize["annual_cash_flows"][2]["replacement_cost_vnd"], cost
+        )
+
+    def test_truncation_at_horizon_takes_only_in_horizon_charges(self):
+        cost = 80000.0
+        # Replacement in year 20, horizon 25: charges years 20..25 only (6), the
+        # undepreciated remainder (2 x cost/8) is NOT written off.
+        capitalize = self._run(
+            replacement_costs_by_year=[0.0] * 19 + [cost], project_years=25
+        )
+        schedule = capitalize["derivation"]["battery_replacement"]["schedules"][0]
+        self.assertEqual(schedule["in_service_year"], 20)
+        self.assertEqual(schedule["depreciation_years"], [20, 21, 22, 23, 24, 25])
+        self.assertAlmostEqual(schedule["annual_charge_usd"], cost / 8)
+        total_taken = schedule["annual_charge_usd"] * len(schedule["depreciation_years"])
+        self.assertAlmostEqual(total_taken, 6 * cost / 8)
+
+        # Capitalize deducts only 6 x cost/8 vs expensing the full cost, so total
+        # taxable (and total CIT) is higher by 0.20 x (cost - 6 x cost/8).
+        expense = self._run(
+            replacement_costs_by_year=[0.0] * 19 + [cost], project_years=25,
+            battery_replacement_treatment="expense",
+        )
+        self.assertAlmostEqual(
+            sum(self._cit(capitalize)) - sum(self._cit(expense)),
+            self.RATE * (cost - 6 * cost / 8),
+        )
+
+    def test_multiple_replacement_years_get_independent_overlapping_schedules(self):
+        cost = 80000.0
+        capitalize = self._run(
+            replacement_costs_by_year=[0.0, 0.0, cost, 0.0, 0.0, cost],
+            project_years=20,
+        )
+        schedules = capitalize["derivation"]["battery_replacement"]["schedules"]
+        self.assertEqual(len(schedules), 2)
+        self.assertEqual(schedules[0]["in_service_year"], 3)
+        self.assertEqual(schedules[0]["depreciation_years"], [3, 4, 5, 6, 7, 8, 9, 10])
+        self.assertEqual(schedules[1]["in_service_year"], 6)
+        self.assertEqual(schedules[1]["depreciation_years"], [6, 7, 8, 9, 10, 11, 12, 13])
+        # Overlap years 6..10 carry both schedules: taxable = savings - 2 x cost/8.
+        self.assertAlmostEqual(
+            self._cit(capitalize)[5], (self.SAVINGS - 2 * cost / 8) * self.RATE
+        )
+        # Both lives fit the horizon -> total deduction = 2 x cost = expensing,
+        # so total CIT matches (pure timing shift).
+        expense = self._run(
+            replacement_costs_by_year=[0.0, 0.0, cost, 0.0, 0.0, cost],
+            project_years=20, battery_replacement_treatment="expense",
+        )
+        self.assertAlmostEqual(sum(self._cit(capitalize)), sum(self._cit(expense)))
+
+    def test_no_replacement_capitalize_default_is_byte_identical_to_expense(self):
+        base = self._run()  # capitalize default, no replacement
+        expense = self._run(battery_replacement_treatment="expense")
+        self.assertEqual(base["annual_cash_flows"], expense["annual_cash_flows"])
+        self.assertEqual(base["summary"], expense["summary"])
+        self.assertEqual(base["derivation"], expense["derivation"])
+        self.assertNotIn("battery_replacement", base["derivation"])
+
+    def test_legacy_expense_flag_leaks_no_block_and_deducts_full_cost_in_year(self):
+        cost = 80000.0
+        expense = self._run(
+            replacement_costs_by_year=[0.0, 0.0, cost],
+            battery_replacement_treatment="expense",
+        )
+        self.assertNotIn("battery_replacement", expense["derivation"])
+        # Full in-year deduction: year-3 taxable = savings - cost (negative) ->
+        # immediate CIT shield of (savings - cost) x 20%.
+        self.assertAlmostEqual(
+            expense["annual_cash_flows"][2]["cit_vnd"], (self.SAVINGS - cost) * self.RATE
+        )
+
+    def test_invalid_treatment_raises_value_error(self):
+        for bad in ("Capitalize", "amortize", "", 0, 1, True, None, ["expense"]):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self._run(battery_replacement_treatment=bad)
+
+    def test_capitalize_interacts_with_dscr_debt_sizing(self):
+        # DSCR sizing consumes the capitalize-adjusted CFADS timing (the year-6
+        # replacement cash year drags the DSCR) and still converges to the
+        # covenant; both self-describing blocks coexist.
+        result = self._run(
+            bau_evn_bill_vnd=1_000_000.0, optimized_evn_bill_vnd=600_000.0,
+            replacement_costs_by_year=[0.0] * 5 + [200000.0],
+            pv_capex_vnd=700_000.0, bess_capex_vnd=300_000.0,
+            debt_fraction=0.70, debt_interest_rate_fraction=0.085, debt_term_years=10,
+            target_min_dscr=1.5, project_years=25,
+        )
+        self.assertIn("battery_replacement", result["derivation"])
+        self.assertIn("debt_sizing", result["derivation"])
+        dscrs = [
+            row["dscr"] for row in result["annual_cash_flows"]
+            if row["debt_service_vnd"] and row["dscr"] is not None
+        ]
+        self.assertGreaterEqual(min(dscrs), 1.5 - 1e-6)
+
+    def test_capitalize_interacts_with_re_producer_holiday_regime(self):
+        # re_producer holiday/reduced-rate schedule: the replacement depreciation
+        # rides the same CIT machinery (no special-casing). Deductions falling in
+        # the first-profit holiday years (0% rate) are worth nothing, so the total
+        # CIT need NOT match expense mode — but the schedule is present and shaped.
+        cost = 80000.0
+        base = dict(
+            project_served_pv_kwh=[100.0], evn_energy_rates_vnd_per_kwh=[10.0],
+            bau_evn_bill_vnd=100000.0, optimized_evn_bill_vnd=60000.0,
+            bau_demand_charge_vnd=0.0, optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=0.0, bess_capex_vnd=0.0, annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0, evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.0, project_years=20, cit_regime="re_producer",
+            replacement_costs_by_year=[0.0, 0.0, cost],
+        )
+        capitalize = calculate_vietnam_esco_cash_flow(**base)
+        expense = calculate_vietnam_esco_cash_flow(
+            **{**base, "battery_replacement_treatment": "expense"}
+        )
+        self.assertEqual(
+            capitalize["derivation"]["battery_replacement"]["treatment"], "capitalize"
+        )
+        self.assertNotIn("battery_replacement", expense["derivation"])
+        schedule = capitalize["derivation"]["battery_replacement"]["schedules"][0]
+        self.assertEqual(schedule["depreciation_years"], [3, 4, 5, 6, 7, 8, 9, 10])
+        # The holiday years suppress CIT regardless of the deduction timing.
+        self.assertAlmostEqual(capitalize["annual_cash_flows"][0]["cit_vnd"], 0.0)

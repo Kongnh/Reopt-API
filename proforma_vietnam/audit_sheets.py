@@ -753,6 +753,10 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     is_direct = d["structure"] == DIRECT_OWNERSHIP
     assume_profitable_host = bool((d.get("direct_ownership") or {}).get("assume_profitable_host"))
     construction = d.get("construction")
+    # Circular 45 replacement capitalization (default). Present only when a
+    # replacement is actually capitalized; the legacy "expense" flag and
+    # no-replacement cases carry no block and render the legacy expensed formulas.
+    battery_replacement = d.get("battery_replacement")
     w = _ProFormaWriter(worksheet, years)
 
     worksheet.sheet_view.showGridLines = False
@@ -977,12 +981,41 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
             "dep_bess", "BESS depreciation (straight-line)", "USD",
             formula=lambda y, c:
                 f"=IF({year_ref(c)}<=BESS_DEP_YEARS,BESS_CAPEX/BESS_DEP_YEARS,0)")
+    # Circular 45 replacement capitalization (default). Each replacement asset is
+    # depreciated straight-line over the BESS class life from its in-service year;
+    # the live formula reads the replacement cost off the engine schedule row and
+    # divides by the named BESS_DEP_YEARS, active only within its window. Gated on
+    # the engine derivation so expense-mode / no-replacement workbooks keep the
+    # legacy two-class total-depreciation and EBT formulas byte-for-byte.
+    repl_dep_rows = []
+    if battery_replacement:
+        for schedule in battery_replacement["schedules"]:
+            in_service = schedule["in_service_year"]
+            cost_cell = f"${w.col(in_service)}${r_repl}"
+            repl_dep_rows.append(w.line(
+                f"dep_repl_{in_service}",
+                f"Replacement depreciation (in-service yr {in_service})", "USD",
+                formula=lambda y, c, r=in_service, cost=cost_cell:
+                    f"=IF(AND({year_ref(c)}>={r},{year_ref(c)}<={r}+BESS_DEP_YEARS-1),"
+                    f"{cost}/BESS_DEP_YEARS,0)"))
     r_dep = w.line(
         "dep", "Total depreciation", "USD",
-        formula=lambda y, c: f"={c}{r_dep_pv}+{c}{r_dep_bess}")
-    r_ebt = w.line(
-        "ebt", "Taxable income before loss relief (EBT)", "USD",
-        formula=lambda y, c: f"={c}{r_ebitda}-{c}{r_dep}-{c}{r_interest}", bold=True)
+        formula=lambda y, c: "=" + "+".join(
+            [f"{c}{r_dep_pv}", f"{c}{r_dep_bess}"]
+            + [f"{c}{row}" for row in repl_dep_rows]
+        ))
+    if battery_replacement:
+        # Capitalize mode: EBITDA already subtracted the replacement cash cost, so
+        # add it back and deduct the capitalized depreciation instead (total
+        # depreciation above now includes the replacement schedules).
+        r_ebt = w.line(
+            "ebt", "Taxable income before loss relief (EBT)", "USD",
+            formula=lambda y, c: f"={c}{r_ebitda}+{c}{r_repl}-{c}{r_dep}-{c}{r_interest}",
+            bold=True)
+    else:
+        r_ebt = w.line(
+            "ebt", "Taxable income before loss relief (EBT)", "USD",
+            formula=lambda y, c: f"={c}{r_ebitda}-{c}{r_dep}-{c}{r_interest}", bold=True)
     if is_direct and assume_profitable_host:
         # Profitable-host convention (DIRECT_OWNERSHIP default): the factory has
         # other taxable profits, so the project's deductions offset them at the
@@ -1711,6 +1744,31 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "is used to size the loan."
         )
 
+    # Battery replacement CIT treatment. Default (capitalize): the register line
+    # disclosing expensing is REMOVED and replaced by a Model Basis bullet
+    # describing the Circular 45 capitalized treatment and the truncation
+    # convention. Legacy "expense" flag (and no-replacement cases): the expensing
+    # register line is kept, byte-for-byte with the pre-change workbook.
+    battery_replacement = derivation.get("battery_replacement")
+    if battery_replacement:
+        replacement_basis_bullets = [
+            "Battery replacement is CAPITALIZED, not expensed (VAS / Circular 45/2013): each replacement "
+            "battery is a fixed asset depreciated straight-line over the 8-year BESS class life from its "
+            "in-service (replacement) year, with each replacement year carrying its own schedule. The "
+            "replacement cash outflow is unchanged — only the CIT deduction timing shifts from a single "
+            "full deduction to the depreciation stream.",
+        ]
+        replacement_register_bullets = [
+            "Battery replacement depreciation is truncated at the analysis horizon: charges beyond the "
+            "final year are simply not taken and the undepreciated remainder is not written off (no "
+            "terminal disposal/salvage of the replaced or residual battery is modelled).",
+        ]
+    else:
+        replacement_basis_bullets = []
+        replacement_register_bullets = [
+            "Battery replacement is expensed in the replacement year, not capitalized and re-depreciated.",
+        ]
+
     if derivation.get("cit", {}).get("regime") == "re_producer":
         cit_regime_text = (
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
@@ -1784,13 +1842,14 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             ),
             "Straight-line depreciation: PV over the configured life within the 7-20y band of Circular "
             "45/2013/TT-BTC; BESS over its own life.",
+            *replacement_basis_bullets,
         ]),
         ("5. Simplifications register (disclosed for audit)", [
             "Fixed FX over the analysis period — quantified on the FX Sensitivity sheet.",
             *construction_register_bullets,
             *usd_debt_register_bullets,
             *debt_sizing_register_bullets,
-            "Battery replacement is expensed in the replacement year, not capitalized and re-depreciated.",
+            *replacement_register_bullets,
             "VAT is out of scope (pass-through assumed for both parties).",
             "No working-capital, DSRA, or terminal/residual value is modelled.",
             "A single dispatch year (8760 h) is escalated; no re-dispatch in later years.",

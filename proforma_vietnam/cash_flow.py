@@ -44,6 +44,14 @@ DEFAULT_DEBT_TERM_YEARS = FINANCIAL_DEFAULTS["debt_term_years"]
 _DEBT_SIZING_MAX_ITERATIONS = 100
 _DEBT_SIZING_TOLERANCE = 1e-9
 
+# Battery replacement CIT treatment. Under VAS / Circular 45/2013 a replacement
+# battery is a >30M VND fixed asset that must be CAPITALIZED and depreciated over
+# the 8-year BESS class life (the default). The legacy "expense" flag books the
+# full replacement cost as an immediate deduction in the replacement year — the
+# behaviour the third-party reference workbooks model — and is retained for those
+# comparisons only.
+BATTERY_REPLACEMENT_TREATMENTS = ("capitalize", "expense")
+
 
 def calculate_vietnam_esco_cash_flow(
     project_served_pv_kwh,
@@ -74,6 +82,7 @@ def calculate_vietnam_esco_cash_flow(
     construction_months=0,
     principal_grace_years=0,
     target_min_dscr=None,
+    battery_replacement_treatment="capitalize",
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
@@ -139,6 +148,7 @@ def calculate_vietnam_esco_cash_flow(
     )
     _validate_debt_currency(debt_currency)
     _validate_target_min_dscr(target_min_dscr)
+    _validate_battery_replacement_treatment(battery_replacement_treatment)
     # Debt-currency default rate: USD loans price off international financing
     # (~5%/yr, vietnam_market_context.md) rather than the VND commercial-bank
     # rate (8.5%). An explicit debt_interest_rate_fraction always wins; only the
@@ -308,6 +318,27 @@ def calculate_vietnam_esco_cash_flow(
         _cit_regime_params(cit_regime)
     )
 
+    # Circular 45 replacement capitalization (default). Each replacement year
+    # with a nonzero cost spawns a BESS-class fixed asset depreciated straight-
+    # line over its 8-year life, truncated at the horizon. In this mode the CIT
+    # deduction is the replacement DEPRECIATION rather than the replacement
+    # expense: taxable income adds the expense back (net_operating_revenue already
+    # subtracted it) and deducts the depreciation instead. Cash is unchanged.
+    # Gated on there being an actual replacement so no-replacement cases (and the
+    # legacy "expense" flag) keep the bit-for-bit inline taxable-income formula.
+    capitalize_replacement = (
+        battery_replacement_treatment == "capitalize"
+        and any(replacement_costs_by_year)
+    )
+    if capitalize_replacement:
+        replacement_depreciation_by_year, replacement_schedules = (
+            _replacement_depreciation_schedules(replacement_costs_by_year, project_years)
+        )
+        replacement_cost_by_year = [
+            _value_for_year(replacement_costs_by_year, year_index)
+            for year_index in range(project_years)
+        ]
+
     def _derive_for_principal(debt_principal_vnd):
         # Single source of the debt-principal-dependent derivation: IDC (Task
         # 4a), the level-payment / grace debt schedule, IDC-capitalized
@@ -338,12 +369,25 @@ def calculate_vietnam_esco_cash_flow(
             pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years,
             idc_vnd=idc_vnd,
         )
-        taxable_income_by_year = [
-            net_operating_revenue_by_year[year_index]
-            - depreciation_by_year[year_index]
-            - debt_schedule[year_index]["interest_vnd"]
-            for year_index in range(project_years)
-        ]
+        if capitalize_replacement:
+            # Deduct the replacement DEPRECIATION instead of the expense: add the
+            # replacement cost back (net_operating_revenue subtracted it) and net
+            # the per-year replacement depreciation charge.
+            taxable_income_by_year = [
+                net_operating_revenue_by_year[year_index]
+                - depreciation_by_year[year_index]
+                - debt_schedule[year_index]["interest_vnd"]
+                + replacement_cost_by_year[year_index]
+                - replacement_depreciation_by_year[year_index]
+                for year_index in range(project_years)
+            ]
+        else:
+            taxable_income_by_year = [
+                net_operating_revenue_by_year[year_index]
+                - depreciation_by_year[year_index]
+                - debt_schedule[year_index]["interest_vnd"]
+                for year_index in range(project_years)
+            ]
         cit_by_year = calculate_cit(
             taxable_income_by_year,
             holiday_years=holiday_years,
@@ -645,6 +689,16 @@ def calculate_vietnam_esco_cash_flow(
         # (both the DSCR-binding and fraction-limited outcomes); omitted
         # otherwise so existing cases stay byte-for-byte unchanged.
         derivation["debt_sizing"] = debt_sizing
+    if capitalize_replacement:
+        # Self-describing Circular 45 replacement-capitalization record so the
+        # audit sheet can rebuild each replacement asset's straight-line schedule
+        # from named cells and tie out the total depreciation. Present only when a
+        # replacement is actually capitalized; the legacy "expense" flag and
+        # no-replacement cases carry no block and stay byte-for-byte unchanged.
+        derivation["battery_replacement"] = {
+            "treatment": battery_replacement_treatment,
+            "schedules": replacement_schedules,
+        }
     if surplus_enabled:
         # Self-describing surplus config so the audit sheet can rebuild the
         # revenue row from named cells (year-1 sold kWh, USD price, escalation,
@@ -867,6 +921,51 @@ def _validate_target_min_dscr(target_min_dscr):
             "target_min_dscr must be >= 1.0 (a covenant below 1.0x lends into "
             f"default), got {target_min_dscr}."
         )
+
+
+def _validate_battery_replacement_treatment(battery_replacement_treatment):
+    # "capitalize" (default) depreciates each replacement battery over the BESS
+    # class life per Circular 45; "expense" (legacy) books the full cost as an
+    # immediate deduction in the replacement year. Anything else — including a
+    # non-string — is an input error.
+    if battery_replacement_treatment not in BATTERY_REPLACEMENT_TREATMENTS:
+        raise ValueError(
+            "battery_replacement_treatment must be 'capitalize' (default) or "
+            f"'expense' (legacy), got {battery_replacement_treatment!r}."
+        )
+
+
+def _replacement_depreciation_schedules(replacement_costs_by_year, project_years):
+    """Per-replacement-year straight-line depreciation (capitalize mode).
+
+    Each year with a nonzero replacement cost spawns a new BESS-class fixed asset
+    placed in service that year (Circular 45): its cost is depreciated straight-
+    line over ``BESS_DEPRECIATION_YEARS`` from the in-service year, truncated at
+    the analysis horizon — years beyond the horizon are simply not taken and the
+    undepreciated remainder is NOT written off (disclosed convention). Returns
+    ``(annual_total_by_year, schedules)`` where ``schedules`` is a self-describing
+    block per replacement year for the audit sheet.
+    """
+    annual_total_by_year = [0.0] * project_years
+    schedules = []
+    for year_index, cost in enumerate(replacement_costs_by_year):
+        if not cost:
+            continue
+        annual_charge = cost / BESS_DEPRECIATION_YEARS
+        charged_years = []
+        for charge_index in range(
+            year_index, min(year_index + BESS_DEPRECIATION_YEARS, project_years)
+        ):
+            annual_total_by_year[charge_index] += annual_charge
+            charged_years.append(charge_index + 1)  # 1-based project year
+        schedules.append({
+            "in_service_year": year_index + 1,
+            "cost_usd": cost,
+            "life_years": BESS_DEPRECIATION_YEARS,
+            "annual_charge_usd": annual_charge,
+            "depreciation_years": charged_years,
+        })
+    return annual_total_by_year, schedules
 
 
 def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years,

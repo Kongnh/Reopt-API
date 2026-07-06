@@ -71,6 +71,7 @@ FINANCIAL_ASSUMPTION_KEYS = [
     "construction_months",
     "principal_grace_years",
     "target_min_dscr",
+    "battery_replacement_treatment",
     "annual_om_usd",
     "annual_om_vnd",
     "om_escalation_rate",

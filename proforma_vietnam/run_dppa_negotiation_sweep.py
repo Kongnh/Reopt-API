@@ -159,6 +159,7 @@ def cash_flow_overrides_from_assumptions(assumptions):
         "construction_months": "construction_months",
         "principal_grace_years": "principal_grace_years",
         "target_min_dscr": "target_min_dscr",
+        "battery_replacement_treatment": "battery_replacement_treatment",
         "annual_om_usd": "annual_om_vnd",
         "pv_capex_usd": "pv_capex_vnd",
         "bess_capex_usd": "bess_capex_vnd",

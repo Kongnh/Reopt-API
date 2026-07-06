@@ -166,6 +166,13 @@ def _dscr_sized_result():
     return _esco_result(target_min_dscr=2.5)
 
 
+def _esco_expense_result():
+    # Legacy expense treatment on the ESCO base (year-11 replacement): the audit
+    # workbook must keep the two-class depreciation / EBT formulas and the
+    # expensing register line, and still tie out under Excel recalc.
+    return _esco_result(battery_replacement_treatment="expense")
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -808,6 +815,112 @@ class DscrSizingAuditTests(TestCase):
         )
         self.assertNotIn("DSCR-supported", text)
         self.assertNotIn("level-payment sizing", text)
+
+
+class BatteryReplacementCapitalizationAuditTests(TestCase):
+    """Circular 45 replacement capitalization on the audit workbook. The default
+    (capitalize) fixture ``_esco_result`` carries a year-11 replacement, so its
+    workbook gains a per-replacement depreciation row, the replacement-aware total
+    depreciation and EBT formulas, and the capitalized Model Basis disclosure. The
+    legacy ``"expense"`` fixture keeps the two-class depreciation / EBT formulas
+    and the expensing register line byte-for-byte.
+    """
+
+    REPL_DEP_LABEL = "Replacement depreciation (in-service yr 11)"
+
+    def _labels(self, workbook):
+        sheet = workbook["Pro Forma (Audit)"]
+        return {
+            sheet.cell(row=row, column=1).value: row
+            for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=1).value
+        }
+
+    def _model_basis_text(self, workbook):
+        sheet = workbook["Model Basis"]
+        return "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+
+    def test_capitalize_adds_replacement_row_and_replacement_aware_formulas(self):
+        result = _esco_result()  # capitalize default, year-11 replacement
+        self.assertIn("battery_replacement", result["derivation"])
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        # A live replacement-depreciation row exists for the year-11 asset.
+        self.assertIn(self.REPL_DEP_LABEL, labels)
+        repl_dep_formula = sheet.cell(
+            row=labels[self.REPL_DEP_LABEL], column=4
+        ).value
+        # Active only within the 8-year in-service window, cost / BESS_DEP_YEARS.
+        self.assertIn("BESS_DEP_YEARS", repl_dep_formula)
+        self.assertIn(">=11", repl_dep_formula)
+
+        # Total depreciation ties in the replacement schedule (PV + BESS + repl =
+        # two '+' terms) and EBT adds the replacement cost back (the only mode
+        # whose EBT formula carries a '+').
+        total_dep = sheet.cell(row=labels["Total depreciation"], column=4).value
+        self.assertEqual(total_dep.count("+"), 2)
+        ebt = sheet.cell(
+            row=labels["Taxable income before loss relief (EBT)"], column=4
+        ).value
+        repl_col_ref = f"D{labels['Battery replacement (engine schedule)']}"
+        self.assertIn("+" + repl_col_ref, ebt)
+
+    def test_expense_mode_keeps_legacy_depreciation_ebt_and_register(self):
+        result = _esco_expense_result()  # legacy expense treatment
+        self.assertNotIn("battery_replacement", result["derivation"])
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        # No replacement-depreciation rows; the two-class total depreciation and
+        # the legacy EBT (no add-back) are preserved bit-for-bit.
+        self.assertNotIn(self.REPL_DEP_LABEL, labels)
+        self.assertFalse(
+            any(str(label).startswith("Replacement depreciation (in-service yr")
+                for label in labels)
+        )
+        total_dep = sheet.cell(row=labels["Total depreciation"], column=4).value
+        self.assertEqual(total_dep.count("+"), 1)
+        ebt = sheet.cell(
+            row=labels["Taxable income before loss relief (EBT)"], column=4
+        ).value
+        self.assertNotIn("+", ebt)
+
+        # The expensing simplification register line is kept; the capitalized
+        # Model Basis disclosure is absent.
+        text = self._model_basis_text(workbook)
+        self.assertIn("expensed in the replacement year", text)
+        self.assertNotIn("CAPITALIZED, not expensed", text)
+
+    def test_capitalize_model_basis_discloses_capitalization_and_truncation(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+        text = self._model_basis_text(workbook)
+
+        self.assertIn("CAPITALIZED, not expensed", text)
+        self.assertIn("truncated at the analysis horizon", text)
+        # The expensing simplification line is removed in the default treatment.
+        self.assertNotIn("expensed in the replacement year", text)
+
+    def test_no_replacement_case_keeps_legacy_formulas_and_register(self):
+        # Capitalize default but an all-zero replacement schedule: no block is
+        # emitted, so the workbook is byte-for-byte the legacy expensed shape.
+        result = _esco_result(replacement_costs_by_year=[0.0] * 30)
+        self.assertNotIn("battery_replacement", result["derivation"])
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        labels = self._labels(workbook)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        self.assertNotIn(self.REPL_DEP_LABEL, labels)
+        total_dep = sheet.cell(row=labels["Total depreciation"], column=4).value
+        self.assertEqual(total_dep.count("+"), 1)
+        self.assertIn("expensed in the replacement year", self._model_basis_text(workbook))
 
 
 class CoverSheetTests(TestCase):

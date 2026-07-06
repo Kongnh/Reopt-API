@@ -1008,6 +1008,27 @@ class VietnamCaseBuilderTests(TestCase):
         overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
         self.assertEqual(overrides["target_min_dscr"], 1.3)
 
+    def test_battery_replacement_treatment_round_trips_like_the_other_scalars(self):
+        # battery_replacement_treatment travels the same allowlisted path as the
+        # other financing scalars: into assumptions (never the REopt payload) and
+        # back out through the rebuild override mapping.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "financial": {"battery_replacement_treatment": "expense"},
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["battery_replacement_treatment"], "expense")
+        self.assertNotIn("battery_replacement_treatment", case["payload"]["Financial"])
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["battery_replacement_treatment"], "expense")
+
     def test_direct_ownership_carries_options_into_assumptions(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

@@ -161,6 +161,10 @@ def _cash_flow_inputs(inputs):
     converted["evn_energy_rates_vnd_per_kwh"] = _parse_number_list(
         converted["evn_energy_rates_vnd_per_kwh"]
     )
+    # The reference workbooks expense battery replacement in the replacement year
+    # (their own math), so pin the engine to the legacy treatment rather than
+    # loosening the 1% tolerance — the model's default now capitalizes it.
+    converted.setdefault("battery_replacement_treatment", "expense")
     return converted
 
 

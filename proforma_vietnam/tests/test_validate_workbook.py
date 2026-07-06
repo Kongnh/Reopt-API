@@ -107,6 +107,23 @@ class ExcelRecalcValidationTests(unittest.TestCase):
         self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
         self.assertTrue(result["file"].endswith("esco.xlsx"))
 
+    def test_expense_mode_esco_fixture_workbook_passes(self):
+        # Legacy expense treatment (Circular 45 opt-out): the year-11 replacement
+        # is fully deducted in-year, so the workbook keeps the two-class
+        # depreciation / EBT formulas. Under real Excel recalc that legacy path
+        # must still tie out to the engine so every check stays PASS — the
+        # byte-identical guarantee holds end-to-end, not just structurally.
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_replacement_treatment="expense"),
+            assumptions=ESCO_ASSUMPTIONS,
+        )
+        result = self._validate_saved(workbook, "esco_expense.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
     def test_surplus_export_esco_fixture_workbook_passes(self):
         # Decree 243/2026 surplus-export line must tie out in Excel: the live
         # surplus revenue formula has to reproduce the engine's number so the
