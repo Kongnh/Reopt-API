@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
 
 from proforma_vietnam import audit_sheets
 from proforma_vietnam.cash_flow import (
@@ -181,6 +182,14 @@ def _esco_contract_term_result():
     # RESIDUAL_VALUE named cells, the NBV disposal block, the year-T EBT gain and
     # transfer-proceeds row, and must tie out under Excel recalc.
     return _esco_result(contract_years=12, contract_residual_value_usd=1_200_000.0)
+
+
+def _esco_vat_result():
+    # Task 4f input VAT on capex on the ESCO base: 10% of total capex paid at
+    # year 0 and refunded in year 2. Exercises the VAT_RATE / VAT_REFUND_YEAR
+    # named cells, the year-0 paid + refund-year rows and the equity-cash-flow
+    # tie-out (which must reproduce the engine under real Excel recalc).
+    return _esco_result(vat_rate_fraction=0.10, vat_refund_year=2)
 
 
 ESCO_ASSUMPTIONS = {
@@ -1067,6 +1076,115 @@ class ContractTenorAuditTests(TestCase):
             "No working-capital, DSRA, or terminal/residual value is modelled.", text
         )
         self.assertIn("asset-disposal tax convention", text.lower())
+
+
+class VatOnCapexAuditTests(TestCase):
+    """Task 4f input VAT on capex on the audit workbook. The default (no VAT)
+    workbook stays byte-identical (no named cells, no VAT rows, the original
+    "VAT is out of scope" register line); the VAT workbook adds the VAT_RATE /
+    VAT_REFUND_YEAR cells, the year-0 paid + refund-year rows, the equity-cash-
+    flow pickup and the disclosed register/Model Basis text.
+    """
+
+    @staticmethod
+    def _named_cell(workbook, name):
+        destination = next(iter(workbook.defined_names[name].destinations))
+        sheet_name, coord = destination
+        return workbook[sheet_name][coord]
+
+    @staticmethod
+    def _proforma_labels(workbook):
+        sheet = workbook["Pro Forma (Audit)"]
+        return [
+            sheet.cell(row=row, column=1).value
+            for row in range(1, sheet.max_row + 1)
+        ]
+
+    @staticmethod
+    def _model_basis_text(workbook):
+        sheet = workbook["Model Basis"]
+        return "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+
+    def test_disabled_leaves_no_named_cells_rows_or_disclosure(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("VAT_RATE", "VAT_REFUND_YEAR"):
+            self.assertNotIn(name, workbook.defined_names, name)
+        labels = self._proforma_labels(workbook)
+        self.assertNotIn("Input VAT paid on capex", labels)
+        self.assertNotIn("VAT refund received", labels)
+        text = self._model_basis_text(workbook)
+        self.assertIn("VAT is out of scope (pass-through assumed for both parties).", text)
+        self.assertNotIn("Input VAT on capex", text)
+
+    def test_enabled_defines_named_cells(self):
+        result = _esco_vat_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("VAT_RATE", "VAT_REFUND_YEAR"):
+            self.assertIn(name, workbook.defined_names, name)
+        block = result["derivation"]["vat"]
+        self.assertEqual(self._named_cell(workbook, "VAT_RATE").value, block["rate"])
+        self.assertEqual(
+            self._named_cell(workbook, "VAT_REFUND_YEAR").value, block["refund_year"]
+        )
+
+    def test_enabled_adds_live_paid_and_refund_rows(self):
+        result = _esco_vat_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = self._proforma_labels(workbook)
+
+        for label in ("Input VAT paid on capex", "VAT refund received"):
+            self.assertIn(label, labels, label)
+
+        # Paid line: year-0 outflow = −VAT_RATE × total capex (a live formula).
+        paid_row = labels.index("Input VAT paid on capex") + 1
+        self.assertEqual(sheet.cell(row=paid_row, column=3).value, "=-VAT_RATE*TOTAL_CAPEX")
+        # Refund line: live only in the refund year, keyed on VAT_REFUND_YEAR.
+        refund_row = labels.index("VAT refund received") + 1
+        refund_formula = str(sheet.cell(row=refund_row, column=3 + 2).value)
+        self.assertIn("=IF(", refund_formula)
+        self.assertIn("=VAT_REFUND_YEAR,VAT_RATE*TOTAL_CAPEX,0)", refund_formula)
+
+    def test_enabled_equity_cash_flow_picks_up_both_flows(self):
+        result = _esco_vat_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = self._proforma_labels(workbook)
+
+        eq_row = labels.index("Equity cash flow") + 1
+        # Year-0 equity cash flow references both VAT year-0 cells.
+        y0_formula = str(sheet.cell(row=eq_row, column=3).value)
+        self.assertIn("-EQUITY_INVESTMENT", y0_formula)
+        paid_row = labels.index("Input VAT paid on capex") + 1
+        refund_row = labels.index("VAT refund received") + 1
+        self.assertIn(f"C{paid_row}", y0_formula)
+        self.assertIn(f"C{refund_row}", y0_formula)
+        # An operating-year equity cash flow adds both VAT rows.
+        op_formula = str(sheet.cell(row=eq_row, column=3 + 5).value)
+        self.assertIn(f"{get_column_letter(3 + 5)}{paid_row}", op_formula)
+        self.assertIn(f"{get_column_letter(3 + 5)}{refund_row}", op_formula)
+
+    def test_enabled_model_basis_and_register_disclose_the_vat_timing(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_vat_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        text = self._model_basis_text(workbook)
+        self.assertIn("Input VAT on capex", text)
+        self.assertIn("VAT Law 48/2024/QH15", text)
+        # The out-of-scope register line is replaced by the modeled treatment.
+        self.assertNotIn(
+            "VAT is out of scope (pass-through assumed for both parties).", text
+        )
+        self.assertIn("Capex input-VAT timing IS modelled", text)
+        # The operating-stage float stays disclosed as pass-through.
+        self.assertIn("pass-through", text)
 
 
 class CoverSheetTests(TestCase):

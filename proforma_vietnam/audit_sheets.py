@@ -75,6 +75,7 @@ CURATED_ASSUMPTION_KEYS = {
     "pv_depreciation_years", "debt_fraction", "debt_interest_rate_fraction",
     "debt_term_years", "construction_months", "principal_grace_years",
     "target_min_dscr", "contract_years", "contract_residual_value_usd",
+    "vat_rate_fraction", "vat_refund_year",
     "owner_discount_rate_fraction", "analysis_years",
     "case_config", "dppa",
 }
@@ -521,6 +522,20 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
                      "end-of-term transfer payment, at contract FX)",
               name="RESIDUAL_VALUE", fmt=FMT_AMOUNT)
 
+    vat = d.get("vat")
+    if vat:
+        # Input VAT on capex (Task 4f). Gated on the engine derivation so default
+        # (no-VAT) cases carry no VAT names or rows and stay byte-identical.
+        section("Input VAT on Capex (Task 4f)")
+        entry("Input VAT rate (user input)", vat.get("rate"), unit="of capex base",
+              source="case.json financial.vat_rate_fraction (VAT Law 48/2024/QH15, "
+                     "eff. 2025-07-01; standard rate 10%, user-supplied)",
+              name="VAT_RATE", fmt=FMT_PERCENT)
+        entry("VAT refund year", vat.get("refund_year"), unit="year (0 = COD year)",
+              source="case.json financial.vat_refund_year (investment-project "
+                     "refund timing; equity-funded, out of debt / CFADS / DSCR)",
+              name="VAT_REFUND_YEAR", fmt="0")
+
     section("Year-1 Engine Outputs (hardcoded — dispatch × tariff, not derivable in-sheet)")
     entry("Year-1 BAU EVN bill", d.get("bau_evn_bill_year1_usd"), unit="USD",
           source="REopt ElectricTariff.year_one_bill_before_tax_bau",
@@ -778,6 +793,10 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     # when contract_years is set; drives operating-line truncation beyond year T,
     # the NBV disposal block and the year-T transfer proceeds.
     contract_term = d.get("contract_term")
+    # Input VAT on capex (Task 4f). Present only when vat_rate_fraction is set;
+    # drives the year-0 outflow / refund-year inflow rows and their equity-cash-
+    # flow tie-out. No-VAT cases carry no block and stay byte-identical.
+    vat = d.get("vat")
     w = _ProFormaWriter(worksheet, years)
 
     worksheet.sheet_view.showGridLines = False
@@ -1224,12 +1243,32 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         r_transfer = w.line(
             "transfer_proceeds", "Asset transfer proceeds (host buyout)", "USD",
             formula=lambda y, c: f"=IF({year_ref(c)}=CONTRACT_YEARS,RESIDUAL_VALUE,0)")
+    # Task 4f: input VAT on capex is paid at year 0 (−VAT_RATE × total capex) and
+    # refunded (VAT_RATE × total capex) in the refund year. Both are equity-funded
+    # and out of CFADS/DSCR/project cash flow — they only join the equity cash
+    # flow below. Gated so no-VAT workbooks stay byte-identical.
+    r_vat_paid = None
+    r_vat_refund = None
+    if vat:
+        r_vat_paid = w.line(
+            "input_vat_paid", "Input VAT paid on capex", "USD",
+            y0="=-VAT_RATE*TOTAL_CAPEX",
+            formula=lambda y, c: f"=IF({year_ref(c)}=0,-VAT_RATE*TOTAL_CAPEX,0)")
+        r_vat_refund = w.line(
+            "vat_refund", "VAT refund received", "USD",
+            y0="=IF(VAT_REFUND_YEAR=0,VAT_RATE*TOTAL_CAPEX,0)",
+            formula=lambda y, c:
+                f"=IF({year_ref(c)}=VAT_REFUND_YEAR,VAT_RATE*TOTAL_CAPEX,0)")
+    eq_y0 = "=-EQUITY_INVESTMENT"
+    if r_vat_paid:
+        eq_y0 += f"+{w.col(0)}{r_vat_paid}+{w.col(0)}{r_vat_refund}"
     r_eq = w.line(
         "equity_cf", "Equity cash flow", "USD",
-        y0="=-EQUITY_INVESTMENT",
+        y0=eq_y0,
         formula=lambda y, c: (
-            f"={c}{r_cfads}-{c}{r_ds}+{c}{r_transfer}" if r_transfer
-            else f"={c}{r_cfads}-{c}{r_ds}"
+            f"={c}{r_cfads}-{c}{r_ds}"
+            + (f"+{c}{r_transfer}" if r_transfer else "")
+            + (f"+{c}{r_vat_paid}+{c}{r_vat_refund}" if r_vat_paid else "")
         ), bold=True)
     r_cum = w.line(
         "cum_equity", "Cumulative equity cash flow", "USD",
@@ -1337,6 +1376,13 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     eq_engine = [-summary["equity_investment_usd"]] + [
         row["equity_cash_flow_usd"] for row in annual
     ]
+    if vat:
+        # Year-0 input VAT on capex rides the equity cash flow, not the equity
+        # investment — mirror the engine so the tie-out reference matches the
+        # live equity_cf year-0 cell (a year-0 refund nets it back).
+        eq_engine[0] -= vat["vat_amount_usd"]
+        if vat["refund_year"] == 0:
+            eq_engine[0] += vat["vat_amount_usd"]
     cfads_engine = [None] + [
         row["cash_available_for_debt_service_usd"] for row in annual
     ]
@@ -1918,6 +1964,39 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "No working-capital, DSRA, or terminal/residual value is modelled."
         )
 
+    # Input VAT on capex (Task 4f). When active the "VAT is out of scope" register
+    # line is replaced by the modeled capex-VAT timing plus the remaining VAT
+    # simplifications; default (no VAT) keeps that line byte-for-byte.
+    vat_block = derivation.get("vat")
+    vat_basis_bullets = []
+    if vat_block:
+        vat_rate = vat_block.get("rate")
+        vat_refund_year = vat_block.get("refund_year")
+        vat_basis_bullets.append(
+            "Input VAT on capex (VAT Law 48/2024/QH15, effective 2025-07-01): the project company pays "
+            f"input VAT at the user-supplied rate ({vat_rate:.0%} of total capex — the standard rate is "
+            "10%, with temporary reductions for some goods that the model does not adjudicate) at "
+            f"purchase (year 0) and recovers it in full via the investment-project refund mechanism in "
+            f"year {vat_refund_year}. Both flows are shown gross on the developer's equity cash flow "
+            "(net-zero timing when refunded in year 0)."
+        )
+        vat_basis_bullets.append(
+            "The refundable input VAT is EQUITY-funded — it does not enter the debt principal, the "
+            "debt-fraction base, IDC or DSCR sizing — and the refund is NOT operating revenue (kept out "
+            "of CFADS/DSCR as a one-off, non-operating item), so it moves equity IRR and NPV only. "
+            "Creditable input VAT is neither income nor expense: no CIT effect and no depreciation-base "
+            "effect (assets stay excl.-VAT)."
+        )
+        vat_register_line = (
+            "Capex input-VAT timing IS modelled (paid year 0, refunded in the configured year, "
+            "equity-funded, returns-only). Remaining VAT simplifications: the operating-stage VAT float "
+            "(output VAT on invoices vs input VAT on O&M) nets to ~zero in annual buckets and stays "
+            "disclosed as pass-through; the refund is assumed full and on time (partial / denied / "
+            "delayed refunds out of scope); battery replacement stays excl.-VAT like all O&M-stage costs."
+        )
+    else:
+        vat_register_line = "VAT is out of scope (pass-through assumed for both parties)."
+
     if derivation.get("cit", {}).get("regime") == "re_producer":
         cit_regime_text = (
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
@@ -1993,6 +2072,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "45/2013/TT-BTC; BESS over its own life.",
             *replacement_basis_bullets,
             *contract_basis_bullets,
+            *vat_basis_bullets,
         ]),
         ("5. Simplifications register (disclosed for audit)", [
             "Fixed FX over the analysis period — quantified on the FX Sensitivity sheet.",
@@ -2001,7 +2081,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             *debt_sizing_register_bullets,
             *replacement_register_bullets,
             *contract_register_bullets,
-            "VAT is out of scope (pass-through assumed for both parties).",
+            vat_register_line,
             terminal_value_register_line,
             "A single dispatch year (8760 h) is escalated; no re-dispatch in later years.",
             "REopt sizing is optimizer output and can vary slightly between solver versions; the financial "

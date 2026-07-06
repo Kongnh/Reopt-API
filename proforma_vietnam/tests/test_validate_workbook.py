@@ -22,6 +22,7 @@ from proforma_vietnam.tests.test_audit_sheets import (
     _esco_contract_term_result,
     _esco_result,
     _esco_surplus_result,
+    _esco_vat_result,
     _physical_result,
     _usd_debt_result,
 )
@@ -225,6 +226,23 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _esco_contract_term_result(), assumptions=ESCO_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "contract_term.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_vat_fixture_workbook_passes(self):
+        # Task 4f input VAT on capex (10%, refunded year 2): the year-0 equity
+        # cash flow carries the −VAT outflow, year 2 carries the refund, and both
+        # are out of CFADS/DSCR/project cash flow. Under real Excel recalc the
+        # equity-cash-flow tie-out (year-0 outflow + refund-year inflow, both
+        # keyed off VAT_RATE / VAT_REFUND_YEAR) and the FX overlay must reproduce
+        # the engine so every check stays PASS.
+        workbook = build_vietnam_esco_workbook(
+            _esco_vat_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "vat.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)
