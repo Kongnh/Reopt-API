@@ -1008,6 +1008,50 @@ class VietnamCaseBuilderTests(TestCase):
         overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
         self.assertEqual(overrides["target_min_dscr"], 1.3)
 
+    def test_contract_tenor_is_allowlisted_into_assumptions_not_the_payload(self):
+        # Task 4e contract_years / contract_residual_value_usd travel the same
+        # allowlisted path as the other financing scalars: into assumptions
+        # (never the REopt payload). The offline rebuild override mapping
+        # (cash_flow_overrides_from_assumptions) lives in the DPPA-only sweep
+        # tool and is intentionally NOT extended (the tenor is ESCO-only); the
+        # live esco_pro_forma path carries the keys via its generic **kwargs.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "financial": {
+                    "contract_years": 15,
+                    "contract_residual_value_usd": 250000.0,
+                },
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["contract_years"], 15)
+        self.assertEqual(case["assumptions"]["contract_residual_value_usd"], 250000.0)
+        self.assertNotIn("contract_years", case["payload"]["Financial"])
+        self.assertNotIn("contract_residual_value_usd", case["payload"]["Financial"])
+
+    def test_contract_tenor_absent_by_default_leaves_no_assumption_keys(self):
+        # Default OFF: no contract keys in the case financial input means neither
+        # key appears in assumptions or the override mapping (byte-identical).
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertNotIn("contract_years", case["assumptions"])
+        self.assertNotIn("contract_residual_value_usd", case["assumptions"])
+
     def test_battery_replacement_treatment_round_trips_like_the_other_scalars(self):
         # battery_replacement_treatment travels the same allowlisted path as the
         # other financing scalars: into assumptions (never the REopt payload) and

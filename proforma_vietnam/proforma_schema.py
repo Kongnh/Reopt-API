@@ -71,6 +71,12 @@ _ROWS = [
     RowSpec("cit", "CIT"),
     RowSpec("cash_available_for_debt_service", "Cash Available For Debt Service"),
     RowSpec("debt_service", "Debt Service"),
+    # Task 4e ESCO contract tenor: the host's end-of-term buyout lands in the
+    # developer's year-T equity cash flow. Present only when a tenor is active
+    # (the compute emits the key conditionally, per the Task 3a surplus-row
+    # precedent); ESCO-only (DPPA/physical/direct tenors are out of scope).
+    RowSpec("asset_transfer_proceeds", "Asset Transfer Proceeds",
+            applies_to=(ESCO,)),
     RowSpec("equity_cash_flow", "Equity Cash Flow"),
     RowSpec("offtaker_savings", "Offtaker Savings"),
     RowSpec("offtaker_savings_fraction", "Offtaker Savings Fraction", currency=False),
@@ -125,6 +131,8 @@ CASH_FLOW_VIEW = [
     "cit",
     "cash_available_for_debt_service",
     "debt_service",
+    # ESCO contract-tenor buyout (hidden unless a tenor is active; ESCO-only):
+    "asset_transfer_proceeds",
     "equity_cash_flow",
     "offtaker_savings",
     "offtaker_savings_fraction",

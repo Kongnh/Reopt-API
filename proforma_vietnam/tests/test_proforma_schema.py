@@ -8,7 +8,10 @@ from proforma_vietnam.structures import DIRECT_OWNERSHIP, DPPA, ESCO, PHYSICAL_D
 def _esco_result():
     # Surplus export enabled so the ESCO-scoped surplus lines the schema now
     # presents (surplus_export_kwh / surplus_export_revenue) exist in the
-    # compute output the single-source-of-truth test checks against.
+    # compute output the single-source-of-truth test checks against. The Task 4e
+    # contract tenor is enabled too (contract_years == project_years, so no
+    # truncation) so the ESCO-scoped asset_transfer_proceeds line the schema now
+    # presents also exists in the compute output.
     return calculate_vietnam_esco_cash_flow(
         project_served_pv_kwh=[1000, 1000],
         evn_energy_rates_vnd_per_kwh=[2000, 2000],
@@ -21,9 +24,12 @@ def _esco_result():
         annual_om_vnd=200_000,
         esco_energy_discount_fraction=0.9,
         debt_fraction=0.7,
+        debt_term_years=2,
         project_years=2,
         surplus_export_kwh_year1=5_000,
         surplus_export_price_usd_per_kwh=1_000,
+        contract_years=2,
+        contract_residual_value_usd=1_000_000,
     )
 
 

@@ -72,6 +72,8 @@ FINANCIAL_ASSUMPTION_KEYS = [
     "principal_grace_years",
     "target_min_dscr",
     "battery_replacement_treatment",
+    "contract_years",
+    "contract_residual_value_usd",
     "annual_om_usd",
     "annual_om_vnd",
     "om_escalation_rate",

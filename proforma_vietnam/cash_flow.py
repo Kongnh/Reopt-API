@@ -2,6 +2,7 @@ from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
 from proforma_vietnam.structures import (
     DIRECT_OWNERSHIP,
     DPPA,
+    ESCO,
     PHYSICAL_DPPA,
     resolve_structure,
 )
@@ -52,6 +53,20 @@ _DEBT_SIZING_TOLERANCE = 1e-9
 # comparisons only.
 BATTERY_REPLACEMENT_TREATMENTS = ("capitalize", "expense")
 
+# ESCO-side per-year row keys zeroed beyond the contract tenor (Task 4e). The
+# buyer-side lines (bau/optimized bills, demand savings, offtaker savings) are
+# intentionally excluded — post-transfer buyer economics are out of scope.
+_CONTRACT_TRUNCATED_ROW_KEYS = (
+    "esco_energy_revenue_vnd",
+    "esco_demand_revenue_vnd",
+    "esco_grid_arbitrage_revenue_vnd",
+    "surplus_export_kwh",
+    "surplus_export_revenue_vnd",
+    "esco_revenue_vnd",
+    "annual_om_vnd",
+    "replacement_cost_vnd",
+)
+
 
 def calculate_vietnam_esco_cash_flow(
     project_served_pv_kwh,
@@ -94,6 +109,8 @@ def calculate_vietnam_esco_cash_flow(
     surplus_export_price_usd_per_kwh=0.0,
     surplus_price_escalation_rate=None,
     surplus_cap_fraction=None,
+    contract_years=None,
+    contract_residual_value_usd=0.0,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
@@ -163,6 +180,22 @@ def calculate_vietnam_esco_cash_flow(
     fraction_based_principal_vnd = total_capex_vnd * debt_fraction
     construction_enabled = construction_months > 0 or principal_grace_years > 0
     validate_pv_depreciation_years(pv_depreciation_years)
+    _validate_contract_tenor(
+        contract_years, contract_residual_value_usd, structure,
+        project_years, debt_term_years,
+    )
+    if contract_years is not None:
+        # ESCO contract tenor: operations cease at the end of contract year T
+        # (= index contract_years - 1). Truncate the debt-independent operating
+        # arrays here (compute once, like the Task 4d replacement schedules); the
+        # disposal gain/loss is debt-dependent (rides IDC-inclusive NBV) and lives
+        # inside _derive_for_principal. REopt-scheduled replacements after T are
+        # NOT incurred (asset already transferred), so drop them before they can
+        # spawn a capitalized depreciation schedule.
+        replacement_costs_by_year = [
+            cost if year_index < contract_years else 0.0
+            for year_index, cost in enumerate(replacement_costs_by_year)
+        ]
 
     base_energy_revenue_vnd = sum(
         kwh * rate * esco_energy_discount_fraction
@@ -314,6 +347,19 @@ def calculate_vietnam_esco_cash_flow(
         preliminary_rows.append(row)
         net_operating_revenue_by_year.append(net_operating_revenue_vnd)
 
+    if contract_years is not None:
+        # Years beyond the tenor: every ESCO-side operating line is zero (asset
+        # transferred). Row/array lengths stay project_years so schema and
+        # workbook shape are unchanged. The offtaker/buyer view is left to the
+        # existing formula (post-transfer buyer economics are out of scope; the
+        # buyer simply retains the full savings once the ESCO cut ends).
+        for year_index in range(contract_years, project_years):
+            row = preliminary_rows[year_index]
+            for zero_key in _CONTRACT_TRUNCATED_ROW_KEYS:
+                if zero_key in row:
+                    row[zero_key] = 0.0
+            net_operating_revenue_by_year[year_index] = 0.0
+
     holiday_years, reduced_rate_years, preferential_rate, preferential_years = (
         _cit_regime_params(cit_regime)
     )
@@ -338,6 +384,13 @@ def calculate_vietnam_esco_cash_flow(
             _value_for_year(replacement_costs_by_year, year_index)
             for year_index in range(project_years)
         ]
+        if contract_years is not None:
+            # A replacement placed in service before T can carry depreciation
+            # charges into years > T; those charges are not taken (asset
+            # transferred) — their undepreciated remainder is recovered in the
+            # year-T net-book-value disposal instead.
+            for year_index in range(contract_years, project_years):
+                replacement_depreciation_by_year[year_index] = 0.0
 
     def _derive_for_principal(debt_principal_vnd):
         # Single source of the debt-principal-dependent derivation: IDC (Task
@@ -369,6 +422,12 @@ def calculate_vietnam_esco_cash_flow(
             pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years,
             idc_vnd=idc_vnd,
         )
+        if contract_years is not None:
+            # Depreciation charges for years > T are not taken (asset gone); the
+            # undepreciated remainder is recovered through the year-T disposal,
+            # not written off separately.
+            for year_index in range(contract_years, project_years):
+                depreciation_by_year[year_index] = 0.0
         if capitalize_replacement:
             # Deduct the replacement DEPRECIATION instead of the expense: add the
             # replacement cost back (net_operating_revenue subtracted it) and net
@@ -388,6 +447,30 @@ def calculate_vietnam_esco_cash_flow(
                 - debt_schedule[year_index]["interest_vnd"]
                 for year_index in range(project_years)
             ]
+        contract_term = None
+        if contract_years is not None:
+            # Year-T asset transfer: gain/loss = residual − net book value, where
+            # NBV is the undepreciated remainder of every asset class (initial
+            # PV/BESS incl. capitalized IDC per 4a, capitalized replacements per
+            # 4d) at end of year T. Depends on IDC (debt-driven), so it is derived
+            # here so DSCR sizing sees the year-T tax effect.
+            pv_basis_vnd, bess_basis_vnd = _idc_capitalized_bases(
+                pv_capex_vnd, bess_capex_vnd, idc_vnd
+            )
+            nbv_by_asset, nbv_total_vnd = _net_book_values_at_transfer(
+                pv_basis_vnd, bess_basis_vnd, pv_depreciation_years, contract_years,
+                replacement_schedules if capitalize_replacement else [],
+            )
+            disposal_gain_vnd = contract_residual_value_usd - nbv_total_vnd
+            transfer_index = contract_years - 1
+            taxable_income_by_year[transfer_index] += disposal_gain_vnd
+            contract_term = {
+                "contract_years": contract_years,
+                "residual_value_usd": contract_residual_value_usd,
+                "net_book_value_by_asset_usd": nbv_by_asset,
+                "net_book_value_at_transfer_usd": nbv_total_vnd,
+                "disposal_gain_usd": disposal_gain_vnd,
+            }
         cit_by_year = calculate_cit(
             taxable_income_by_year,
             holiday_years=holiday_years,
@@ -396,6 +479,24 @@ def calculate_vietnam_esco_cash_flow(
             preferential_years=preferential_years,
             immediate_loss_relief=assume_profitable_host,
         )
+        if contract_term is not None:
+            # Year-T disposal tax effect: the incremental CIT the gain/loss
+            # produces once routed through the case's regime/carryforward (compare
+            # the year-T CIT with vs. without the disposal gain). Disclosure only.
+            cit_without_disposal = calculate_cit(
+                [
+                    income - (disposal_gain_vnd if index == transfer_index else 0.0)
+                    for index, income in enumerate(taxable_income_by_year)
+                ],
+                holiday_years=holiday_years,
+                reduced_rate_years=reduced_rate_years,
+                preferential_rate=preferential_rate,
+                preferential_years=preferential_years,
+                immediate_loss_relief=assume_profitable_host,
+            )
+            contract_term["disposal_tax_usd"] = (
+                cit_by_year[transfer_index] - cit_without_disposal[transfer_index]
+            )
         # Minimum DSCR over the debt-term years (debt service > 0), evaluated on
         # the base case with contract FX held flat — no FX-sensitivity overlay.
         min_dscr = None
@@ -417,6 +518,7 @@ def calculate_vietnam_esco_cash_flow(
             "depreciation_by_year": depreciation_by_year,
             "cit_by_year": cit_by_year,
             "min_dscr": min_dscr,
+            "contract_term": contract_term,
         }
 
     if target_min_dscr is None:
@@ -484,6 +586,7 @@ def calculate_vietnam_esco_cash_flow(
     debt_schedule = derived["debt_schedule"]
     depreciation_by_year = derived["depreciation_by_year"]
     cit_by_year = derived["cit_by_year"]
+    contract_term = derived["contract_term"]
 
     annual_cash_flows = []
     project_cash_flows = [-total_capex_vnd]
@@ -501,6 +604,14 @@ def calculate_vietnam_esco_cash_flow(
             - cit_by_year[year_index]
         )
         equity_cash_flow_vnd = cash_available_for_debt_service_vnd - debt_service_vnd
+        # ESCO contract tenor: the host's residual/buyout payment lands in the
+        # developer's year-T equity cash flow (its own disclosed line; CFADS and
+        # the project cash flow are unchanged — the residual is an equity-side
+        # terminal value).
+        asset_transfer_proceeds_vnd = 0.0
+        if contract_term is not None and year_index == contract_term["contract_years"] - 1:
+            asset_transfer_proceeds_vnd = contract_residual_value_usd
+            equity_cash_flow_vnd += asset_transfer_proceeds_vnd
         # Energy lost to PV degradation is repurchased from EVN at retail,
         # so the offtaker's residual bill grows as the system degrades.
         optimized_evn_bill_year_vnd = (
@@ -556,6 +667,11 @@ def calculate_vietnam_esco_cash_flow(
                 else None
             ),
         })
+        if contract_term is not None:
+            # Present only when the tenor is active (0 in every year but T), so
+            # non-tenor cases stay byte-for-byte unchanged; _finalize_currencies
+            # emits the _usd pair below like every other money row.
+            row["asset_transfer_proceeds_vnd"] = asset_transfer_proceeds_vnd
         _finalize_currencies(row, exchange_rate_vnd_per_usd)
         annual_cash_flows.append(row)
         project_cash_flows.append(cash_available_for_debt_service_vnd)
@@ -699,6 +815,13 @@ def calculate_vietnam_esco_cash_flow(
             "treatment": battery_replacement_treatment,
             "schedules": replacement_schedules,
         }
+    if contract_term is not None:
+        # Self-describing ESCO contract-tenor / asset-transfer record (Task 4e)
+        # so the audit sheet can rebuild the NBV tie-out, disposal gain and the
+        # year-T tax effect from named cells. Present only when contract_years is
+        # set; disabled (default) runs carry no block and stay byte-for-byte
+        # unchanged.
+        derivation["contract_term"] = contract_term
     if surplus_enabled:
         # Self-describing surplus config so the audit sheet can rebuild the
         # revenue row from named cells (year-1 sold kWh, USD price, escalation,
@@ -935,6 +1058,58 @@ def _validate_battery_replacement_treatment(battery_replacement_treatment):
         )
 
 
+def _validate_contract_tenor(contract_years, contract_residual_value_usd,
+                             structure, project_years, debt_term_years):
+    # ESCO contract tenor + end-of-term asset transfer (Task 4e). contract_years
+    # is None by default (no tenor: operations run the full horizon, no residual).
+    # The residual value is validated first so a bad value is caught whether or
+    # not the tenor is set.
+    if isinstance(contract_residual_value_usd, bool) or not isinstance(
+        contract_residual_value_usd, (int, float)
+    ):
+        raise ValueError(
+            "contract_residual_value_usd must be a number >= 0, got "
+            f"{contract_residual_value_usd!r}."
+        )
+    if contract_residual_value_usd < 0:
+        raise ValueError(
+            "contract_residual_value_usd must be >= 0, got "
+            f"{contract_residual_value_usd}."
+        )
+    if contract_years is None:
+        # A residual with no tenor has nowhere to land — reject rather than
+        # silently ignore it.
+        if contract_residual_value_usd:
+            raise ValueError(
+                "contract_residual_value_usd is only meaningful with "
+                "contract_years set (the asset-transfer year); got "
+                f"contract_residual_value_usd={contract_residual_value_usd} with "
+                "contract_years=None."
+            )
+        return
+    if isinstance(contract_years, bool) or not isinstance(contract_years, int):
+        raise ValueError(
+            f"contract_years must be an integer, got {contract_years!r}."
+        )
+    if structure != ESCO:
+        raise ValueError(
+            "contract_years (ESCO contract tenor) is only defined for the ESCO "
+            f"structure, got structure={structure!r}. DPPA / physical-DPPA / "
+            "direct-ownership tenors are a different concept, out of scope."
+        )
+    if not 1 <= contract_years <= project_years:
+        raise ValueError(
+            f"contract_years must be within 1-{project_years} (the analysis "
+            f"horizon), got {contract_years}."
+        )
+    if contract_years < debt_term_years:
+        raise ValueError(
+            f"contract_years must be >= debt_term_years ({debt_term_years}) — "
+            "balloon refinancing at transfer is out of scope; got "
+            f"contract_years={contract_years}."
+        )
+
+
 def _replacement_depreciation_schedules(replacement_costs_by_year, project_years):
     """Per-replacement-year straight-line depreciation (capitalize mode).
 
@@ -968,25 +1143,82 @@ def _replacement_depreciation_schedules(replacement_costs_by_year, project_years
     return annual_total_by_year, schedules
 
 
-def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years,
-                           pv_depreciation_years, idc_vnd=0.0):
-    # Capitalized IDC (borrowing costs during construction; VAS / Circular 45)
-    # is allocated pro-rata across the depreciable classes by capex share and
-    # rides each class's existing schedule — never expensed. idc_vnd=0 leaves
-    # the bases unchanged.
+def _idc_capitalized_bases(pv_capex_vnd, bess_capex_vnd, idc_vnd=0.0):
+    """PV/BESS depreciable bases with capitalized IDC allocated pro-rata.
+
+    Capitalized IDC (borrowing costs during construction; VAS / Circular 45) is
+    allocated across the depreciable classes by capex share and rides each
+    class's schedule — never expensed. ``idc_vnd=0`` returns the bare capex
+    bases. Single source of the IDC split so the depreciation schedule and the
+    Task 4e net-book-value disposal use identical bases.
+    """
     depreciable_capex_vnd = pv_capex_vnd + bess_capex_vnd
     idc_pv_vnd = (
         idc_vnd * pv_capex_vnd / depreciable_capex_vnd
         if depreciable_capex_vnd else 0.0
     )
     idc_bess_vnd = idc_vnd - idc_pv_vnd if depreciable_capex_vnd else 0.0
+    return pv_capex_vnd + idc_pv_vnd, bess_capex_vnd + idc_bess_vnd
+
+
+def _net_book_values_at_transfer(pv_basis_vnd, bess_basis_vnd,
+                                 pv_depreciation_years, contract_years,
+                                 replacement_schedules):
+    """Undepreciated remainder of every asset class at the end of contract year T.
+
+    Straight-line NBV = basis − basis/life × min(T, life) for the initial PV and
+    BESS classes (each incl. its capitalized-IDC share per Task 4a). Each
+    capitalized replacement (Task 4d) contributes its cost minus the charges
+    taken through year T (charge years ≤ T). Depreciation for years > T is not
+    taken — the remainder is recovered here through the disposal, not written off
+    separately. Returns ``(by_asset, total)`` where ``by_asset`` is a
+    self-describing list (per the audit-sheet NBV tie-out).
+    """
+    def _remaining(basis, life):
+        return basis - basis / life * min(contract_years, life)
+
+    pv_nbv_vnd = _remaining(pv_basis_vnd, pv_depreciation_years)
+    bess_nbv_vnd = _remaining(bess_basis_vnd, BESS_DEPRECIATION_YEARS)
+    by_asset = [
+        {"asset": "initial_pv", "cost_usd": pv_basis_vnd,
+         "life_years": pv_depreciation_years, "net_book_value_usd": pv_nbv_vnd},
+        {"asset": "initial_bess", "cost_usd": bess_basis_vnd,
+         "life_years": BESS_DEPRECIATION_YEARS, "net_book_value_usd": bess_nbv_vnd},
+    ]
+    total_vnd = pv_nbv_vnd + bess_nbv_vnd
+    for schedule in replacement_schedules:
+        charges_taken = sum(
+            1 for year in schedule["depreciation_years"] if year <= contract_years
+        )
+        remainder_vnd = (
+            schedule["cost_usd"]
+            - schedule["annual_charge_usd"] * charges_taken
+        )
+        by_asset.append({
+            "asset": "replacement",
+            "in_service_year": schedule["in_service_year"],
+            "cost_usd": schedule["cost_usd"],
+            "life_years": schedule["life_years"],
+            "net_book_value_usd": remainder_vnd,
+        })
+        total_vnd += remainder_vnd
+    return by_asset, total_vnd
+
+
+def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years,
+                           pv_depreciation_years, idc_vnd=0.0):
+    # Capitalized IDC rides each class's existing schedule (see
+    # _idc_capitalized_bases); idc_vnd=0 leaves the bases unchanged.
+    pv_basis_vnd, bess_basis_vnd = _idc_capitalized_bases(
+        pv_capex_vnd, bess_capex_vnd, idc_vnd
+    )
     pv_depreciation = straight_line_depreciation_schedule(
-        pv_capex_vnd + idc_pv_vnd,
+        pv_basis_vnd,
         pv_depreciation_years,
         project_years=project_years,
     )
     bess_depreciation = straight_line_depreciation_schedule(
-        bess_capex_vnd + idc_bess_vnd,
+        bess_basis_vnd,
         BESS_DEPRECIATION_YEARS,
         project_years=project_years,
     )

@@ -1990,3 +1990,235 @@ class BatteryReplacementCapitalizationTests(TestCase):
         self.assertEqual(schedule["depreciation_years"], [3, 4, 5, 6, 7, 8, 9, 10])
         # The holiday years suppress CIT regardless of the deduction timing.
         self.assertAlmostEqual(capitalize["annual_cash_flows"][0]["cit_vnd"], 0.0)
+
+
+class ContractTenorTests(TestCase):
+    """Task 4e: ESCO contract tenor with end-of-term asset transfer at a
+    residual/buyout value. Default OFF (``contract_years=None``).
+
+    The fixture is a strongly profitable, no-debt, flat (no escalation /
+    degradation) ESCO case under the flat-20% standard regime, so taxable income
+    is positive every year, no losses carry forward, and CIT == taxable income x
+    20% — the year-T disposal gain's tax effect is hand-computable. With
+    ``pv_capex=2,000,000`` over a 20-year life, the year-1..12 depreciation is
+    100,000/yr and revenue is a flat 900,000/yr (100,000 kWh x 10 x 0.9).
+    """
+
+    RATE = 0.20
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100000.0],
+            evn_energy_rates_vnd_per_kwh=[10.0],
+            bau_evn_bill_vnd=2_000_000.0,
+            optimized_evn_bill_vnd=1_400_000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=2_000_000.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.0,
+            project_years=25,
+            cit_regime="standard_flat",
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    # --- default OFF / byte-identical guard --------------------------------
+
+    def test_disabled_by_default_leaks_no_block_or_row_key(self):
+        result = self._run()
+        self.assertNotIn("contract_term", result["derivation"])
+        for row in result["annual_cash_flows"]:
+            self.assertNotIn("asset_transfer_proceeds_usd", row)
+            self.assertNotIn("asset_transfer_proceeds_vnd", row)
+
+    def test_explicit_none_defaults_are_byte_identical_to_omitting(self):
+        omitted = self._run()
+        explicit = self._run(contract_years=None, contract_residual_value_usd=0.0)
+        self.assertEqual(explicit["annual_cash_flows"], omitted["annual_cash_flows"])
+        self.assertEqual(explicit["summary"], omitted["summary"])
+        self.assertEqual(explicit["derivation"], omitted["derivation"])
+
+    # --- hand-computed PV-only fixture (T=12) ------------------------------
+
+    def test_pv_only_nbv_gain_truncation_and_transfer(self):
+        result = self._run(contract_years=12, contract_residual_value_usd=1_000_000.0)
+        block = result["derivation"]["contract_term"]
+        rows = result["annual_cash_flows"]
+
+        # NBV = capitalized cost - straight-line depreciation through T:
+        # 2,000,000 x (20 - 12)/20 = 800,000 (BESS capex is 0 here).
+        self.assertAlmostEqual(block["net_book_value_at_transfer_usd"], 800_000.0)
+        self.assertAlmostEqual(block["disposal_gain_usd"], 200_000.0)  # 1,000,000 - 800,000
+        # Gain is taxed at the year-12 regime rate (flat 20%).
+        self.assertAlmostEqual(block["disposal_tax_usd"], 200_000.0 * self.RATE)
+
+        # Operations stop at T: every ESCO-side line is zero for years 13..25.
+        for row in rows[12:]:
+            self.assertEqual(row["esco_revenue_usd"], 0.0)
+            self.assertEqual(row["annual_om_usd"], 0.0)
+            self.assertEqual(row["depreciation_usd"], 0.0)
+            self.assertEqual(row["cit_usd"], 0.0)
+            self.assertEqual(row["equity_cash_flow_usd"], 0.0)
+
+        # Transfer proceeds are their own line, present only in year T.
+        self.assertAlmostEqual(rows[11]["asset_transfer_proceeds_usd"], 1_000_000.0)
+        self.assertEqual(rows[10]["asset_transfer_proceeds_usd"], 0.0)
+        self.assertEqual(rows[12]["asset_transfer_proceeds_usd"], 0.0)
+
+        # Year-12 equity = CFADS (900,000 - CIT 200,000) + residual 1,000,000.
+        self.assertAlmostEqual(rows[11]["equity_cash_flow_usd"], 700_000.0 + 1_000_000.0)
+        # Year-12 CIT carries the disposal gain: (800,000 + 200,000) x 20%.
+        self.assertAlmostEqual(rows[11]["cit_usd"], 200_000.0)
+
+    def test_zero_residual_books_a_disposal_loss_of_negative_nbv(self):
+        result = self._run(contract_years=12, contract_residual_value_usd=0.0)
+        block = result["derivation"]["contract_term"]
+        rows = result["annual_cash_flows"]
+        # Transfer row is present at 0.0 (a set tenor, no buyout).
+        self.assertEqual(rows[11]["asset_transfer_proceeds_usd"], 0.0)
+        # Disposal LOSS = 0 - NBV = -800,000, which reduces year-12 taxable income.
+        self.assertAlmostEqual(block["disposal_gain_usd"], -800_000.0)
+        self.assertAlmostEqual(block["disposal_tax_usd"], -800_000.0 * self.RATE)
+
+    # --- asset-class coverage ----------------------------------------------
+
+    def test_bess_fully_depreciated_at_transfer_is_excluded_from_nbv(self):
+        # T=10 > BESS 8-year life, no replacement: BESS NBV is zero, PV remains.
+        result = self._run(
+            bess_capex_vnd=800_000.0, contract_years=10,
+            contract_residual_value_usd=0.0,
+        )
+        by_asset = {
+            item["asset"]: item
+            for item in result["derivation"]["contract_term"]["net_book_value_by_asset_usd"]
+        }
+        self.assertAlmostEqual(by_asset["initial_bess"]["net_book_value_usd"], 0.0)
+        # PV: 2,000,000 x (20 - 10)/20 = 1,000,000.
+        self.assertAlmostEqual(by_asset["initial_pv"]["net_book_value_usd"], 1_000_000.0)
+        self.assertAlmostEqual(
+            result["derivation"]["contract_term"]["net_book_value_at_transfer_usd"],
+            1_000_000.0,
+        )
+
+    def test_replacement_before_T_in_nbv_and_after_T_not_incurred(self):
+        # Replacement in year 11 (before T=12) and year 20 (after T). Only the
+        # year-11 asset exists; the year-20 replacement is never incurred.
+        result = self._run(
+            bess_capex_vnd=800_000.0, contract_years=12,
+            contract_residual_value_usd=0.0,
+            replacement_costs_by_year=[0.0] * 10 + [240_000.0] + [0.0] * 8 + [500_000.0],
+        )
+        schedules = result["derivation"]["battery_replacement"]["schedules"]
+        self.assertEqual([s["in_service_year"] for s in schedules], [11])
+        rows = result["annual_cash_flows"]
+        self.assertEqual(rows[10]["replacement_cost_usd"], 240_000.0)
+        self.assertEqual(rows[19]["replacement_cost_usd"], 0.0)  # year-20 not incurred
+        by_asset = {
+            (item["asset"], item.get("in_service_year")): item
+            for item in result["derivation"]["contract_term"]["net_book_value_by_asset_usd"]
+        }
+        # Year-11 asset: cost 240,000, life 8, charges in years 11 & 12 (2 taken
+        # through T): NBV = 240,000 - 240,000/8 x 2 = 180,000.
+        self.assertAlmostEqual(
+            by_asset[("replacement", 11)]["net_book_value_usd"], 180_000.0
+        )
+
+    def test_transfer_at_horizon_end_has_no_truncation(self):
+        # contract_years == project_years: operations run the full horizon, the
+        # transfer lands in the final year.
+        result = self._run(contract_years=25, contract_residual_value_usd=500_000.0)
+        rows = result["annual_cash_flows"]
+        # No truncation: year-20 (still within PV life) revenue is the flat value.
+        self.assertAlmostEqual(rows[19]["esco_revenue_usd"], 900_000.0)
+        self.assertAlmostEqual(rows[24]["asset_transfer_proceeds_usd"], 500_000.0)
+        for row in rows[:24]:
+            self.assertEqual(row["asset_transfer_proceeds_usd"], 0.0)
+        # PV fully depreciated by year 20 (< 25), so NBV at T=25 is 0.
+        self.assertAlmostEqual(
+            result["derivation"]["contract_term"]["net_book_value_at_transfer_usd"], 0.0
+        )
+
+    # --- interactions with earlier tasks -----------------------------------
+
+    def test_construction_idc_rides_into_the_disposal_nbv(self):
+        # Capitalized IDC (Task 4a) joins the PV/BESS bases pro-rata, so the NBV
+        # at transfer is higher than the bare-capex NBV by the undepreciated IDC.
+        result = self._run(
+            contract_years=12, contract_residual_value_usd=0.0,
+            construction_months=12, debt_fraction=0.5,
+        )
+        idc = result["derivation"]["construction"]["idc_usd"]
+        pv_nbv = result["derivation"]["contract_term"][
+            "net_book_value_by_asset_usd"][0]["net_book_value_usd"]
+        # PV basis = 2,000,000 + IDC (all IDC to PV since BESS capex is 0);
+        # NBV = basis x (20 - 12)/20.
+        self.assertAlmostEqual(pv_nbv, (2_000_000.0 + idc) * (20 - 12) / 20)
+
+    def test_tenor_with_dscr_sizing_converges_with_year_T_tax_effect(self):
+        # DSCR sizing (Task 4c) re-runs the derivation against the truncated
+        # CFADS incl. the year-T disposal tax; both blocks must be present and
+        # the sized loan must not exceed the fraction-based loan.
+        result = self._run(
+            debt_fraction=0.6, debt_term_years=10, target_min_dscr=1.5,
+            contract_years=12, contract_residual_value_usd=1_000_000.0,
+        )
+        self.assertIn("debt_sizing", result["derivation"])
+        self.assertIn("contract_term", result["derivation"])
+        self.assertLessEqual(
+            result["summary"]["debt_principal_usd"],
+            result["summary"]["total_capex_usd"] * 0.6 + 1e-6,
+        )
+
+    def test_tenor_with_usd_debt_still_transfers(self):
+        result = self._run(
+            debt_fraction=0.5, debt_term_years=10, debt_currency="USD",
+            contract_years=12, contract_residual_value_usd=1_000_000.0,
+        )
+        self.assertEqual(result["derivation"]["debt_currency"], "USD")
+        self.assertAlmostEqual(
+            result["annual_cash_flows"][11]["asset_transfer_proceeds_usd"], 1_000_000.0
+        )
+
+    # --- validation --------------------------------------------------------
+
+    def test_residual_without_tenor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_residual_value_usd=500_000.0)
+
+    def test_negative_residual_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_years=12, contract_residual_value_usd=-1.0)
+
+    def test_zero_tenor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_years=0)
+
+    def test_negative_tenor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_years=-5)
+
+    def test_tenor_beyond_horizon_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_years=26)  # project_years is 25
+
+    def test_non_integer_tenor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_years=12.0)
+
+    def test_boolean_tenor_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(contract_years=True)
+
+    def test_tenor_shorter_than_debt_term_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(debt_fraction=0.5, debt_term_years=15, contract_years=12)
+
+    def test_tenor_on_non_esco_structure_is_rejected(self):
+        # DIRECT_OWNERSHIP (and any non-ESCO structure) rejects a tenor.
+        with self.assertRaises(ValueError):
+            self._run(direct_ownership={}, contract_years=12)

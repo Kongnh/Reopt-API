@@ -22,6 +22,29 @@ class VietnamEscoProFormaAdapterTests(TestCase):
         self.assertEqual(annual["annual_om_vnd"], 1000)
         self.assertEqual(summary["total_capex_vnd"], 110000)
 
+    def test_contract_tenor_kwargs_pass_through_to_the_cash_flow(self):
+        # Task 4e: contract_years / contract_residual_value_usd are plain cash
+        # flow kwargs, so esco_pro_forma's generic **cash_flow_overrides carries
+        # them straight into calculate_vietnam_esco_cash_flow (no schema-specific
+        # handling needed, unlike surplus/dppa/direct blocks).
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False),
+            esco_energy_discount_fraction=0.9,
+            project_years=25,
+            debt_term_years=10,
+            contract_years=12,
+            contract_residual_value_usd=40000.0,
+        )
+
+        block = result["derivation"]["contract_term"]
+        self.assertEqual(block["contract_years"], 12)
+        self.assertAlmostEqual(block["residual_value_usd"], 40000.0)
+        # Transfer proceeds land in the year-12 row; operations truncate after.
+        self.assertAlmostEqual(
+            result["annual_cash_flows"][11]["asset_transfer_proceeds_vnd"], 40000.0
+        )
+        self.assertEqual(result["annual_cash_flows"][12]["esco_revenue_vnd"], 0.0)
+
     def test_excludes_storage_discharge_when_grid_charging_is_enabled(self):
         result = calculate_esco_pro_forma_from_reopt_results(
             _fake_reopt_results(can_grid_charge=True),
