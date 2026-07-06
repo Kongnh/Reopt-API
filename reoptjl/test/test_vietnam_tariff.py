@@ -170,3 +170,118 @@ class VietnamEvnTariffTests(TestCase):
             payload["ElectricTariff"]["tou_energy_rates_per_kwh"][jan_6_2025_21_index],
             3398 / 25000
         )
+
+    def test_leap_year_is_rejected(self):
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(year=2028, voltage_level="22-110kV")
+
+        self.assertIn("8760", str(context.exception))
+        self.assertIn("non-leap", str(context.exception))
+
+    def test_non_manufacturing_tariff_category_is_rejected(self):
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(year=2025, voltage_level="22-110kV", tariff_category="residential")
+
+        self.assertIn("Only manufacturing EVN tariffs are available.", str(context.exception))
+
+    def test_unsupported_voltage_level_raises_with_message(self):
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(year=2025, voltage_level="500kV")
+
+        self.assertIn("500kV", str(context.exception))
+
+    def test_voltage_level_aliases_produce_identical_rates(self):
+        spelled_out = build_evn_tariff(year=2025, voltage_level="6 kV to less than 22 kV")
+        abbreviated = build_evn_tariff(year=2025, voltage_level="6-22kV")
+
+        self.assertEqual(
+            spelled_out["tou_energy_rates_per_kwh"],
+            abbreviated["tou_energy_rates_per_kwh"]
+        )
+
+    def test_unsupported_tou_schedule_raises_with_message(self):
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(year=2025, voltage_level="22-110kV", tou_schedule="decision_9999")
+
+        self.assertIn("decision_9999", str(context.exception))
+
+    def test_unsupported_currency_raises(self):
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(year=2025, voltage_level="22-110kV", currency="eur")
+
+        self.assertIn("Unsupported currency", str(context.exception))
+
+    def test_usd_currency_without_exchange_rate_raises(self):
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(
+                year=2025,
+                voltage_level="22-110kV",
+                currency="usd",
+                exchange_rate_vnd_per_usd=None
+            )
+
+        self.assertIn("exchange_rate_vnd_per_usd is required", str(context.exception))
+
+    def test_exact_vintage_match_echoes_metadata_for_requested_year(self):
+        tariff = build_evn_tariff(year=2025, voltage_level="22-110kV")
+
+        self.assertEqual(tariff["rate_vintage_year"], 2025)
+        self.assertIn("1279/QD-BCT", tariff["rate_vintage_source"])
+
+    def test_two_component_pilot_raises_for_year_before_earliest_vintage(self):
+        # 2023 (not 2024) is deliberately used here: 2024 is a leap year, which
+        # would trip the unrelated 8760-hour leap-year guard before the pilot
+        # vintage lookup ever runs, and this test wants to isolate the
+        # vintage-fallback error for the two-component pilot table.
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(
+                year=2023,
+                voltage_level="6-22kV",
+                two_component_pilot_enabled=True
+            )
+
+        self.assertIn("2023", str(context.exception))
+        self.assertIn("two-component pilot", str(context.exception))
+
+    def test_base_rate_override_has_no_vintage_metadata(self):
+        tariff = build_evn_tariff(
+            year=2025,
+            voltage_level="<6kV",
+            base_rate_per_kwh=2000
+        )
+
+        self.assertNotIn("rate_vintage_year", tariff)
+        self.assertNotIn("rate_vintage_source", tariff)
+
+    def test_two_component_pilot_usd_conversion_covers_capacity_rate(self):
+        tariff = build_evn_tariff(
+            year=2025,
+            voltage_level="6-22kV",
+            two_component_pilot_enabled=True,
+            currency="usd",
+            exchange_rate_vnd_per_usd=25000
+        )
+
+        jan_6_2025_10am = datetime(2025, 1, 6, 10).timetuple().tm_yday - 1
+        jan_6_2025_10am_index = jan_6_2025_10am * 24 + 10
+
+        self.assertEqual(tariff["monthly_demand_rates"], [240050 / 25000] * 12)
+        self.assertAlmostEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_10am_index], 2189 / 25000)
+
+    def test_two_component_pilot_takes_precedence_over_base_rate_override(self):
+        pilot_with_base_rate_override = build_evn_tariff(
+            year=2025,
+            voltage_level="6-22kV",
+            two_component_pilot_enabled=True,
+            base_rate_per_kwh=2000
+        )
+        pilot_only = build_evn_tariff(
+            year=2025,
+            voltage_level="6-22kV",
+            two_component_pilot_enabled=True
+        )
+
+        # Documents current precedence: the pilot branch in _rates_for() returns
+        # before the base_rate_per_kwh branch is reached, so base_rate_per_kwh
+        # is silently ignored whenever the pilot is enabled.
+        self.assertEqual(pilot_with_base_rate_override, pilot_only)
