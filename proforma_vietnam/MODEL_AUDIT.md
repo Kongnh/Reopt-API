@@ -30,7 +30,8 @@ shaded; everything derivable is a **live Excel formula**.
   assumptions.json key not shown in a curated group — nothing in the case
   file or assumptions file is omitted from the workbook.
 - **Pro Forma (Audit)** — the 25-year cash flow rebuilt entirely with Excel
-  formulas from those named cells: indexation factors, revenue (ESCO or DPPA
+  formulas from those named cells: indexation factors, revenue (ESCO, grid
+  DPPA/CfD, physical (private-wire) DPPA, or direct-ownership bill-savings
   decomposition), O&M, debt annuity schedule, straight-line depreciation, the
   Vietnam CIT block (incentive clock + FIFO 5-year loss-carryforward schedule,
   fully visible), CFADS, equity cash flow, DSCR, and Excel-native `IRR`/`NPV`/
@@ -77,8 +78,12 @@ and `_usd` keys with no FX applied — is resolved:
 
 Fixed FX over 25 years remains a disclosed simplification; the **FX
 Sensitivity** sheet (and `cash_flow.calculate_fx_sensitivity`) quantifies
-USD-reported equity IRR/NPV under 0–3 %/yr VND depreciation. Debt is assumed
-VND-denominated, so DSCR is FX-neutral.
+USD-reported equity IRR/NPV under 0–3 %/yr VND depreciation. Debt is
+VND-denominated by default, so DSCR is FX-neutral; USD-denominated debt is
+available as an option (`debt_currency="USD"`), in which case DSCR is NOT
+FX-neutral — USD debt service is FX-fixed while VND-sourced CFADS deflates
+under depreciation, an effect the FX Sensitivity sheet also quantifies for
+that case.
 
 ## 4. Code-vs-doc cross-check (ESCO_CONTRACT_MODEL_DESIGN.md, CD7, ND57)
 
@@ -103,20 +108,52 @@ settlement always emits `q_adj_kw`).
 ## 5. Simplifications register (disclosed; also on the Model Basis sheet)
 
 1. Fixed FX over the analysis period — quantified on FX Sensitivity.
-2. Battery replacement expensed in the replacement year (not capitalized).
-3. VAT out of scope (pass-through assumed).
-4. No working capital, DSRA, or terminal/residual value.
+2. Battery replacement is CAPITALIZED by default (Circular 45/2013,
+   `battery_replacement_treatment="capitalize"`): each replacement is
+   depreciated straight-line over the 8-year BESS class life from its
+   in-service year; only the CIT-deduction timing changes — the replacement
+   cash outflow is unchanged. Expensing in the replacement year (the pre-4d
+   treatment) is retained as a legacy option
+   (`battery_replacement_treatment="expense"`).
+3. VAT is out of scope (pass-through assumed) by default. Optionally, capex
+   input-VAT with refund timing can be modeled (`vat_rate_fraction` +
+   `vat_refund_year`, default OFF): paid at year 0 and recovered in the
+   configured year, equity-funded and returns-only (no CFADS/DSCR/CIT/IDC
+   effect). The operating-stage VAT float (output VAT on invoices vs. input
+   VAT on O&M) remains out of scope / pass-through in both modes.
+4. No working capital or DSRA is modeled. By default there is also no
+   terminal/residual value; optionally (ESCO structures only, default OFF) a
+   contract tenor with end-of-term asset transfer can be modeled
+   (`contract_years` + `contract_residual_value_usd`): operations truncate at
+   year T and the disposal gain/(loss) vs. net book value enters year-T
+   taxable income through the case's CIT regime.
 5. Single 8760-hour dispatch year escalated forward; no re-dispatch.
 6. Project IRR uses post-tax CFADS with the levered CIT (interest shield
    included) — disclosed convention for a simple single-sheet model.
 7. REopt sizing is optimizer output and is not bit-reproducible across solver
    versions (see CODEX_SESSION.md); the financial layer is deterministic given
    `results.json`.
+8. The default convention is an overnight build: all pre-COD flows collapse
+   to year 0. Optionally, a construction period with capitalized interest
+   during construction (IDC) and a principal grace period can be modeled
+   (`construction_months`, `principal_grace_years`; default OFF/0): IDC is
+   simple interest on the average drawn balance, debt-funded and capitalized
+   into the depreciable base (not expensed); grace defers principal
+   amortization within the debt term.
+9. Debt is VND-denominated by default; USD-denominated debt is available as
+   an option (`debt_currency="USD"`, ~5% default rate) — its FX exposure is
+   quantified on the FX Sensitivity sheet as a deflation overlay only (CIT is
+   not recomputed under FX drift). Debt sizing is fraction-of-capex by
+   default; DSCR-covenant-driven sizing is available as an option
+   (`target_min_dscr`), solved by fixed-point iteration against the full
+   debt/IDC/CIT/CFADS derivation on base-case CFADS only (flat FX, no
+   downside/stress scenario).
 
 ## 6. Test coverage
 
-130 unittests green (`.venv/Scripts/python.exe -m unittest discover -s
-proforma_vietnam/tests -t .`), including:
+426 unittests green (`.venv/Scripts/python.exe -m unittest discover -s
+proforma_vietnam/tests -t .`), plus 23 in the Vietnam tariff-layer suite
+(`reoptjl.test.test_vietnam_tariff`), including:
 
 - CD7 Ví dụ 1 reproduced exactly (acceptance test).
 - Reference ESCO workbook (hand-built 25-year model) within tolerance.
@@ -131,7 +168,7 @@ Through 2026-07-04 this was confirmed by opening each workbook in Excel by
 hand and reading the recalculated Cover/checks-block cells. From 2026-07-05
 it is automated: `python -m proforma_vietnam.validate_workbook <case_dir>`
 (Task 5a) drives the same full-recalculation-and-read-back via Excel COM
-non-interactively and exits 0 iff every check cell reads PASS — see §7 for
+non-interactively and exits 0 iff every check cell reads PASS — see §8 for
 the current run.
 
 ## 7. 2026-07-05 re-baseline (regulatory refresh)
