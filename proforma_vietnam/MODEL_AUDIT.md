@@ -216,3 +216,92 @@ PASS  .../case_6/vietnam_report_5b999b24-d8c1-4d91-aa2e-1ea0a973af38.xlsx  (9 ch
 
 Cover status "ALL CHECKS PASS" on every workbook, zero REVIEW cells, exit
 code 0 on every invocation.
+
+## 8. 2026-07-06 re-baseline (Circular 45 battery-replacement capitalization, Task 4d)
+
+Task 4d makes battery-replacement capitalization the engine **default**. Under
+VAS / Circular 45/2013 a replacement battery is a >30M VND fixed asset: it must
+be capitalized and depreciated over the 8-year BESS class life, not expensed in
+the replacement year. `calculate_vietnam_esco_cash_flow` gained
+`battery_replacement_treatment` (`"capitalize"` default, `"expense"` legacy).
+Only the **CIT deduction timing** changes — the replacement cash outflow (CFADS,
+equity cash flow, DSCR) is unchanged in both modes. Each replacement year spawns
+its own straight-line schedule in service that year (years R..R+7), truncated at
+the analysis horizon (the undepreciated remainder is not written off).
+
+All six Factory A cases carry `battery_replacement_year = 11`. Five have a
+non-zero year-11 replacement cost and therefore capitalize it; **case_4 has no
+battery replacement** (empty REopt replacement schedule) and is unaffected.
+
+The six committed `vietnam_report_*.xlsx` deliverables were regenerated offline
+with `python -m proforma_vietnam.rebuild_report --case-dir <case dir>` (no REopt
+re-run; pure post-processing of the unmodified `results.json` +
+`assumptions.json`).
+
+### case_4 (ESCO, no replacement) — byte-identical
+
+case_4's replacement schedule is empty, so `capitalize` and `expense` produce
+identical results and no `battery_replacement` derivation block is emitted. The
+committed workbook is left **unchanged** (financially byte-identical): a fresh
+`rebuild_report` differs from the committed file only in the cover "prepared"
+date stamp and the `docProps/core.xml` save timestamps — no cell value, formula,
+or engine tie-out changes. Every headline metric is equal
+(equity IRR 17.855%, equity NPV $693,480, lifetime CIT $982,179).
+
+### Cases 1–3 (ESCO) and 5–6 (DPPA) — BEFORE/AFTER
+
+BEFORE = `battery_replacement_treatment="expense"` forced (reproduces the
+pre-4d committed workbook — verified byte-identical for case_4 and equity-IRR
+exact for case_1 against the committed HEAD workbook). AFTER = engine default
+(`"capitalize"`). Both runs use each case's saved `results.json` +
+`assumptions.json` unmodified; only the replacement CIT-deduction timing differs.
+NPV / CIT shown in USD at each case's saved contract FX (25,000 VND/USD).
+
+| Metric | case_1 B→A | case_2 B→A | case_3 B→A | case_5 B→A | case_6 B→A |
+|---|---|---|---|---|---|
+| Year-11 replacement (USD) | 998,738 | 1,226,338 | 1,347,451 | 1,226,338 | 165,760 |
+| Equity IRR | 15.726%→15.703% | 13.794%→13.767% | 10.163%→10.154% | 17.020%→17.031% | 27.477%→27.476% |
+| Δ Equity IRR (pp) | −0.023 | −0.026 | −0.009 | +0.011 | −0.002 |
+| Equity NPV (USD) | 1,124,715→1,124,385 | 861,175→858,132 | 39,914→37,802 | 1,576,314→1,585,245 | 2,651,647→2,653,244 |
+| Δ Equity NPV (USD) | −330 | −3,043 | −2,111 | +8,931 | +1,597 |
+| Lifetime CIT (USD) | 1,979,316→1,941,863 | 1,978,570→1,947,912 | 1,714,955→1,681,268 | 2,226,181→2,157,200 | 2,196,077→2,184,681 |
+| Δ Lifetime CIT (USD) | −37,453 | −30,658 | −33,686 | −68,982 | −11,396 |
+
+These deltas are the **Circular 45 replacement capitalization, not a logic
+error**. The year-11 replacement's full 8-year life (years 11–18) fits inside
+the 25-year horizon, so in a flat-rate world the total deduction — and total CIT
+— would be unchanged (pure timing shift). It is not flat here because the
+deduction interacts with the CIT regime and loss relief:
+
+- **ESCO (cases 1–3, `standard_with_holiday`)**: expensing books a large
+  single deduction in year 11 that partly falls into the reduced-rate window and
+  partly exceeds year-11 taxable income (loss carried forward with limited
+  relief), so some deduction value is captured at a lower effective rate.
+  Spreading it recovers more total value (lifetime CIT falls) but pushes the
+  shield later, so equity IRR/NPV tick **down** slightly (delayed cash).
+- **DPPA (cases 5–6, `re_producer`: 0% y1–4, 5% y5–13, 10% y14–15, 20% y16+)**:
+  expensing concentrates the deduction in the 5% year-11 window; capitalizing
+  spreads it into the 10% (y14–15) and 20% (y16–18) windows where it is worth
+  more, so both lifetime CIT falls **and** equity IRR/NPV tick **up**.
+
+All movements are small (≤ 0.03 pp on IRR) and directionally consistent with the
+regime each case resolves to.
+
+### Validation run (2026-07-06)
+
+`python -m proforma_vietnam.validate_workbook <case dirs...>`, all six committed
+workbooks (five rebuilt, case_4 unchanged), real Excel COM recalc:
+
+```
+PASS  .../case_1/vietnam_report_3dd5bf1f-fa51-4f1e-aa64-d24ae11a1820.xlsx  (9 checks)
+PASS  .../case_2/vietnam_report_554ee85a-6f3c-4077-8dcb-0145406d4e6e.xlsx  (9 checks)
+PASS  .../case_3/vietnam_report_b33f4a1f-9de5-4228-ba55-4db9578de73a.xlsx  (9 checks)
+PASS  .../case_4/vietnam_report_36f36f61-c28e-4c8a-bc9d-66f21300c28e.xlsx  (9 checks)
+PASS  .../case_5/vietnam_report_c73574b2-1170-4611-a6c8-8a012bd1f50d.xlsx  (9 checks)
+PASS  .../case_6/vietnam_report_5b999b24-d8c1-4d91-aa2e-1ea0a973af38.xlsx  (9 checks)
+```
+
+Cover status "ALL CHECKS PASS" on every workbook, zero REVIEW cells, exit
+code 0. The capitalized cases (1–3, 5–6) now carry the per-replacement
+depreciation row and the replacement-aware total-depreciation / EBT formulas;
+these tie out to the engine under recalc.
