@@ -2222,3 +2222,267 @@ class ContractTenorTests(TestCase):
         # DIRECT_OWNERSHIP (and any non-ESCO structure) rejects a tenor.
         with self.assertRaises(ValueError):
             self._run(direct_ownership={}, contract_years=12)
+
+
+class VatOnCapexTests(TestCase):
+    """Task 4f: input VAT on capex, paid at year 0 and refunded in a later year.
+
+    A pure equity-side timing item (default OFF, ``vat_rate_fraction=None``): the
+    project company pays input VAT (rate x total capex) at purchase and recovers
+    it via the investment-project refund mechanism. It is EQUITY-funded and the
+    refund is non-operating, so it must not touch debt sizing, IDC, CFADS, DSCR,
+    CIT or depreciation — only the equity cash flow, equity IRR and NPV.
+
+    The fixture is a no-debt, flat (no escalation / degradation) ESCO case with
+    ``pv_capex=1,000,000`` (BESS + other = 0), so the capex base the equity/debt
+    split uses is exactly 1,000,000 and ``vat_amount = rate x 1,000,000``.
+    """
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100000.0],
+            evn_energy_rates_vnd_per_kwh=[10.0],
+            bau_evn_bill_vnd=2_000_000.0,
+            optimized_evn_bill_vnd=1_400_000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=1_000_000.0,
+            bess_capex_vnd=0.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.0,
+            owner_discount_rate_fraction=0.10,
+            project_years=10,
+            cit_regime="standard_flat",
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    # --- default OFF / byte-identical guard --------------------------------
+
+    def test_disabled_by_default_leaks_no_block_or_row_key(self):
+        result = self._run()
+        self.assertNotIn("vat", result["derivation"])
+        for row in result["annual_cash_flows"]:
+            self.assertNotIn("input_vat_paid_usd", row)
+            self.assertNotIn("input_vat_paid_vnd", row)
+            self.assertNotIn("vat_refund_usd", row)
+            self.assertNotIn("vat_refund_vnd", row)
+
+    def test_explicit_none_is_byte_identical_to_omitting(self):
+        omitted = self._run()
+        explicit = self._run(vat_rate_fraction=None, vat_refund_year=None)
+        self.assertEqual(explicit["annual_cash_flows"], omitted["annual_cash_flows"])
+        self.assertEqual(explicit["summary"], omitted["summary"])
+        self.assertEqual(explicit["derivation"], omitted["derivation"])
+
+    # --- hand-computed fixture (rate 0.10, refund year 2) ------------------
+
+    def test_hand_fixture_paid_year0_refund_year2(self):
+        discount = 0.10
+        base = self._run()
+        vat = self._run(vat_rate_fraction=0.10, vat_refund_year=2)
+
+        # The debt-independent operating math is untouched: CFADS, CIT,
+        # depreciation and DSCR are identical row-for-row to the no-VAT run.
+        for base_row, vat_row in zip(
+            base["annual_cash_flows"], vat["annual_cash_flows"]
+        ):
+            for key in ("cash_available_for_debt_service_vnd", "cit_vnd",
+                        "depreciation_vnd", "dscr"):
+                self.assertEqual(vat_row[key], base_row[key], key)
+
+        # Derivation vat block: rate, capex base, amount, refund year.
+        block = vat["derivation"]["vat"]
+        self.assertEqual(block["rate"], 0.10)
+        self.assertEqual(block["capex_base_usd"], 1_000_000.0)
+        self.assertAlmostEqual(block["vat_amount_usd"], 100_000.0)
+        self.assertEqual(block["refund_year"], 2)
+
+        rows = vat["annual_cash_flows"]
+        # Paid line is zero in every operating year (the payment is at year 0);
+        # the refund lands only in year 2 (index 1).
+        for index, row in enumerate(rows):
+            self.assertEqual(row["input_vat_paid_vnd"], 0.0)
+            self.assertEqual(
+                row["vat_refund_vnd"], 100_000.0 if index == 1 else 0.0, index
+            )
+        # Year-2 equity cash flow grows by the refund; other years unchanged.
+        self.assertAlmostEqual(
+            rows[1]["equity_cash_flow_vnd"],
+            base["annual_cash_flows"][1]["equity_cash_flow_vnd"] + 100_000.0,
+        )
+        self.assertAlmostEqual(
+            rows[0]["equity_cash_flow_vnd"],
+            base["annual_cash_flows"][0]["equity_cash_flow_vnd"],
+        )
+
+        # Equity investment (total capex - debt) is unchanged: the VAT outlay is
+        # NOT rolled into equity_investment; it rides the year-0 equity cash flow.
+        self.assertEqual(
+            vat["summary"]["equity_investment_vnd"],
+            base["summary"]["equity_investment_vnd"],
+        )
+        # NPV lower by exactly 100,000 x (1 - 1/(1+d)^2): -100,000 at year 0 plus
+        # +100,000 discounted two years.
+        expected_delta = 100_000.0 * (1 - 1 / (1 + discount) ** 2)
+        self.assertAlmostEqual(
+            vat["summary"]["npv_vnd"] - base["summary"]["npv_vnd"], -expected_delta
+        )
+        # Equity IRR strictly lower (a year-0 outlay recovered later costs money).
+        self.assertLess(
+            vat["summary"]["equity_irr_fraction"],
+            base["summary"]["equity_irr_fraction"],
+        )
+
+    def test_refund_in_year0_is_net_zero_timing(self):
+        base = self._run()
+        vat = self._run(vat_rate_fraction=0.10, vat_refund_year=0)
+        # Refund lands in the same year 0 as the payment: net-zero timing, so
+        # equity IRR / NPV are identical to the no-VAT run.
+        self.assertAlmostEqual(
+            vat["summary"]["npv_vnd"], base["summary"]["npv_vnd"]
+        )
+        self.assertAlmostEqual(
+            vat["summary"]["equity_irr_fraction"],
+            base["summary"]["equity_irr_fraction"],
+        )
+        # Both row keys are still present (0 in every operating year — both flows
+        # are at year 0, which is not an operating-year row).
+        for row in vat["annual_cash_flows"]:
+            self.assertIn("input_vat_paid_vnd", row)
+            self.assertIn("vat_refund_vnd", row)
+            self.assertEqual(row["input_vat_paid_vnd"], 0.0)
+            self.assertEqual(row["vat_refund_vnd"], 0.0)
+        self.assertEqual(vat["derivation"]["vat"]["refund_year"], 0)
+
+    def test_refund_year_defaults_to_one_when_enabled(self):
+        vat = self._run(vat_rate_fraction=0.10)
+        self.assertEqual(vat["derivation"]["vat"]["refund_year"], 1)
+        # Refund lands in operating year 1 (index 0).
+        self.assertAlmostEqual(
+            vat["annual_cash_flows"][0]["vat_refund_vnd"], 100_000.0
+        )
+
+    def test_usd_aliases_emitted_for_both_rows(self):
+        vat = self._run(vat_rate_fraction=0.10, vat_refund_year=2)
+        row = vat["annual_cash_flows"][1]
+        self.assertEqual(row["vat_refund_usd"], row["vat_refund_vnd"])
+        self.assertEqual(row["input_vat_paid_usd"], row["input_vat_paid_vnd"])
+
+    # --- interactions with earlier tasks -----------------------------------
+
+    def test_vat_does_not_leak_into_dscr_debt_sizing(self):
+        # Task 4c DSCR sizing must size the loan off the same CFADS with or
+        # without VAT (the refund is out of CFADS/DSCR; the outlay is equity).
+        common = dict(debt_fraction=0.7, debt_term_years=10, target_min_dscr=1.5)
+        base = self._run(**common)
+        vat = self._run(vat_rate_fraction=0.10, vat_refund_year=2, **common)
+        self.assertEqual(
+            vat["summary"]["debt_principal_vnd"],
+            base["summary"]["debt_principal_vnd"],
+        )
+
+    def test_vat_does_not_change_construction_idc(self):
+        # Task 4a IDC rides the debt principal only; the equity-funded VAT outlay
+        # must not change it.
+        common = dict(debt_fraction=0.5, construction_months=12)
+        base = self._run(**common)
+        vat = self._run(vat_rate_fraction=0.10, vat_refund_year=2, **common)
+        self.assertEqual(
+            vat["derivation"]["construction"]["idc_usd"],
+            base["derivation"]["construction"]["idc_usd"],
+        )
+
+    def test_vat_does_not_change_contract_tenor_nbv_or_disposal(self):
+        # Task 4e NBV / disposal gain ride the capex bases and depreciation, not
+        # the equity-side VAT flows.
+        common = dict(contract_years=10, contract_residual_value_usd=400_000.0)
+        base = self._run(**common)
+        vat = self._run(vat_rate_fraction=0.10, vat_refund_year=2, **common)
+        base_block = base["derivation"]["contract_term"]
+        vat_block = vat["derivation"]["contract_term"]
+        self.assertEqual(
+            vat_block["net_book_value_at_transfer_usd"],
+            base_block["net_book_value_at_transfer_usd"],
+        )
+        self.assertEqual(
+            vat_block["disposal_gain_usd"], base_block["disposal_gain_usd"]
+        )
+
+    def test_all_four_structures_accept_vat(self):
+        for overrides in (
+            {},                                   # ESCO
+            {"direct_ownership": {}},             # direct ownership
+            {"physical_dppa": {                   # physical DPPA
+                "matched_kwh_year1": 500_000.0,
+                "ppa_price_usd_per_kwh": 0.08,
+            }},
+        ):
+            result = self._run(
+                vat_rate_fraction=0.10, vat_refund_year=2, **overrides
+            )
+            self.assertIn("vat", result["derivation"])
+            self.assertAlmostEqual(
+                result["derivation"]["vat"]["vat_amount_usd"], 100_000.0
+            )
+        # Grid DPPA via a settlement block.
+        dppa = self._run(
+            vat_rate_fraction=0.10, vat_refund_year=2,
+            dppa_settlement={
+                "type": "grid_dppa_cfd",
+                "year_one": {
+                    "c_dn_vnd": 0.0, "c_dppa_vnd": 0.0, "c_cl_vnd": 0.0,
+                    "c_bl_vnd": 0.0, "cfd_strike_revenue_vnd": 0.0,
+                    "cfd_fmp_offset_vnd": 0.0, "generator_fmp_revenue_vnd": 900_000.0,
+                },
+                "escalation": {},
+                "hourly_breakout": [],
+                "monthly_breakout": [],
+            },
+        )
+        self.assertIn("vat", dppa["derivation"])
+
+    # --- validation --------------------------------------------------------
+
+    def test_rate_zero_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=0.0)
+
+    def test_rate_one_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=1.0)
+
+    def test_negative_rate_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=-0.1)
+
+    def test_boolean_rate_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=True)
+
+    def test_string_rate_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction="0.1")
+
+    def test_negative_refund_year_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=0.10, vat_refund_year=-1)
+
+    def test_refund_year_beyond_horizon_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=0.10, vat_refund_year=11)  # project_years is 10
+
+    def test_non_integer_refund_year_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=0.10, vat_refund_year=2.0)
+
+    def test_boolean_refund_year_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_rate_fraction=0.10, vat_refund_year=True)
+
+    def test_refund_year_without_rate_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self._run(vat_refund_year=2)

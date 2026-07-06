@@ -1037,6 +1037,51 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(overrides["contract_years"], 15)
         self.assertEqual(overrides["contract_residual_value_usd"], 250000.0)
 
+    def test_vat_inputs_round_trip_like_the_other_scalars(self):
+        # Task 4f vat_rate_fraction / vat_refund_year travel the same allowlisted
+        # path as the other financing scalars: into assumptions (never the REopt
+        # payload) and back out through the rebuild override mapping
+        # (cash_flow_overrides_from_assumptions), shared by rebuild_report.py.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "financial": {
+                    "vat_rate_fraction": 0.1,
+                    "vat_refund_year": 2,
+                },
+            }
+        )
+
+        self.assertEqual(case["assumptions"]["vat_rate_fraction"], 0.1)
+        self.assertEqual(case["assumptions"]["vat_refund_year"], 2)
+        self.assertNotIn("vat_rate_fraction", case["payload"]["Financial"])
+        self.assertNotIn("vat_refund_year", case["payload"]["Financial"])
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["vat_rate_fraction"], 0.1)
+        self.assertEqual(overrides["vat_refund_year"], 2)
+
+    def test_vat_inputs_absent_by_default_leaves_no_assumption_keys(self):
+        # Default OFF: no VAT keys in the case financial input means neither key
+        # appears in assumptions or the override mapping (byte-identical).
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertNotIn("vat_rate_fraction", case["assumptions"])
+        self.assertNotIn("vat_refund_year", case["assumptions"])
+
     def test_contract_tenor_absent_by_default_leaves_no_assumption_keys(self):
         # Default OFF: no contract keys in the case financial input means neither
         # key appears in assumptions or the override mapping (byte-identical).

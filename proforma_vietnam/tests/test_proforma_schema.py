@@ -30,6 +30,9 @@ def _esco_result():
         surplus_export_price_usd_per_kwh=1_000,
         contract_years=2,
         contract_residual_value_usd=1_000_000,
+        # Task 4f input VAT on capex so the VAT rows the schema presents exist in
+        # the compute output the single-source-of-truth test checks against.
+        vat_rate_fraction=0.1,
     )
 
 
@@ -63,6 +66,7 @@ def _dppa_result():
             "hourly_breakout": [],
             "monthly_breakout": [],
         },
+        vat_rate_fraction=0.1,
     )
 
 
@@ -90,6 +94,7 @@ def _physical_result():
         },
         surplus_export_kwh_year1=5_000,
         surplus_export_price_usd_per_kwh=1_000,
+        vat_rate_fraction=0.1,
     )
 
 
@@ -113,6 +118,7 @@ def _direct_result():
         direct_ownership={},
         surplus_export_kwh_year1=5_000,
         surplus_export_price_usd_per_kwh=1_000,
+        vat_rate_fraction=0.1,
     )
 
 
@@ -203,6 +209,14 @@ class StructureFilteringTests(TestCase):
         dppa_keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, DPPA)}
         self.assertNotIn("surplus_export_kwh", dppa_keys)
         self.assertNotIn("surplus_export_revenue_usd", dppa_keys)
+
+    def test_vat_lines_appear_under_every_structure(self):
+        # Task 4f input VAT on capex applies to all four structures (whichever
+        # party owns the capex pays and recovers the input VAT).
+        for structure in (ESCO, DPPA, PHYSICAL_DPPA, DIRECT_OWNERSHIP):
+            keys = {key for _label, key in schema.columns(schema.CASH_FLOW_VIEW, structure)}
+            self.assertIn("input_vat_paid_usd", keys, structure)
+            self.assertIn("vat_refund_usd", keys, structure)
 
     def test_physical_ppa_lines_appear_under_physical_only(self):
         physical_keys = {

@@ -162,6 +162,8 @@ def cash_flow_overrides_from_assumptions(assumptions):
         "battery_replacement_treatment": "battery_replacement_treatment",
         "contract_years": "contract_years",
         "contract_residual_value_usd": "contract_residual_value_usd",
+        "vat_rate_fraction": "vat_rate_fraction",
+        "vat_refund_year": "vat_refund_year",
         "annual_om_usd": "annual_om_vnd",
         "pv_capex_usd": "pv_capex_vnd",
         "bess_capex_usd": "bess_capex_vnd",

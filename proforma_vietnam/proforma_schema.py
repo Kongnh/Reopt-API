@@ -77,6 +77,13 @@ _ROWS = [
     # precedent); ESCO-only (DPPA/physical/direct tenors are out of scope).
     RowSpec("asset_transfer_proceeds", "Asset Transfer Proceeds",
             applies_to=(ESCO,)),
+    # Task 4f input VAT on capex: a year-0 equity outflow (rate x total capex)
+    # recovered as a refund inflow in a later year. Present only when the VAT
+    # block is active (the compute emits the keys conditionally, per the Task 4e
+    # transfer-proceeds precedent); applies to all four structures (whichever
+    # party owns the capex pays and recovers the input VAT).
+    RowSpec("input_vat_paid", "Input VAT Paid on Capex"),
+    RowSpec("vat_refund", "VAT Refund Received"),
     RowSpec("equity_cash_flow", "Equity Cash Flow"),
     RowSpec("offtaker_savings", "Offtaker Savings"),
     RowSpec("offtaker_savings_fraction", "Offtaker Savings Fraction", currency=False),
@@ -133,6 +140,9 @@ CASH_FLOW_VIEW = [
     "debt_service",
     # ESCO contract-tenor buyout (hidden unless a tenor is active; ESCO-only):
     "asset_transfer_proceeds",
+    # Task 4f input VAT on capex (hidden unless the VAT block is active):
+    "input_vat_paid",
+    "vat_refund",
     "equity_cash_flow",
     "offtaker_savings",
     "offtaker_savings_fraction",

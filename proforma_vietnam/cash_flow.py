@@ -111,6 +111,8 @@ def calculate_vietnam_esco_cash_flow(
     surplus_cap_fraction=None,
     contract_years=None,
     contract_residual_value_usd=0.0,
+    vat_rate_fraction=None,
+    vat_refund_year=None,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
@@ -184,6 +186,18 @@ def calculate_vietnam_esco_cash_flow(
         contract_years, contract_residual_value_usd, structure,
         project_years, debt_term_years,
     )
+    _validate_vat(vat_rate_fraction, vat_refund_year, project_years)
+    # Input VAT on capex (Task 4f), default OFF. When enabled, the project
+    # company pays vat_amount = rate x total capex (the same base the equity/debt
+    # split uses) at year 0 and recovers it via the refund mechanism in year
+    # vat_refund_year (default 1). It is a pure equity-side timing item — computed
+    # here, OUTSIDE _derive_for_principal, and applied to the equity cash flow
+    # only, so debt sizing / IDC / CFADS / DSCR / CIT / depreciation are untouched.
+    vat_enabled = vat_rate_fraction is not None
+    if vat_enabled:
+        if vat_refund_year is None:
+            vat_refund_year = 1
+        vat_amount_vnd = vat_rate_fraction * total_capex_vnd
     if contract_years is not None:
         # ESCO contract tenor: operations cease at the end of contract year T
         # (= index contract_years - 1). Truncate the debt-independent operating
@@ -612,6 +626,16 @@ def calculate_vietnam_esco_cash_flow(
         if contract_term is not None and year_index == contract_term["contract_years"] - 1:
             asset_transfer_proceeds_vnd = contract_residual_value_usd
             equity_cash_flow_vnd += asset_transfer_proceeds_vnd
+        # Input VAT on capex (Task 4f): the payment is at year 0 (capex/COD), not
+        # an operating year, so the paid line is zero here and the year-0 outflow
+        # is applied to the equity investment after the loop. The refund is an
+        # equity-side inflow (out of CFADS/DSCR) landing in operating year
+        # vat_refund_year; a year-0 refund is likewise applied after the loop.
+        input_vat_paid_vnd = 0.0
+        vat_refund_vnd = 0.0
+        if vat_enabled and year_index + 1 == vat_refund_year:
+            vat_refund_vnd = vat_amount_vnd
+            equity_cash_flow_vnd += vat_refund_vnd
         # Energy lost to PV degradation is repurchased from EVN at retail,
         # so the offtaker's residual bill grows as the system degrades.
         optimized_evn_bill_year_vnd = (
@@ -672,10 +696,26 @@ def calculate_vietnam_esco_cash_flow(
             # non-tenor cases stay byte-for-byte unchanged; _finalize_currencies
             # emits the _usd pair below like every other money row.
             row["asset_transfer_proceeds_vnd"] = asset_transfer_proceeds_vnd
+        if vat_enabled:
+            # Present only when the VAT block is active (Task 4f). The paid line
+            # is 0 in every operating year (the year-0 payment lands on the
+            # equity investment); the refund is nonzero only in the refund year.
+            row["input_vat_paid_vnd"] = input_vat_paid_vnd
+            row["vat_refund_vnd"] = vat_refund_vnd
         _finalize_currencies(row, exchange_rate_vnd_per_usd)
         annual_cash_flows.append(row)
         project_cash_flows.append(cash_available_for_debt_service_vnd)
         equity_cash_flows.append(equity_cash_flow_vnd)
+
+    if vat_enabled:
+        # Year-0 input VAT on capex is an equity-side, undiscounted outflow. It is
+        # equity-funded (never in the debt principal / IDC / DSCR sizing) and the
+        # refund is out of CFADS, so only the equity cash flow, equity IRR and NPV
+        # move; the project (unlevered) cash flow is unchanged. A year-0 refund
+        # lands here too (net-zero timing).
+        equity_cash_flows[0] -= vat_amount_vnd
+        if vat_refund_year == 0:
+            equity_cash_flows[0] += vat_amount_vnd
 
     # Sums read the _usd keys: after _finalize_currencies those always hold the
     # model-currency (computed) value, whether or not an FX rate was supplied.
@@ -822,6 +862,17 @@ def calculate_vietnam_esco_cash_flow(
         # set; disabled (default) runs carry no block and stay byte-for-byte
         # unchanged.
         derivation["contract_term"] = contract_term
+    if vat_enabled:
+        # Self-describing input-VAT-on-capex record (Task 4f) so the audit sheet
+        # can rebuild the year-0 outflow and the refund-year inflow from named
+        # cells. Present only when vat_rate_fraction is set; disabled (default)
+        # runs carry no block and stay byte-for-byte unchanged.
+        derivation["vat"] = {
+            "rate": vat_rate_fraction,
+            "capex_base_usd": total_capex_vnd,
+            "vat_amount_usd": vat_amount_vnd,
+            "refund_year": vat_refund_year,
+        }
     if surplus_enabled:
         # Self-describing surplus config so the audit sheet can rebuild the
         # revenue row from named cells (year-1 sold kWh, USD price, escalation,
@@ -904,10 +955,19 @@ def calculate_fx_sensitivity(
     usd_debt = derivation.get("debt_currency") == "USD"
     annual = cash_flow_result["annual_cash_flows"]
     equity_investment_usd = summary["equity_investment_usd"]
+    # Year-0 equity outflow: the equity investment plus any Task 4f input VAT on
+    # capex paid at year 0 (a year-0 refund nets it back), matching the engine's
+    # equity cash flow so the FX overlay ties out to the audit sheet.
+    year0_equity_usd = -equity_investment_usd
+    vat = derivation.get("vat")
+    if vat:
+        year0_equity_usd -= vat["vat_amount_usd"]
+        if vat["refund_year"] == 0:
+            year0_equity_usd += vat["vat_amount_usd"]
 
     rows = []
     for rate in vnd_depreciation_rates:
-        adjusted = [-equity_investment_usd]
+        adjusted = [year0_equity_usd]
         dscrs = []
         for year_index, row in enumerate(annual, start=1):
             deflator = (1 + rate) ** year_index
@@ -1107,6 +1167,44 @@ def _validate_contract_tenor(contract_years, contract_residual_value_usd,
             f"contract_years must be >= debt_term_years ({debt_term_years}) — "
             "balloon refinancing at transfer is out of scope; got "
             f"contract_years={contract_years}."
+        )
+
+
+def _validate_vat(vat_rate_fraction, vat_refund_year, project_years):
+    # Input VAT on capex (Task 4f). vat_rate_fraction is None by default (the VAT
+    # block is disabled — no versioned/statutory default rate is hardcoded, the
+    # user supplies the rate). vat_refund_year is only meaningful when the rate is
+    # set (its default of 1 is applied by the caller).
+    if vat_rate_fraction is None:
+        if vat_refund_year is not None:
+            raise ValueError(
+                "vat_refund_year is only meaningful with vat_rate_fraction set "
+                "(the VAT block is disabled); got vat_refund_year="
+                f"{vat_refund_year} with vat_rate_fraction=None."
+            )
+        return
+    if isinstance(vat_rate_fraction, bool) or not isinstance(
+        vat_rate_fraction, (int, float)
+    ):
+        raise ValueError(
+            "vat_rate_fraction must be a real number in (0, 1), got "
+            f"{vat_rate_fraction!r}."
+        )
+    if not 0 < vat_rate_fraction < 1:
+        raise ValueError(
+            "vat_rate_fraction must be within (0, 1) exclusive, got "
+            f"{vat_rate_fraction}."
+        )
+    if vat_refund_year is None:
+        return
+    if isinstance(vat_refund_year, bool) or not isinstance(vat_refund_year, int):
+        raise ValueError(
+            f"vat_refund_year must be an integer, got {vat_refund_year!r}."
+        )
+    if not 0 <= vat_refund_year <= project_years:
+        raise ValueError(
+            f"vat_refund_year must be within 0-{project_years} (0 = refunded "
+            f"within the construction/COD year), got {vat_refund_year}."
         )
 
 

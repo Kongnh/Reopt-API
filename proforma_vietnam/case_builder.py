@@ -74,6 +74,8 @@ FINANCIAL_ASSUMPTION_KEYS = [
     "battery_replacement_treatment",
     "contract_years",
     "contract_residual_value_usd",
+    "vat_rate_fraction",
+    "vat_refund_year",
     "annual_om_usd",
     "annual_om_vnd",
     "om_escalation_rate",
