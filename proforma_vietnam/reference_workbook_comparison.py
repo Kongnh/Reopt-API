@@ -165,6 +165,9 @@ def _cash_flow_inputs(inputs):
     # (their own math), so pin the engine to the legacy treatment rather than
     # loosening the 1% tolerance — the model's default now capitalizes it.
     converted.setdefault("battery_replacement_treatment", "expense")
+    # The reference workbooks model flat O&M, so pin the engine's escalation to
+    # zero — the model's default now escalates O&M 3%/yr (vietnam_defaults.json).
+    converted.setdefault("om_escalation_rate", 0.0)
     return converted
 
 

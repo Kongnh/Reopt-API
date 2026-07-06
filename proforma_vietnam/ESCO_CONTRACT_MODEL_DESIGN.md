@@ -476,7 +476,8 @@ period (all opt-out by overriding the relevant input):
   Matched energy lost to degradation is repurchased from EVN at retail
   (added to the residual bill / C_BL). The CfD settles on the contracted
   volume and does not degrade.
-- **O&M escalation**: `om_escalation_rate` compounds annual O&M (default 0).
+- **O&M escalation**: `om_escalation_rate` compounds annual O&M (default 3%/yr
+  from `vietnam_defaults.json`).
 - **Battery replacement**: a replacement expense is booked in the configured
   `battery_replacement_year` assumption (Factory A cases use year 11) at
   `size_kw × replace_cost_per_kw + size_kwh × replace_cost_per_kwh`,

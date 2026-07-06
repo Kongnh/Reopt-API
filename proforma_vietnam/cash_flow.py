@@ -31,6 +31,7 @@ from proforma_vietnam.tax_model import (
 DEFAULT_PROJECT_YEARS = FINANCIAL_DEFAULTS["project_years"]
 DEFAULT_EVN_ENERGY_ESCALATION_RATE = FINANCIAL_DEFAULTS["evn_energy_escalation_rate"]
 DEFAULT_EVN_CAPACITY_ESCALATION_RATE = FINANCIAL_DEFAULTS["evn_capacity_escalation_rate"]
+DEFAULT_OM_ESCALATION_RATE = FINANCIAL_DEFAULTS["om_escalation_rate"]
 DEFAULT_ESCO_DEMAND_SAVINGS_SHARE = FINANCIAL_DEFAULTS["esco_demand_savings_share"]
 DEFAULT_ESCO_GRID_ARBITRAGE_SHARE = FINANCIAL_DEFAULTS["esco_grid_arbitrage_share"]
 DEFAULT_DEBT_FRACTION = FINANCIAL_DEFAULTS["debt_fraction"]
@@ -85,7 +86,7 @@ def calculate_vietnam_esco_cash_flow(
     evn_energy_escalation_rate=DEFAULT_EVN_ENERGY_ESCALATION_RATE,
     evn_capacity_escalation_rate=DEFAULT_EVN_CAPACITY_ESCALATION_RATE,
     pv_degradation_rate=0.0,
-    om_escalation_rate=0.0,
+    om_escalation_rate=DEFAULT_OM_ESCALATION_RATE,
     esco_demand_savings_share=DEFAULT_ESCO_DEMAND_SAVINGS_SHARE,
     grid_charging_enabled=False,
     net_grid_arbitrage_value_vnd=0,

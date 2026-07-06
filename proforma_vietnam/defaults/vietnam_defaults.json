@@ -6,6 +6,7 @@
     "exchange_rate_vnd_per_usd": 26300,
     "evn_energy_escalation_rate": 0.04,
     "evn_capacity_escalation_rate": 0.04,
+    "om_escalation_rate": 0.03,
     "esco_demand_savings_share": 0.80,
     "esco_grid_arbitrage_share": 1.00,
     "debt_fraction": 0.70,

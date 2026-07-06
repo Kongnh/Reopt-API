@@ -502,6 +502,7 @@ class CitRegimeTests(TestCase):
             annual_om_vnd=100000,
             esco_energy_discount_fraction=0.9,
             evn_energy_escalation_rate=0.0,
+            om_escalation_rate=0.0,
             debt_fraction=0,
             project_years=25,
         )

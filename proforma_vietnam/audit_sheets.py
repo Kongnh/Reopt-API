@@ -252,7 +252,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
           source="REopt Financial.year_one_om_costs_before_tax",
           name="OM_YEAR1", fmt=FMT_AMOUNT)
     entry("O&M escalation", get("om_escalation_rate") or 0.0, unit="per year",
-          source="case.json financial.om_escalation_rate",
+          source="vietnam_defaults.json / case.json financial.om_escalation_rate",
           name="ESC_OM", fmt=FMT_PERCENT)
     if assumptions.get("battery_replacement_year"):
         entry("Battery replacement year", assumptions["battery_replacement_year"],
