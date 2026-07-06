@@ -1403,6 +1403,198 @@ class UsdDebtTests(TestCase):
         self.assertNotIn("debt_currency", base["derivation"])
 
 
+class DscrDebtSizingTests(TestCase):
+    """Optional DSCR-driven debt sizing (default OFF). When target_min_dscr is
+    set the loan is sized as min(fraction-based, DSCR-supported) via a fixed-
+    point iteration; equity absorbs the gap. When it binds the converged case
+    hits min_dscr == target; when it does not, outputs match the same case run
+    without the input.
+    """
+
+    def _run(self, **overrides):
+        inputs = dict(
+            project_served_pv_kwh=[100000.0],
+            evn_energy_rates_vnd_per_kwh=[2.0],
+            bau_evn_bill_vnd=400000.0,
+            optimized_evn_bill_vnd=200000.0,
+            bau_demand_charge_vnd=0.0,
+            optimized_demand_charge_vnd=0.0,
+            pv_capex_vnd=700000.0,
+            bess_capex_vnd=300000.0,
+            annual_om_vnd=0.0,
+            esco_energy_discount_fraction=0.9,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+            debt_fraction=0.70,
+            debt_interest_rate_fraction=0.085,
+            debt_term_years=10,
+            project_years=25,
+        )
+        inputs.update(overrides)
+        return calculate_vietnam_esco_cash_flow(**inputs)
+
+    @staticmethod
+    def _min_dscr(result):
+        dscrs = [
+            row["dscr"] for row in result["annual_cash_flows"]
+            if row["debt_service_vnd"] and row["dscr"] is not None
+        ]
+        return min(dscrs) if dscrs else None
+
+    def test_binding_case_converges_to_target_and_sizes_debt_down(self):
+        # Fraction-based debt violates the covenant, so DSCR limits the loan.
+        target = 2.0
+        result = self._run(target_min_dscr=target)
+        fraction_debt = 1_000_000.0 * 0.70
+
+        sizing = result["derivation"]["debt_sizing"]
+        self.assertEqual(sizing["binding_constraint"], "dscr")
+        self.assertAlmostEqual(sizing["target_min_dscr"], target)
+        self.assertAlmostEqual(sizing["fraction_based_principal_usd"], fraction_debt)
+        # Converged min DSCR equals the covenant (the fixed-point tie-out).
+        self.assertAlmostEqual(self._min_dscr(result), target, places=6)
+        self.assertAlmostEqual(sizing["achieved_min_dscr"], target, places=6)
+        # Sized debt is below the fraction-based principal.
+        sized = result["summary"]["debt_principal_vnd"]
+        self.assertLess(sized, fraction_debt)
+        self.assertAlmostEqual(sizing["sized_principal_usd"], sized)
+        # Equity absorbs the gap: equity = capex − sized debt.
+        self.assertAlmostEqual(
+            result["summary"]["equity_investment_vnd"], 1_000_000.0 - sized
+        )
+        # Debt-service rows are consistent with the sized principal (no
+        # construction, so the COD balance equals the sized principal).
+        rows = result["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["interest_vnd"], sized * 0.085)
+        self.assertAlmostEqual(
+            sum(row["principal_vnd"] for row in rows), sized
+        )
+        # Gated summary keys surface the sized principal and binding flag.
+        self.assertAlmostEqual(result["summary"]["sized_debt_principal_vnd"], sized)
+        self.assertTrue(result["summary"]["debt_sizing_binding"])
+
+    def test_non_binding_case_matches_case_without_the_input(self):
+        # A low covenant the fraction-based debt already clears: outputs must be
+        # identical (annual_cash_flows + summary) to omitting the input.
+        target = 1.05
+        baseline = self._run()
+        sized = self._run(target_min_dscr=target)
+
+        self.assertEqual(sized["derivation"]["debt_sizing"]["binding_constraint"],
+                         "fraction")
+        self.assertGreaterEqual(self._min_dscr(sized), target)
+        self.assertEqual(sized["annual_cash_flows"], baseline["annual_cash_flows"])
+        self.assertEqual(sized["summary"], baseline["summary"])
+        # Non-binding leaves the summary byte-identical: no gated summary keys.
+        self.assertNotIn("sized_debt_principal_vnd", sized["summary"])
+        self.assertNotIn("debt_sizing_binding", sized["summary"])
+        # The self-describing derivation block is still present (input was set).
+        self.assertIn("debt_sizing", sized["derivation"])
+
+    def test_raising_the_target_weakly_lowers_the_sized_principal(self):
+        principals = [
+            self._run(target_min_dscr=target)["summary"]["debt_principal_vnd"]
+            for target in (1.0, 1.5, 2.0, 2.5, 3.0)
+        ]
+        for lower, higher in zip(principals, principals[1:]):
+            self.assertLessEqual(higher, lower + 1e-6)
+
+    def test_sizing_with_construction_puts_idc_on_the_sized_principal(self):
+        target = 2.0
+        result = self._run(target_min_dscr=target, construction_months=12)
+
+        sizing = result["derivation"]["debt_sizing"]
+        self.assertEqual(sizing["binding_constraint"], "dscr")
+        sized = sizing["sized_principal_usd"]
+        # IDC is computed on the SIZED principal (Task 4a formula).
+        construction = result["derivation"]["construction"]
+        self.assertAlmostEqual(construction["idc_usd"], sized * 0.085 * 0.5)
+        self.assertAlmostEqual(
+            construction["cod_debt_balance_usd"], sized + sized * 0.085 * 0.5
+        )
+        # Covenant is still hit at convergence.
+        self.assertAlmostEqual(self._min_dscr(result), target, places=6)
+
+    def test_sizing_with_grace_respects_the_covenant_in_interest_only_years(self):
+        target = 2.0
+        result = self._run(target_min_dscr=target, principal_grace_years=3)
+
+        rows = result["annual_cash_flows"]
+        # Grace years are interest-only but still carry debt service, so the
+        # covenant must hold there too.
+        for row in rows[:3]:
+            self.assertAlmostEqual(row["principal_vnd"], 0.0)
+            self.assertGreaterEqual(row["dscr"], target - 1e-6)
+        self.assertAlmostEqual(self._min_dscr(result), target, places=6)
+
+    def test_sizing_with_usd_debt_uses_resolved_usd_rate(self):
+        # USD debt resolves the 5% default; the covenant sizing runs on it.
+        target = 2.0
+        result = self._run(
+            target_min_dscr=target,
+            debt_interest_rate_fraction=None,
+            debt_currency="USD",
+        )
+        self.assertEqual(
+            result["derivation"]["debt_interest_rate_fraction"], 0.05
+        )
+        sized = result["summary"]["debt_principal_vnd"]
+        self.assertAlmostEqual(result["annual_cash_flows"][0]["interest_vnd"],
+                               sized * 0.05)
+        self.assertAlmostEqual(self._min_dscr(result), target, places=6)
+
+    def test_degenerate_non_positive_cfads_sizes_debt_to_zero_all_equity(self):
+        # Operating costs exceed revenue, so CFADS <= 0 in the debt years: the
+        # supported debt collapses to zero — all-equity, zero debt schedule, no
+        # exception.
+        result = self._run(target_min_dscr=1.5, annual_om_vnd=300000.0)
+
+        self.assertAlmostEqual(result["summary"]["debt_principal_vnd"], 0.0)
+        self.assertAlmostEqual(
+            result["summary"]["equity_investment_vnd"], 1_000_000.0
+        )
+        for row in result["annual_cash_flows"]:
+            self.assertAlmostEqual(row["debt_service_vnd"], 0.0)
+            self.assertIsNone(row["dscr"])
+        sizing = result["derivation"]["debt_sizing"]
+        self.assertAlmostEqual(sizing["sized_principal_usd"], 0.0)
+        self.assertEqual(sizing["binding_constraint"], "dscr")
+
+    def test_validation_rejects_below_one_zero_negative_bool_and_string(self):
+        for bad in (0.9, 0, -1.0, True, False, "1.5"):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                self._run(target_min_dscr=bad)
+
+    def test_none_leaves_outputs_byte_identical_and_leaks_no_keys(self):
+        base = self._run()
+        disabled = self._run(target_min_dscr=None)
+
+        self.assertEqual(base["annual_cash_flows"], disabled["annual_cash_flows"])
+        self.assertEqual(base["summary"], disabled["summary"])
+        self.assertEqual(base["derivation"], disabled["derivation"])
+        self.assertNotIn("debt_sizing", base["derivation"])
+        self.assertNotIn("sized_debt_principal_vnd", base["summary"])
+        self.assertNotIn("debt_sizing_binding", base["summary"])
+
+    def test_derivation_block_carries_the_full_self_describing_record(self):
+        result = self._run(target_min_dscr=2.0)
+        sizing = result["derivation"]["debt_sizing"]
+        for key in (
+            "target_min_dscr", "fraction_based_principal_usd",
+            "supported_principal_usd", "sized_principal_usd",
+            "binding_constraint", "iterations", "achieved_min_dscr",
+        ):
+            self.assertIn(key, sizing)
+        self.assertGreaterEqual(sizing["iterations"], 1)
+
+    def test_sizing_applies_under_direct_ownership(self):
+        result = self._run(target_min_dscr=2.0, direct_ownership={})
+        self.assertEqual(
+            result["derivation"]["debt_sizing"]["binding_constraint"], "dscr"
+        )
+        self.assertAlmostEqual(self._min_dscr(result), 2.0, places=6)
+
+
 class FxSensitivityTests(TestCase):
 
     def test_zero_depreciation_scenario_reproduces_base_metrics(self):

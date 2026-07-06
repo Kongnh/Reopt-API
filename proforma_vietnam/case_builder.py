@@ -70,6 +70,7 @@ FINANCIAL_ASSUMPTION_KEYS = [
     "debt_currency",
     "construction_months",
     "principal_grace_years",
+    "target_min_dscr",
     "annual_om_usd",
     "annual_om_vnd",
     "om_escalation_rate",

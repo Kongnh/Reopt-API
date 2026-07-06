@@ -74,6 +74,7 @@ CURATED_ASSUMPTION_KEYS = {
     "bess_capex_usd", "om_escalation_rate", "pv_degradation_rate",
     "pv_depreciation_years", "debt_fraction", "debt_interest_rate_fraction",
     "debt_term_years", "construction_months", "principal_grace_years",
+    "target_min_dscr",
     "owner_discount_rate_fraction", "analysis_years",
     "case_config", "dppa",
 }
@@ -378,9 +379,38 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     entry("Debt term", get("debt_term_years"), unit="years",
           source="vietnam_defaults.json / case.json financial.debt_term_years",
           name="DEBT_TERM_YEARS", fmt="0")
-    entry("Debt principal", None, unit="USD", source="Formula: total investment × debt fraction",
-          name="DEBT_PRINCIPAL", fmt=FMT_AMOUNT,
-          formula="=TOTAL_CAPEX*DEBT_FRACTION")
+    debt_sizing = d.get("debt_sizing")
+    if debt_sizing:
+        # DSCR-driven debt sizing: the loan is min(fraction-based, DSCR-
+        # supported). Gated on the engine derivation so fraction-sized cases
+        # carry no sizing names or rows and stay byte-identical. The DSCR-
+        # supported principal is the engine's converged fixed point (a
+        # non-closed-form iteration, so it is carried as an input value like the
+        # other engine constants); DEBT_PRINCIPAL then reproduces the min() rule
+        # live, and every downstream formula (IDC, COD balance, debt schedule,
+        # equity) rides the sized principal.
+        entry("Target minimum DSCR (covenant)", debt_sizing.get("target_min_dscr"),
+              unit="x",
+              source="case.json financial.target_min_dscr (DSCR-sized debt; "
+                     "level-payment sizing on base-case CFADS)",
+              name="TARGET_MIN_DSCR", fmt=FMT_RATIO)
+        entry("Fraction-based debt", None, unit="USD",
+              source="Formula: total investment × debt fraction (pre-DSCR cap)",
+              name="FRACTION_DEBT", fmt=FMT_AMOUNT,
+              formula="=TOTAL_CAPEX*DEBT_FRACTION")
+        entry("DSCR-supported debt", debt_sizing.get("supported_principal_usd"),
+              unit="USD",
+              source="Engine fixed point: D × min_DSCR(D) / target (converged so "
+                     "min DSCR = covenant when this binds)",
+              name="SUPPORTED_DEBT", fmt=FMT_AMOUNT)
+        entry("Debt principal (DSCR-sized)", None, unit="USD",
+              source="Formula: min(fraction-based, DSCR-supported)",
+              name="DEBT_PRINCIPAL", fmt=FMT_AMOUNT,
+              formula="=MIN(FRACTION_DEBT,SUPPORTED_DEBT)")
+    else:
+        entry("Debt principal", None, unit="USD", source="Formula: total investment × debt fraction",
+              name="DEBT_PRINCIPAL", fmt=FMT_AMOUNT,
+              formula="=TOTAL_CAPEX*DEBT_FRACTION")
     entry("Equity investment", None, unit="USD", source="Formula: total investment − debt",
           name="EQUITY_INVESTMENT", fmt=FMT_AMOUNT,
           formula="=TOTAL_CAPEX-DEBT_PRINCIPAL")
@@ -1248,6 +1278,40 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         check("Buyer savings, years 1-10 (% of BAU)", f"$C${r_sav10}",
               summary["buyer_savings_10yr_fraction"], TOL_RATE, FMT_PERCENT)
 
+    debt_sizing = d.get("debt_sizing")
+    if debt_sizing and min_dscr_engine is not None:
+        # DSCR debt-sizing fixed-point tie-out. DEBT_PRINCIPAL is the live
+        # min(FRACTION_DEBT, SUPPORTED_DEBT), so the debt schedule above is
+        # driven by the sized loan. When the covenant binds (SUPPORTED_DEBT <
+        # FRACTION_DEBT) the MIN DSCR of that schedule must equal the covenant;
+        # when it does not, DEBT_PRINCIPAL falls back to the fraction-based
+        # principal and the MIN DSCR clears the covenant. A single live formula
+        # self-determines which branch applies.
+        row = w.row
+        worksheet.cell(row=row, column=1, value="DSCR-sized debt fixed point")
+        excel_cell = worksheet.cell(row=row, column=3, value=f"=$C${r_min_dscr}")
+        excel_cell.number_format = FMT_RATIO
+        target_cell = worksheet.cell(
+            row=row, column=4, value=debt_sizing["target_min_dscr"])
+        target_cell.number_format = FMT_RATIO
+        target_cell.fill = INPUT_FILL
+        delta = worksheet.cell(row=row, column=5, value=f"=ABS(C{row}-D{row})")
+        delta.number_format = "0.000000"
+        status = worksheet.cell(
+            row=row, column=6,
+            value=(
+                "=IF(IF(SUPPORTED_DEBT<FRACTION_DEBT,"
+                f"ABS($C${r_min_dscr}-TARGET_MIN_DSCR)<={_fmt_num(TOL_RATIO)},"
+                f"AND($C${r_min_dscr}>=TARGET_MIN_DSCR-{_fmt_num(TOL_RATIO)},"
+                f"ABS(DEBT_PRINCIPAL-FRACTION_DEBT)<={_fmt_num(TOL_AMOUNT)})),"
+                "\"PASS\",\"REVIEW\")"
+            ),
+        )
+        status.fill = CHECK_FILL
+        status.font = BOLD_FONT
+        status_cells.append(f"F{row}")
+        w.row += 1
+
     # highlight REVIEW statuses in red
     status_range = f"F{header_row + 1}:F{w.row - 1}"
     worksheet.conditional_formatting.add(
@@ -1618,6 +1682,35 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "principal are not modelled."
         )
 
+    # DSCR-driven debt-sizing disclosures, gated on the engine derivation so
+    # fraction-sized (default) cases carry no sizing bullets and stay byte-
+    # identical.
+    debt_sizing = derivation.get("debt_sizing")
+    debt_sizing_register_bullets = []
+    if debt_sizing:
+        target = debt_sizing.get("target_min_dscr")
+        binds = debt_sizing.get("binding_constraint") == "dscr"
+        debt_bullets.append(
+            f"Debt sizing: the loan is min(fraction-based, DSCR-supported) at a {target}x minimum-DSCR "
+            "covenant. Because debt service scales linearly with the principal, the DSCR-supported loan "
+            "is found by a fixed-point iteration (supported(D) = D × min_DSCR(D) / target, re-running the "
+            "full debt / IDC / CIT / CFADS derivation each round) so the CIT and IDC feedbacks are solved, "
+            "not approximated. "
+            + (
+                "This covenant binds: the sized loan sits below the fraction-based principal and the "
+                "minimum DSCR over the debt term equals the covenant (see the Debt-sizing fixed-point "
+                "check). Equity absorbs the gap (equity = capex − sized debt)."
+                if binds else
+                "This covenant does not bind: the fraction-based principal already clears it, so the loan "
+                "and every downstream metric are identical to the un-sized case."
+            )
+        )
+        debt_sizing_register_bullets.append(
+            "DSCR debt sizing uses level-payment sizing (no sculpted repayment profile) on base-case "
+            "CFADS only — the contract FX is held flat (no FX-drift overlay) and no downside/stress case "
+            "is used to size the loan."
+        )
+
     if derivation.get("cit", {}).get("regime") == "re_producer":
         cit_regime_text = (
             "CIT regime: renewable-energy producer (Law 67/2025/QH15 + Decree "
@@ -1696,6 +1789,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "Fixed FX over the analysis period — quantified on the FX Sensitivity sheet.",
             *construction_register_bullets,
             *usd_debt_register_bullets,
+            *debt_sizing_register_bullets,
             "Battery replacement is expensed in the replacement year, not capitalized and re-depreciated.",
             "VAT is out of scope (pass-through assumed for both parties).",
             "No working-capital, DSRA, or terminal/residual value is modelled.",

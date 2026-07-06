@@ -157,6 +157,15 @@ def _usd_debt_result():
     return _esco_result(debt_currency="USD")
 
 
+def _dscr_sized_result():
+    # DSCR-sized debt on the ESCO base: the fraction-based loan yields a minimum
+    # DSCR of ~1.98x, so a 2.5x covenant BINDS — the loan is sized down until the
+    # minimum DSCR equals 2.5x. Exercises the gated TARGET_MIN_DSCR / FRACTION_DEBT
+    # / SUPPORTED_DEBT cells, the live DEBT_PRINCIPAL = MIN(...) rule and the
+    # fixed-point tie-out row.
+    return _esco_result(target_min_dscr=2.5)
+
+
 ESCO_ASSUMPTIONS = {
     "case_name": "Audit Test",
     "exchange_rate_vnd_per_usd": 25000,
@@ -712,6 +721,93 @@ class UsdDebtAuditTests(TestCase):
         )
 
         self.assertNotIn("revaluation", text.lower())
+
+
+class DscrSizingAuditTests(TestCase):
+
+    @staticmethod
+    def _named_cell(workbook, name):
+        destination = next(iter(workbook.defined_names[name].destinations))
+        sheet_name, coord = destination
+        return workbook[sheet_name][coord]
+
+    @staticmethod
+    def _proforma_labels(workbook):
+        sheet = workbook["Pro Forma (Audit)"]
+        return [
+            sheet.cell(row=row, column=1).value
+            for row in range(1, sheet.max_row + 1)
+        ]
+
+    def test_fraction_default_defines_no_sizing_cells_and_keeps_debt_formula(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("TARGET_MIN_DSCR", "SUPPORTED_DEBT", "FRACTION_DEBT"):
+            self.assertNotIn(name, workbook.defined_names)
+        self.assertEqual(
+            self._named_cell(workbook, "DEBT_PRINCIPAL").value,
+            "=TOTAL_CAPEX*DEBT_FRACTION",
+        )
+        self.assertNotIn(
+            "DSCR-sized debt fixed point", self._proforma_labels(workbook)
+        )
+
+    def test_dscr_sized_defines_sizing_cells_and_min_debt_formula(self):
+        result = _dscr_sized_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+
+        for name in ("TARGET_MIN_DSCR", "SUPPORTED_DEBT", "FRACTION_DEBT"):
+            self.assertIn(name, workbook.defined_names)
+        # DEBT_PRINCIPAL reproduces the min() sizing rule live.
+        self.assertEqual(
+            self._named_cell(workbook, "DEBT_PRINCIPAL").value,
+            "=MIN(FRACTION_DEBT,SUPPORTED_DEBT)",
+        )
+        # The supported-debt cell carries the engine's converged fixed point.
+        sizing = result["derivation"]["debt_sizing"]
+        self.assertAlmostEqual(
+            self._named_cell(workbook, "SUPPORTED_DEBT").value,
+            sizing["supported_principal_usd"],
+        )
+        self.assertAlmostEqual(
+            self._named_cell(workbook, "TARGET_MIN_DSCR").value,
+            sizing["target_min_dscr"],
+        )
+
+    def test_dscr_sized_adds_fixed_point_tie_out_row(self):
+        workbook = build_vietnam_esco_workbook(_dscr_sized_result(), assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = self._proforma_labels(workbook)
+        self.assertIn("DSCR-sized debt fixed point", labels)
+        row = labels.index("DSCR-sized debt fixed point") + 1
+        status_formula = sheet.cell(row=row, column=6).value
+        # The status is a live formula branching on whether the covenant binds.
+        self.assertIn("SUPPORTED_DEBT<FRACTION_DEBT", status_formula)
+        self.assertIn("TARGET_MIN_DSCR", status_formula)
+
+    def test_dscr_sized_model_basis_discloses_conventions(self):
+        workbook = build_vietnam_esco_workbook(_dscr_sized_result(), assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Model Basis"]
+        text = "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+        self.assertIn("min(fraction-based, DSCR-supported)", text)
+        self.assertIn("level-payment sizing", text)
+
+    def test_fraction_default_model_basis_omits_sizing_disclosures(self):
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Model Basis"]
+        text = "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+        self.assertNotIn("DSCR-supported", text)
+        self.assertNotIn("level-payment sizing", text)
 
 
 class CoverSheetTests(TestCase):

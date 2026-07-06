@@ -18,6 +18,7 @@ from proforma_vietnam.tests.test_audit_sheets import (
     _construction_result,
     _direct_result,
     _dppa_result,
+    _dscr_sized_result,
     _esco_result,
     _esco_surplus_result,
     _physical_result,
@@ -173,6 +174,22 @@ class ExcelRecalcValidationTests(unittest.TestCase):
             _usd_debt_result(), assumptions=ESCO_ASSUMPTIONS
         )
         result = self._validate_saved(workbook, "usd_debt.xlsx")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["review_count"], 0)
+        self.assertGreaterEqual(result["pass_count"], 1)
+        self.assertEqual(result["cover_status"], "ALL CHECKS PASS")
+
+    def test_dscr_sized_fixture_workbook_passes(self):
+        # DSCR-sized debt (binding 2.5x covenant): DEBT_PRINCIPAL is the live
+        # MIN(FRACTION_DEBT, SUPPORTED_DEBT), so the whole debt schedule / IDC /
+        # depreciation / DSCR chain rides the sized loan. Under real Excel recalc
+        # the base pro-forma tie-out and the fixed-point property row (MIN DSCR =
+        # covenant when binding) must both stay PASS.
+        workbook = build_vietnam_esco_workbook(
+            _dscr_sized_result(), assumptions=ESCO_ASSUMPTIONS
+        )
+        result = self._validate_saved(workbook, "dscr_sized.xlsx")
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["review_count"], 0)

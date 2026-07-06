@@ -37,6 +37,13 @@ DEFAULT_DEBT_INTEREST_RATE = FINANCIAL_DEFAULTS["debt_interest_rate"]
 DEFAULT_USD_DEBT_INTEREST_RATE = FINANCIAL_DEFAULTS["usd_debt_interest_rate"]
 DEFAULT_DEBT_TERM_YEARS = FINANCIAL_DEFAULTS["debt_term_years"]
 
+# DSCR debt sizing (optional target_min_dscr): fixed-point iteration controls.
+# Debt service scales linearly with the principal, so supported(D) = D ×
+# min_dscr(D) / target and D_next = min(D_frac, supported(D)) converges quickly
+# (the CIT/IDC feedback is a mild contraction); 100 rounds is a safety cap.
+_DEBT_SIZING_MAX_ITERATIONS = 100
+_DEBT_SIZING_TOLERANCE = 1e-9
+
 
 def calculate_vietnam_esco_cash_flow(
     project_served_pv_kwh,
@@ -66,6 +73,7 @@ def calculate_vietnam_esco_cash_flow(
     debt_currency="VND",
     construction_months=0,
     principal_grace_years=0,
+    target_min_dscr=None,
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
     dppa_settlement=None,
@@ -130,6 +138,7 @@ def calculate_vietnam_esco_cash_flow(
         construction_months, principal_grace_years, debt_term_years
     )
     _validate_debt_currency(debt_currency)
+    _validate_target_min_dscr(target_min_dscr)
     # Debt-currency default rate: USD loans price off international financing
     # (~5%/yr, vietnam_market_context.md) rather than the VND commercial-bank
     # rate (8.5%). An explicit debt_interest_rate_fraction always wins; only the
@@ -141,42 +150,9 @@ def calculate_vietnam_esco_cash_flow(
             else DEFAULT_DEBT_INTEREST_RATE
         )
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
-    debt_principal_vnd = total_capex_vnd * debt_fraction
-    equity_investment_vnd = total_capex_vnd - debt_principal_vnd
-    # Interest during construction (IDC): even drawdown of the debt-funded
-    # capex over the construction period, interest at the debt rate on the
-    # average balance (half the final draw), simple (no compounding). IDC is
-    # debt-funded (rolled up): the balance at COD is the drawn principal plus
-    # IDC; equity is unchanged. With construction_months=0 this collapses to
-    # the legacy overnight build, bit-for-bit.
-    idc_vnd = (
-        debt_principal_vnd * debt_interest_rate_fraction
-        * (construction_months / 12) / 2
-    ) if construction_months else 0
-    cod_debt_balance_vnd = debt_principal_vnd + idc_vnd
+    fraction_based_principal_vnd = total_capex_vnd * debt_fraction
     construction_enabled = construction_months > 0 or principal_grace_years > 0
-
-    # Principal grace: years 1..g are interest-only on the full COD balance,
-    # then principal amortizes over the remaining (tenor − g) years with the
-    # same level-payment annuity as before.
-    annual_debt_payment_vnd = _annual_debt_payment(
-        cod_debt_balance_vnd,
-        debt_interest_rate_fraction,
-        debt_term_years - principal_grace_years,
-    )
-    debt_schedule = _debt_schedule(
-        cod_debt_balance_vnd,
-        debt_interest_rate_fraction,
-        annual_debt_payment_vnd,
-        debt_term_years,
-        project_years,
-        grace_years=principal_grace_years,
-    )
     validate_pv_depreciation_years(pv_depreciation_years)
-    depreciation_by_year = _depreciation_schedule(
-        pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years,
-        idc_vnd=idc_vnd,
-    )
 
     base_energy_revenue_vnd = sum(
         kwh * rate * esco_energy_discount_fraction
@@ -218,7 +194,7 @@ def calculate_vietnam_esco_cash_flow(
         base_energy_revenue_vnd = matched_kwh_year1 * ppa_price_usd_per_kwh
 
     preliminary_rows = []
-    taxable_income_by_year = []
+    net_operating_revenue_by_year = []
 
     for year_index in range(project_years):
         energy_multiplier = (1 + evn_energy_escalation_rate) ** year_index
@@ -288,13 +264,15 @@ def calculate_vietnam_esco_cash_flow(
                 + esco_grid_arbitrage_revenue_vnd
                 + surplus_export_revenue_vnd
             )
-        interest_vnd = debt_schedule[year_index]["interest_vnd"]
-        taxable_income_vnd = (
+        # Debt-independent operating margin (revenue net of O&M and
+        # replacements). The debt schedule, capitalized-IDC depreciation, CIT and
+        # per-year DSCR are debt-principal-dependent, so they are derived below
+        # by _derive_for_principal (once for the fraction-based loan, or per
+        # iteration when target_min_dscr sizes the loan by coverage).
+        net_operating_revenue_vnd = (
             esco_revenue_vnd
             - annual_om_year_vnd
             - replacement_cost_vnd
-            - depreciation_by_year[year_index]
-            - interest_vnd
         )
 
         row = {
@@ -307,8 +285,6 @@ def calculate_vietnam_esco_cash_flow(
             "esco_revenue_vnd": esco_revenue_vnd,
             "annual_om_vnd": annual_om_year_vnd,
             "replacement_cost_vnd": replacement_cost_vnd,
-            "depreciation_vnd": depreciation_by_year[year_index],
-            "interest_vnd": interest_vnd,
         }
         if surplus_enabled:
             row["surplus_export_kwh"] = surplus_export_kwh
@@ -326,19 +302,145 @@ def calculate_vietnam_esco_cash_flow(
         if dppa_year is not None:
             row.update(dppa_year)
         preliminary_rows.append(row)
-        taxable_income_by_year.append(taxable_income_vnd)
+        net_operating_revenue_by_year.append(net_operating_revenue_vnd)
 
     holiday_years, reduced_rate_years, preferential_rate, preferential_years = (
         _cit_regime_params(cit_regime)
     )
-    cit_by_year = calculate_cit(
-        taxable_income_by_year,
-        holiday_years=holiday_years,
-        reduced_rate_years=reduced_rate_years,
-        preferential_rate=preferential_rate,
-        preferential_years=preferential_years,
-        immediate_loss_relief=assume_profitable_host,
-    )
+
+    def _derive_for_principal(debt_principal_vnd):
+        # Single source of the debt-principal-dependent derivation: IDC (Task
+        # 4a), the level-payment / grace debt schedule, IDC-capitalized
+        # depreciation, Vietnam CIT and the per-year DSCR. The DSCR sizing loop
+        # re-enters this per trial principal (rather than duplicating the math),
+        # and the final result is built from the return value at the sized
+        # principal — so the no-sizing path is bit-for-bit the legacy inline
+        # computation with the fraction-based principal.
+        idc_vnd = (
+            debt_principal_vnd * debt_interest_rate_fraction
+            * (construction_months / 12) / 2
+        ) if construction_months else 0
+        cod_debt_balance_vnd = debt_principal_vnd + idc_vnd
+        annual_debt_payment_vnd = _annual_debt_payment(
+            cod_debt_balance_vnd,
+            debt_interest_rate_fraction,
+            debt_term_years - principal_grace_years,
+        )
+        debt_schedule = _debt_schedule(
+            cod_debt_balance_vnd,
+            debt_interest_rate_fraction,
+            annual_debt_payment_vnd,
+            debt_term_years,
+            project_years,
+            grace_years=principal_grace_years,
+        )
+        depreciation_by_year = _depreciation_schedule(
+            pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years,
+            idc_vnd=idc_vnd,
+        )
+        taxable_income_by_year = [
+            net_operating_revenue_by_year[year_index]
+            - depreciation_by_year[year_index]
+            - debt_schedule[year_index]["interest_vnd"]
+            for year_index in range(project_years)
+        ]
+        cit_by_year = calculate_cit(
+            taxable_income_by_year,
+            holiday_years=holiday_years,
+            reduced_rate_years=reduced_rate_years,
+            preferential_rate=preferential_rate,
+            preferential_years=preferential_years,
+            immediate_loss_relief=assume_profitable_host,
+        )
+        # Minimum DSCR over the debt-term years (debt service > 0), evaluated on
+        # the base case with contract FX held flat — no FX-sensitivity overlay.
+        min_dscr = None
+        for year_index in range(project_years):
+            debt_service_vnd = debt_schedule[year_index]["debt_service_vnd"]
+            if not debt_service_vnd:
+                continue
+            dscr = (
+                net_operating_revenue_by_year[year_index]
+                - cit_by_year[year_index]
+            ) / debt_service_vnd
+            if min_dscr is None or dscr < min_dscr:
+                min_dscr = dscr
+        return {
+            "debt_principal_vnd": debt_principal_vnd,
+            "idc_vnd": idc_vnd,
+            "cod_debt_balance_vnd": cod_debt_balance_vnd,
+            "debt_schedule": debt_schedule,
+            "depreciation_by_year": depreciation_by_year,
+            "cit_by_year": cit_by_year,
+            "min_dscr": min_dscr,
+        }
+
+    if target_min_dscr is None:
+        # Legacy path: debt is the fraction-based loan, derived once.
+        derived = _derive_for_principal(fraction_based_principal_vnd)
+        debt_sizing = None
+    else:
+        # Coverage sizing: debt = min(fraction-based, DSCR-supported). Debt
+        # service scales linearly with the principal, so for a trial principal D
+        # with achieved min_dscr(D), supported(D) = D × min_dscr(D) / target;
+        # iterate D_next = min(D_frac, supported(D)) until it settles (the CIT /
+        # IDC feedback is a mild contraction). Degenerate min CFADS ≤ 0 drives
+        # min_dscr ≤ 0 (or no debt years once D collapses), so supported → 0 and
+        # the loan sizes to zero (all-equity) without crashing.
+        trial_principal_vnd = fraction_based_principal_vnd
+        supported_principal_vnd = 0.0
+        iterations = 0
+        while True:
+            iterations += 1
+            derived = _derive_for_principal(trial_principal_vnd)
+            min_dscr = derived["min_dscr"]
+            supported_principal_vnd = (
+                0.0 if min_dscr is None
+                else trial_principal_vnd * min_dscr / target_min_dscr
+            )
+            next_principal_vnd = min(
+                fraction_based_principal_vnd, max(supported_principal_vnd, 0.0)
+            )
+            # Relative change gauged against the fixed fraction-based scale (D
+            # never exceeds it), so convergence stays well-defined as D → 0.
+            converged = (
+                fraction_based_principal_vnd <= 0
+                or abs(next_principal_vnd - trial_principal_vnd)
+                <= _DEBT_SIZING_TOLERANCE * fraction_based_principal_vnd
+            )
+            if converged:
+                break
+            if iterations >= _DEBT_SIZING_MAX_ITERATIONS:
+                raise RuntimeError(
+                    "DSCR debt sizing did not converge within "
+                    f"{_DEBT_SIZING_MAX_ITERATIONS} iterations "
+                    f"(target_min_dscr={target_min_dscr})."
+                )
+            trial_principal_vnd = next_principal_vnd
+        # `derived` and supported_principal_vnd correspond to the converged
+        # trial principal, which becomes the sized loan.
+        binding_constraint = (
+            "dscr" if supported_principal_vnd < fraction_based_principal_vnd
+            else "fraction"
+        )
+        debt_sizing = {
+            "target_min_dscr": target_min_dscr,
+            "fraction_based_principal_usd": fraction_based_principal_vnd,
+            "supported_principal_usd": supported_principal_vnd,
+            "sized_principal_usd": trial_principal_vnd,
+            "binding_constraint": binding_constraint,
+            "iterations": iterations,
+            "achieved_min_dscr": derived["min_dscr"],
+        }
+
+    debt_principal_vnd = derived["debt_principal_vnd"]
+    equity_investment_vnd = total_capex_vnd - debt_principal_vnd
+    idc_vnd = derived["idc_vnd"]
+    cod_debt_balance_vnd = derived["cod_debt_balance_vnd"]
+    debt_schedule = derived["debt_schedule"]
+    depreciation_by_year = derived["depreciation_by_year"]
+    cit_by_year = derived["cit_by_year"]
+
     annual_cash_flows = []
     project_cash_flows = [-total_capex_vnd]
     equity_cash_flows = [-equity_investment_vnd]
@@ -385,6 +487,8 @@ def calculate_vietnam_esco_cash_flow(
         offtaker_savings_vnd = bau_evn_bill_year_vnd - offtaker_post_project_cost_vnd
 
         row.update({
+            "depreciation_vnd": depreciation_by_year[year_index],
+            "interest_vnd": debt_schedule[year_index]["interest_vnd"],
             "cit_vnd": cit_by_year[year_index],
             "debt_service_vnd": debt_service_vnd,
             "principal_vnd": debt_schedule[year_index]["principal_vnd"],
@@ -463,6 +567,14 @@ def calculate_vietnam_esco_cash_flow(
         # unchanged; _finalize_currencies emits the _usd pair below.
         summary["idc_vnd"] = idc_vnd
         summary["cod_debt_balance_vnd"] = cod_debt_balance_vnd
+    if debt_sizing is not None and debt_sizing["binding_constraint"] == "dscr":
+        # The DSCR covenant actually reduced the loan below the fraction-based
+        # principal. Gated on binding (not merely on the input being set) so a
+        # non-binding target_min_dscr leaves the summary byte-for-byte identical
+        # to the same case run without it; debt_principal_vnd already carries the
+        # sized value here.
+        summary["sized_debt_principal_vnd"] = debt_principal_vnd
+        summary["debt_sizing_binding"] = True
     _finalize_currencies(summary, exchange_rate_vnd_per_usd)
 
     derivation = {
@@ -526,6 +638,13 @@ def calculate_vietnam_esco_cash_flow(
             "idc_usd": idc_vnd,
             "cod_debt_balance_usd": cod_debt_balance_vnd,
         }
+    if debt_sizing is not None:
+        # Self-describing DSCR debt-sizing record so the audit sheet can rebuild
+        # the min(fraction-based, DSCR-supported) rule from named cells and tie
+        # out the fixed-point property. Present whenever target_min_dscr is set
+        # (both the DSCR-binding and fraction-limited outcomes); omitted
+        # otherwise so existing cases stay byte-for-byte unchanged.
+        derivation["debt_sizing"] = debt_sizing
     if surplus_enabled:
         # Self-describing surplus config so the audit sheet can rebuild the
         # revenue row from named cells (year-1 sold kWh, USD price, escalation,
@@ -727,6 +846,26 @@ def _validate_debt_currency(debt_currency):
         raise ValueError(
             "debt_currency must be 'VND' (default) or 'USD', got "
             f"{debt_currency!r}."
+        )
+
+
+def _validate_target_min_dscr(target_min_dscr):
+    # None disables DSCR debt sizing (default). When set it must be a real
+    # number >= 1.0: a covenant below 1.0x is lending into default and is
+    # treated as an input error; bools and non-numerics are rejected.
+    if target_min_dscr is None:
+        return
+    if isinstance(target_min_dscr, bool) or not isinstance(
+        target_min_dscr, (int, float)
+    ):
+        raise ValueError(
+            "target_min_dscr must be a number >= 1.0 (a covenant below 1.0x "
+            f"lends into default), got {target_min_dscr!r}."
+        )
+    if target_min_dscr < 1.0:
+        raise ValueError(
+            "target_min_dscr must be >= 1.0 (a covenant below 1.0x lends into "
+            f"default), got {target_min_dscr}."
         )
 
 
