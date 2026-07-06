@@ -1011,10 +1011,9 @@ class VietnamCaseBuilderTests(TestCase):
     def test_contract_tenor_is_allowlisted_into_assumptions_not_the_payload(self):
         # Task 4e contract_years / contract_residual_value_usd travel the same
         # allowlisted path as the other financing scalars: into assumptions
-        # (never the REopt payload). The offline rebuild override mapping
-        # (cash_flow_overrides_from_assumptions) lives in the DPPA-only sweep
-        # tool and is intentionally NOT extended (the tenor is ESCO-only); the
-        # live esco_pro_forma path carries the keys via its generic **kwargs.
+        # (never the REopt payload) and back out through the rebuild override
+        # mapping (cash_flow_overrides_from_assumptions), shared by the
+        # offline rebuild_report.py path.
         load_csv_path = _write_load_csv([500.0] * 8760)
 
         case = build_vietnam_case(
@@ -1034,6 +1033,9 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(case["assumptions"]["contract_residual_value_usd"], 250000.0)
         self.assertNotIn("contract_years", case["payload"]["Financial"])
         self.assertNotIn("contract_residual_value_usd", case["payload"]["Financial"])
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["contract_years"], 15)
+        self.assertEqual(overrides["contract_residual_value_usd"], 250000.0)
 
     def test_contract_tenor_absent_by_default_leaves_no_assumption_keys(self):
         # Default OFF: no contract keys in the case financial input means neither
