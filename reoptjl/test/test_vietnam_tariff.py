@@ -182,7 +182,7 @@ class VietnamEvnTariffTests(TestCase):
         with self.assertRaises(ValueError) as context:
             build_evn_tariff(year=2025, voltage_level="22-110kV", tariff_category="residential")
 
-        self.assertIn("Only manufacturing EVN tariffs are available.", str(context.exception))
+        self.assertIn("residential", str(context.exception))
 
     def test_unsupported_voltage_level_raises_with_message(self):
         with self.assertRaises(ValueError) as context:
@@ -285,3 +285,80 @@ class VietnamEvnTariffTests(TestCase):
         # before the base_rate_per_kwh branch is reached, so base_rate_per_kwh
         # is silently ignored whenever the pilot is enabled.
         self.assertEqual(pilot_with_base_rate_override, pilot_only)
+
+    def test_builds_business_category_rates_for_22kv_and_above(self):
+        tariff = build_evn_tariff(
+            year=2025,
+            voltage_level="22-110kV",
+            tariff_category="business",
+        )
+
+        jan_5_2025_10am_index = (datetime(2025, 1, 5, 10).timetuple().tm_yday - 1) * 24 + 10
+        jan_6_2025_10am_index = (datetime(2025, 1, 6, 10).timetuple().tm_yday - 1) * 24 + 10
+        jan_6_2025_2am_index = (datetime(2025, 1, 6, 2).timetuple().tm_yday - 1) * 24 + 2
+
+        # Sunday 10:00 normal / Monday 10:00 peak / Monday 02:00 off-peak,
+        # kinh doanh >=22kV tier per Decision 1279/QD-BCT (2025-05-09).
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_5_2025_10am_index], 2887)
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_10am_index], 5025)
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_2am_index], 1609)
+        self.assertEqual(tariff["rate_vintage_year"], 2025)
+        self.assertIn("1279/QD-BCT", tariff["rate_vintage_source"])
+
+    def test_business_category_maps_110kv_connections_to_22kv_and_above_tier(self):
+        # The kinh doanh table has a single ">=22kV" tier, so both engine
+        # voltage keys at or above 22kV resolve to the same rates.
+        tariff_110 = build_evn_tariff(
+            year=2025, voltage_level=">=110kV", tariff_category="business"
+        )
+        tariff_22 = build_evn_tariff(
+            year=2025, voltage_level="22-110kV", tariff_category="business"
+        )
+
+        self.assertEqual(
+            tariff_110["tou_energy_rates_per_kwh"],
+            tariff_22["tou_energy_rates_per_kwh"],
+        )
+
+    def test_business_category_lower_voltage_tiers(self):
+        jan_6_2025_2am_index = (datetime(2025, 1, 6, 2).timetuple().tm_yday - 1) * 24 + 2
+
+        tariff_6_22 = build_evn_tariff(
+            year=2025, voltage_level="6-22kV", tariff_category="business"
+        )
+        tariff_below_6 = build_evn_tariff(
+            year=2025, voltage_level="<6kV", tariff_category="business"
+        )
+
+        self.assertEqual(tariff_6_22["tou_energy_rates_per_kwh"][jan_6_2025_2am_index], 1829)
+        self.assertEqual(tariff_below_6["tou_energy_rates_per_kwh"][jan_6_2025_2am_index], 1918)
+
+    def test_business_category_with_decision_963_schedule(self):
+        tariff = build_evn_tariff(
+            year=2025,
+            voltage_level="22-110kV",
+            tariff_category="business",
+            tou_schedule="decision_963",
+        )
+
+        jan_6_2025_5am_index = (datetime(2025, 1, 6, 5).timetuple().tm_yday - 1) * 24 + 5
+        jan_6_2025_10am_index = (datetime(2025, 1, 6, 10).timetuple().tm_yday - 1) * 24 + 10
+        jan_6_2025_18_index = (datetime(2025, 1, 6, 18).timetuple().tm_yday - 1) * 24 + 18
+
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_5am_index], 1609)
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_10am_index], 2887)
+        self.assertEqual(tariff["tou_energy_rates_per_kwh"][jan_6_2025_18_index], 5025)
+
+    def test_two_component_pilot_rejects_business_category(self):
+        # The two-component pilot is defined for production (manufacturing)
+        # customers; combining it with the kinh doanh table would silently
+        # ignore the category, so it raises instead.
+        with self.assertRaises(ValueError) as context:
+            build_evn_tariff(
+                year=2025,
+                voltage_level="22-110kV",
+                tariff_category="business",
+                two_component_pilot_enabled=True,
+            )
+
+        self.assertIn("two-component", str(context.exception))

@@ -51,6 +51,13 @@ def calculate_esco_pro_forma_from_reopt_results(
             storage_outputs.get("storage_to_load_series_kw", []),
         ])
 
+    tou_rates = tariff_inputs.get("tou_energy_rates_per_kwh", [])
+    if not project_served_pv_kwh and tou_rates:
+        # No PV tech in the run (battery-only case): an empty served series
+        # would trip the cash flow's length check, so serve zeros over the
+        # tariff horizon instead.
+        project_served_pv_kwh = [0.0] * len(tou_rates)
+
     cash_flow_inputs = {
         "project_served_pv_kwh": project_served_pv_kwh,
         "evn_energy_rates_vnd_per_kwh": _money_series(
@@ -84,6 +91,22 @@ def calculate_esco_pro_forma_from_reopt_results(
         "esco_energy_discount_fraction": esco_energy_discount_fraction,
         "owner_discount_rate_fraction": financial_inputs.get("owner_discount_rate_fraction", 0.10),
     }
+
+    pv_capacity_kw = sum(_value(pv, "size_kw") for pv in pv_outputs)
+    if storage_inputs.get("can_grid_charge") is True and pv_capacity_kw == 0:
+        # Battery-only grid-charging case: with no PV, every discharged kWh was
+        # grid-charged, so the whole energy-bill delta IS the net grid-arbitrage
+        # value (the demand-charge movement is booked on its own line and
+        # excluded here). This sidesteps the PV-vs-grid attribution problem the
+        # design doc defers; with PV present the value stays 0 unless an
+        # explicit override provides it.
+        cash_flow_inputs["net_grid_arbitrage_value_vnd"] = (
+            cash_flow_inputs["bau_evn_bill_vnd"]
+            - cash_flow_inputs["optimized_evn_bill_vnd"]
+        ) - (
+            cash_flow_inputs["bau_demand_charge_vnd"]
+            - cash_flow_inputs["optimized_demand_charge_vnd"]
+        )
 
     pv_input_list = _as_list(inputs.get("PV"))
     degradation_rates = [

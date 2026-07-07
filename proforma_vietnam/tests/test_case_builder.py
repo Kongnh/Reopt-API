@@ -212,6 +212,67 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertNotIn("rate_vintage_year", case["payload"]["ElectricTariff"])
         self.assertNotIn("rate_vintage_source", case["payload"]["ElectricTariff"])
 
+    def test_storage_soc_bounds_pass_through_to_payload(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV", "currency": "vnd"},
+                "technologies": {
+                    "storage": {
+                        "max_kw": 500.0,
+                        "max_kwh": 2000.0,
+                        "soc_min_fraction": 0.0,
+                        "soc_init_fraction": 0.5,
+                    },
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        storage = case["payload"]["ElectricStorage"]
+        self.assertEqual(storage["soc_min_fraction"], 0.0)
+        self.assertEqual(storage["soc_init_fraction"], 0.5)
+
+    def test_business_tariff_category_passes_through_to_payload_and_assumptions(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {
+                    "year": 2025,
+                    "voltage_level": "22-110kV",
+                    "currency": "vnd",
+                    "tariff_category": "business",
+                },
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        # 2025-01-01 00:00 is off-peak; kinh doanh >=22kV off-peak is 1,609
+        # VND/kWh (Decision 1279/QD-BCT) vs 1,190 for manufacturing.
+        self.assertEqual(case["payload"]["ElectricTariff"]["tou_energy_rates_per_kwh"][0], 1609)
+        self.assertEqual(case["assumptions"]["tariff_category"], "business")
+
+    def test_tariff_category_defaults_to_manufacturing_in_assumptions(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV", "currency": "vnd"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertEqual(case["payload"]["ElectricTariff"]["tou_energy_rates_per_kwh"][0], 1190)
+        self.assertEqual(case["assumptions"]["tariff_category"], "manufacturing")
+
     def test_builds_two_component_pilot_tariff_when_enabled(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
 

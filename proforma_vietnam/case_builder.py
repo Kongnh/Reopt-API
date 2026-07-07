@@ -28,6 +28,7 @@ from reoptjl.src.vietnam.evn_tariff import RATE_VINTAGE_KEYS, _normalize_voltage
 DEFAULT_COUNTRY = "Vietnam"
 DEFAULT_ANALYSIS_YEARS = 25
 DEFAULT_TOU_SCHEDULE = "current"
+DEFAULT_TARIFF_CATEGORY = "manufacturing"
 DEFAULT_DEMAND_SAVINGS_ESCO_SHARE = 0.8
 DEFAULT_GRID_CHARGING_ENABLED = False
 # Default contract FX planning rate (VND per USD), used when a case's tariff
@@ -106,6 +107,8 @@ STORAGE_PAYLOAD_KEYS = [
     "cost_constant_replacement_year",
     "om_cost_fraction_of_installed_cost",
     "can_grid_charge",
+    "soc_min_fraction",
+    "soc_init_fraction",
 ]
 
 
@@ -205,6 +208,7 @@ def _build_tariff(tariff_config):
     return build_evn_tariff(
         year=tariff_config["year"],
         voltage_level=tariff_config["voltage_level"],
+        tariff_category=tariff_config.get("tariff_category", DEFAULT_TARIFF_CATEGORY),
         currency=tariff_config.get("currency", "usd"),
         exchange_rate_vnd_per_usd=tariff_config.get(
             "exchange_rate_vnd_per_usd",
@@ -473,6 +477,7 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         "country": DEFAULT_COUNTRY,
         "tariff_year": tariff_config.get("year"),
         "voltage_level": tariff_config.get("voltage_level"),
+        "tariff_category": tariff_config.get("tariff_category", DEFAULT_TARIFF_CATEGORY),
         "tou_schedule": tariff_config.get("tou_schedule", DEFAULT_TOU_SCHEDULE),
         "exchange_rate_vnd_per_usd": tariff_config.get("exchange_rate_vnd_per_usd"),
         "evn_energy_escalation_rate": tariff_config.get("evn_energy_escalation_rate"),

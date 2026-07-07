@@ -57,6 +57,61 @@ class VietnamEscoProFormaAdapterTests(TestCase):
         self.assertEqual(annual["esco_energy_revenue_vnd"], 4500)
         self.assertEqual(annual["esco_grid_arbitrage_revenue_vnd"], 0)
 
+    def test_battery_only_grid_charging_wires_net_arbitrage_from_bill_delta(self):
+        # With no PV, every discharged kWh was grid-charged, so the whole
+        # energy-bill delta IS the net grid-arbitrage value:
+        # (50000 - 30000) - (8000 - 3000) demand delta = 15000, ESCO share 1.0.
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _battery_only_reopt_results(),
+            esco_energy_discount_fraction=0.0,
+            grid_charging_enabled=True,
+            project_years=1,
+        )
+
+        annual = result["annual_cash_flows"][0]
+
+        self.assertEqual(annual["esco_grid_arbitrage_revenue_vnd"], 15000)
+        self.assertEqual(annual["esco_energy_revenue_vnd"], 0)
+
+    def test_battery_only_arbitrage_stays_zero_without_grid_charging_flag(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _battery_only_reopt_results(),
+            esco_energy_discount_fraction=0.0,
+            project_years=1,
+        )
+
+        self.assertEqual(
+            result["annual_cash_flows"][0]["esco_grid_arbitrage_revenue_vnd"], 0
+        )
+
+    def test_pv_case_keeps_arbitrage_unwired_even_with_grid_charging_flag(self):
+        # With PV present the grid-charged share of discharge cannot be
+        # attributed from available REopt outputs (per the design doc), so the
+        # bill-delta wiring must not fire.
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=True),
+            esco_energy_discount_fraction=0.9,
+            grid_charging_enabled=True,
+            project_years=1,
+        )
+
+        self.assertEqual(
+            result["annual_cash_flows"][0]["esco_grid_arbitrage_revenue_vnd"], 0
+        )
+
+    def test_explicit_net_arbitrage_override_wins_over_battery_only_wiring(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _battery_only_reopt_results(),
+            esco_energy_discount_fraction=0.0,
+            grid_charging_enabled=True,
+            net_grid_arbitrage_value_vnd=1234.0,
+            project_years=1,
+        )
+
+        self.assertEqual(
+            result["annual_cash_flows"][0]["esco_grid_arbitrage_revenue_vnd"], 1234.0
+        )
+
     def test_converts_vnd_tariff_inputs_to_usd_report_values_when_exchange_rate_is_provided(self):
         reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
         reopt_results["inputs"]["ElectricTariff"]["tou_energy_rates_per_kwh"] = [1000, 2000]
@@ -737,6 +792,14 @@ class UsdDebtAdapterTests(TestCase):
         )
 
         self.assertNotIn("debt_currency", result["derivation"])
+
+
+def _battery_only_reopt_results():
+    # A grid-charging BESS with no PV tech at all: REopt omits (or zeroes) the
+    # PV output block, so the project-served series is empty.
+    results = deepcopy(_fake_reopt_results(can_grid_charge=True))
+    del results["outputs"]["PV"]
+    return results
 
 
 def _fake_reopt_results(can_grid_charge):

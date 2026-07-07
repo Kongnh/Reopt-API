@@ -29,6 +29,29 @@
       }
     }
   },
+  "standard_business": {
+    "2025": {
+      "source": "EVN retail electricity tariff (kinh doanh/business category), Decision 1279/QD-BCT dated 2025-05-09",
+      "currency": "vnd",
+      "rates": {
+        "22kv_and_above": {
+          "normal": 2887,
+          "off_peak": 1609,
+          "peak": 5025
+        },
+        "6_to_22kv": {
+          "normal": 3108,
+          "off_peak": 1829,
+          "peak": 5202
+        },
+        "below_6kv": {
+          "normal": 3152,
+          "off_peak": 1918,
+          "peak": 5422
+        }
+      }
+    }
+  },
   "two_component": {
     "2025": {
       "source": "EVN two-component pilot tariff, EVNNPC ref. 7646/BCT-ĐL (2025-10-09); official pilot billing from 2026-07 for selected ≥200,000 kWh/month ≥22kV customers",

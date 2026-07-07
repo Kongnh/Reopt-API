@@ -23,6 +23,16 @@ STANDARD_MANUFACTURING_RATES = {
 }
 
 
+STANDARD_BUSINESS_RATES = {
+    int(year): {
+        "source": vintage["source"],
+        "currency": vintage["currency"],
+        "rates_per_kwh": vintage["rates"],
+    }
+    for year, vintage in EVN_TARIFF_RATES["standard_business"].items()
+}
+
+
 TWO_COMPONENT_PILOT_RATES = {
     int(year): {
         "source": vintage["source"],

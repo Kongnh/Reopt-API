@@ -2,6 +2,7 @@ from calendar import isleap
 from datetime import datetime
 
 from reoptjl.src.vietnam.evn_rates import (
+    STANDARD_BUSINESS_RATES,
     STANDARD_MANUFACTURING_RATES,
     STANDARD_TOU_MULTIPLIERS,
     TWO_COMPONENT_PILOT_RATES,
@@ -25,6 +26,18 @@ TOU_SCHEDULES = {
 # metadata, not REopt.jl ElectricTariff scenario fields — callers that submit the
 # tariff dict to REopt.jl must strip these keys from the payload first.
 RATE_VINTAGE_KEYS = ("rate_vintage_year", "rate_vintage_source")
+
+SUPPORTED_TARIFF_CATEGORIES = ("manufacturing", "business")
+
+# The kinh doanh (business) table has a single ">=22kV" tier where the
+# manufacturing table splits 110kV+ from 22-110kV, so both normalized keys
+# resolve to the same business tier.
+BUSINESS_VOLTAGE_TIER_BY_KEY = {
+    "110kv_and_above": "22kv_and_above",
+    "22_to_110kv": "22kv_and_above",
+    "6_to_22kv": "6_to_22kv",
+    "below_6kv": "below_6kv",
+}
 
 VOLTAGE_LEVEL_ALIASES = {
     ">=110kv": "110kv_and_above",
@@ -50,15 +63,25 @@ def build_evn_tariff(year, voltage_level, tariff_category="manufacturing",
                      base_rate_per_kwh=None, two_component_pilot_enabled=False,
                      currency="vnd", exchange_rate_vnd_per_usd=None,
                      tou_schedule="current"):
-    if tariff_category != "manufacturing":
-        raise ValueError("Only manufacturing EVN tariffs are available.")
+    if tariff_category not in SUPPORTED_TARIFF_CATEGORIES:
+        raise ValueError(
+            "Unsupported EVN tariff category: {}. Supported: {}.".format(
+                tariff_category, ", ".join(repr(c) for c in SUPPORTED_TARIFF_CATEGORIES)
+            )
+        )
+    if tariff_category == "business" and two_component_pilot_enabled:
+        raise ValueError(
+            "The two-component pilot applies to manufacturing (production) "
+            "customers; it cannot be combined with the business (kinh doanh) "
+            "tariff category."
+        )
     if isleap(year):
         raise ValueError("EVN tariff builder currently produces 8760-hour non-leap-year arrays.")
 
     voltage_key = _normalize_voltage_level(voltage_level)
     schedule = _tou_schedule(tou_schedule)
     rates, rate_vintage_year, rate_vintage_source = _rates_for(
-        year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled
+        year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled, tariff_category
     )
     tou_rates = [_convert_currency(rates[_period_for(year, hour_index, schedule)], currency, exchange_rate_vnd_per_usd)
                  for hour_index in range(8760)]
@@ -97,7 +120,8 @@ def _tou_schedule(tou_schedule):
     raise ValueError("Unsupported EVN TOU schedule: {}".format(tou_schedule))
 
 
-def _rates_for(year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled):
+def _rates_for(year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled,
+               tariff_category="manufacturing"):
     if two_component_pilot_enabled:
         vintage_year = _latest_vintage_year(TWO_COMPONENT_PILOT_RATES, year, "two-component pilot")
         vintage = TWO_COMPONENT_PILOT_RATES[vintage_year]
@@ -109,6 +133,12 @@ def _rates_for(year, voltage_key, base_rate_per_kwh, two_component_pilot_enabled
             for period, multiplier in STANDARD_TOU_MULTIPLIERS.items()
         }
         return rates, None, None
+
+    if tariff_category == "business":
+        vintage_year = _latest_vintage_year(STANDARD_BUSINESS_RATES, year, "standard business")
+        vintage = STANDARD_BUSINESS_RATES[vintage_year]
+        business_tier = BUSINESS_VOLTAGE_TIER_BY_KEY[voltage_key]
+        return vintage["rates_per_kwh"][business_tier], vintage_year, vintage["source"]
 
     vintage_year = _latest_vintage_year(STANDARD_MANUFACTURING_RATES, year, "standard manufacturing")
     vintage = STANDARD_MANUFACTURING_RATES[vintage_year]
