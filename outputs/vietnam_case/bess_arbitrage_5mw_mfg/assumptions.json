@@ -1,0 +1,22 @@
+{
+  "case_name": "BESS 5MW/25MWh grid arbitrage - manufacturing 22kV, QD963 TOU, ESCO 15yr",
+  "country": "Vietnam",
+  "tariff_year": 2025,
+  "voltage_level": "22-110kV",
+  "tariff_category": "manufacturing",
+  "tou_schedule": "decision_963",
+  "exchange_rate_vnd_per_usd": 26300,
+  "evn_energy_escalation_rate": 0.04,
+  "evn_capacity_escalation_rate": 0.04,
+  "rate_vintage_year": 2025,
+  "rate_vintage_source": "EVN retail electricity tariff, Decision 1279/QD-BCT dated 2025-05-09",
+  "esco_energy_discount_fraction": 0.0,
+  "demand_savings_esco_share": 0.8,
+  "grid_charging_enabled": true,
+  "owner_discount_rate_fraction": 0.1,
+  "debt_fraction": 0.7,
+  "debt_interest_rate_fraction": 0.085,
+  "debt_term_years": 10,
+  "contract_years": 15,
+  "contract_residual_value_usd": 0.0
+}
