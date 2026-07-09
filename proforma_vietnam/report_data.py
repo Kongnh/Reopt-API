@@ -1,4 +1,5 @@
-def build_vietnam_report_data(reopt_results, cash_flow_result=None):
+def build_vietnam_report_data(reopt_results, cash_flow_result=None,
+                              poa_irradiance_series=None):
     cash_flow_result = cash_flow_result or {}
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
@@ -20,9 +21,10 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None):
     storage_to_load = _series(storage_outputs.get("storage_to_load_series_kw"))
     # Original PV generation before any dispatch split (load/storage/grid/curtailment).
     pv_total = _sum_series([pv_to_load, pv_to_storage, pv_to_grid, pv_curtailed])
-    # Hourly solar resource signal: the PVWatts-derived production factor
-    # (kWh per kW installed). REopt does not persist raw irradiance, so this
-    # per-kW series is the irradiation proxy shown on the Dispatch sheet.
+    # Hourly solar resource: PVWatts plane-of-array irradiance (W/m2), shown on
+    # the Dispatch sheet. The per-kW production factor (kWh/kW) is kept for the
+    # annual Performance Ratio but is no longer a dispatch column.
+    irradiance = _series(poa_irradiance_series)
     production_factor = _production_factor_series(pv_outputs, _as_list(inputs.get("PV")))
 
     return {
@@ -31,9 +33,10 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None):
             "battery_kw": _value(storage_outputs, "size_kw"),
             "battery_kwh": _value(storage_outputs, "size_kwh"),
         },
+        "solar_resource": _solar_resource(irradiance, production_factor),
         "dispatch_profile": _dispatch_rows(
             load_series=load_series,
-            production_factor=production_factor,
+            irradiance=irradiance,
             pv_total=pv_total,
             pv_to_load=pv_to_load,
             pv_to_storage=pv_to_storage,
@@ -63,10 +66,29 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None):
     }
 
 
-def _dispatch_rows(*, load_series, production_factor, pv_total, pv_to_load,
+def _solar_resource(irradiance, production_factor):
+    """Annual POA irradiation (kWh/m2) and Performance Ratio for Year 1.
+
+    Reference yield = annual POA insolation / 1 kW/m2 = sum(POA_wm2) / 1000.
+    PR (IEC 61724) = specific yield (sum production factor, kWh/kW) / reference
+    yield. ``performance_ratio`` is ``None`` when no irradiance is available.
+    """
+    reference_yield_kwh_per_m2 = sum(irradiance) / 1000.0 if irradiance else 0.0
+    specific_yield_kwh_per_kw = sum(production_factor)
+    performance_ratio = (
+        specific_yield_kwh_per_kw / reference_yield_kwh_per_m2
+        if reference_yield_kwh_per_m2 else None
+    )
+    return {
+        "annual_poa_irradiation_kwh_per_m2": reference_yield_kwh_per_m2,
+        "performance_ratio": performance_ratio,
+    }
+
+
+def _dispatch_rows(*, load_series, irradiance, pv_total, pv_to_load,
                    pv_to_storage, pv_to_grid, pv_curtailed, grid_to_load,
                    grid_to_storage, storage_to_load):
-    series = (load_series, production_factor, pv_total, pv_to_load,
+    series = (load_series, irradiance, pv_total, pv_to_load,
               pv_to_storage, pv_to_grid, pv_curtailed, grid_to_load,
               grid_to_storage, storage_to_load)
     row_count = max((len(values) for values in series), default=0)
@@ -75,7 +97,7 @@ def _dispatch_rows(*, load_series, production_factor, pv_total, pv_to_load,
         rows.append({
             "hour": index + 1,
             "load_kw": _at(load_series, index),
-            "pv_production_factor": _at(production_factor, index),
+            "pv_irradiance": _at(irradiance, index),
             "pv_total_kw": _at(pv_total, index),
             "pv_to_load_kw": _at(pv_to_load, index),
             "pv_to_storage_kw": _at(pv_to_storage, index),

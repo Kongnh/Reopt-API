@@ -30,7 +30,11 @@ def rebuild_report(case_dir):
         esco_energy_discount_fraction=assumptions["esco_energy_discount_fraction"],
         **cash_flow_overrides_from_assumptions(assumptions),
     )
-    report_data = build_vietnam_report_data(results, cash_flow_result)
+    report_data = build_vietnam_report_data(
+        results,
+        cash_flow_result,
+        poa_irradiance_series=assumptions.get("pv_poa_irradiance_series"),
+    )
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
         assumptions={**assumptions, "run_uuid": results.get("run_uuid")},

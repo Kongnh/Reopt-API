@@ -422,7 +422,13 @@ def _vietnam_proforma_response(request, run_uuid, reopt_results):
         esco_energy_discount_fraction=esco_energy_discount_fraction,
         **cash_flow_overrides,
     )
-    report_data = build_vietnam_report_data(reopt_results, cash_flow_result)
+    try:
+        poa_irradiance_series = _vietnam_poa_series(request)
+    except ValueError as error:
+        return JsonResponse(make_error_resp(str(error)), status=400)
+    report_data = build_vietnam_report_data(
+        reopt_results, cash_flow_result, poa_irradiance_series=poa_irradiance_series
+    )
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
         assumptions={**assumptions, "run_uuid": str(run_uuid)},
@@ -438,6 +444,27 @@ def _vietnam_proforma_response(request, run_uuid, reopt_results):
     )
     response["Content-Disposition"] = f'attachment; filename="vietnam_proforma_{run_uuid}.xlsx"'
     return response
+
+
+def _vietnam_poa_series(request):
+    """Report-only PVWatts POA irradiance series (W/m2), sent by the client.
+
+    POSTed in the request body (an 8760-length JSON list would overflow a GET
+    URL, same as dppa_config). Returns ``None`` when absent so the report
+    degrades gracefully (blank irradiance column, no Performance Ratio).
+    """
+    raw = request.POST.get("pv_poa_irradiance_series") or request.GET.get(
+        "pv_poa_irradiance_series"
+    )
+    if raw is None:
+        return None
+    try:
+        series = json.loads(raw)
+    except (ValueError, TypeError):
+        raise ValueError("pv_poa_irradiance_series must be a valid JSON array.")
+    if not isinstance(series, list):
+        raise ValueError("pv_poa_irradiance_series must encode a JSON array.")
+    return series
 
 
 def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):

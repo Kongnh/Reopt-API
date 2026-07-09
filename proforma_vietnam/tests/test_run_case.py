@@ -24,8 +24,11 @@ class VietnamRunCaseTests(TestCase):
 
     def setUp(self):
         patcher = patch(
-            "proforma_vietnam.case_builder.pvwatts_client.fetch_production_factor_series",
-            return_value=list(STUB_PV_SERIES),
+            "proforma_vietnam.case_builder.pvwatts_client.fetch_pv_series",
+            return_value={
+                "production_factor": list(STUB_PV_SERIES),
+                "poa_wm2": [800.0] * 8760,
+            },
         )
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -191,6 +194,24 @@ class VietnamRunCaseTests(TestCase):
         self.assertIn("grid_dppa_cfd", body)
         # The dppa block should not be reflected as flat query params either.
         self.assertNotIn("cfd_strike_per_kwh_vnd=1700", sent_request.full_url)
+
+    def test_download_report_posts_poa_series_in_request_body(self):
+        assumptions = {
+            "esco_energy_discount_fraction": 0.9,
+            "pv_poa_irradiance_series": [800.0, 810.0, 0.0],
+        }
+
+        with patch("proforma_vietnam.run_case.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = b"workbook"
+
+            _download_vietnam_report("http://localhost:8000/v3", "abc", assumptions)
+
+        sent_request = urlopen.call_args.args[0]
+        # The 8760-list irradiance moves to the POST body to avoid a 414.
+        self.assertEqual(sent_request.get_method(), "POST")
+        self.assertNotIn("pv_poa_irradiance_series=", sent_request.full_url)
+        body = sent_request.data.decode("utf-8")
+        self.assertIn("pv_poa_irradiance_series=", body)
 
 
 class VietnamRunCaseUrlTests(TestCase):

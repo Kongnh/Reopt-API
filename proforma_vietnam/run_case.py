@@ -149,14 +149,22 @@ def _print_run_failure(run_uuid, results):
 
 def _download_vietnam_report(api_base, run_uuid, assumptions):
     query = _vietnam_report_query_params(assumptions)
+    # POST 8760-length series in the body — they overflow GET URL limits (HTTP
+    # 414) as query parameters. dppa_config carries FMP/CfD volumes;
+    # pv_poa_irradiance_series carries the report-only PVWatts irradiance.
+    body_params = {}
     dppa_blob = query.pop("dppa_config", None)
+    if dppa_blob is not None:
+        body_params["dppa_config"] = dppa_blob
+    poa_series = assumptions.get("pv_poa_irradiance_series")
+    if poa_series:
+        body_params["pv_poa_irradiance_series"] = json.dumps(poa_series)
+
     url = f"{_results_url(api_base, run_uuid)}?{parse.urlencode(query)}"
-    # POST dppa_config in the body — the 8760-list FMP and CfD volume series
-    # overflow GET URL limits (HTTP 414) when sent as a query parameter.
-    if dppa_blob is None:
+    if not body_params:
         post_request = request.Request(url)
     else:
-        body = parse.urlencode({"dppa_config": dppa_blob}).encode("utf-8")
+        body = parse.urlencode(body_params).encode("utf-8")
         post_request = request.Request(
             url,
             data=body,

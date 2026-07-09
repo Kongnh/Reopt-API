@@ -139,7 +139,7 @@ def build_vietnam_case(case_config):
         tariff.pop(key, None) for key in RATE_VINTAGE_KEYS
     )
     site = case_config.get("site", {})
-    pv_inputs = _pv_inputs(technologies.get("pv", {}), site)
+    pv_inputs, poa_irradiance_series = _pv_inputs(technologies.get("pv", {}), site)
 
     payload = {
         "Meta": {
@@ -166,22 +166,25 @@ def build_vietnam_case(case_config):
         ),
     }
 
-    return {
-        "payload": payload,
-        "assumptions": _assumptions(
-            case_config,
-            financial,
-            technologies,
-            esco_contract,
-            tariff_config,
-            dppa_inputs,
-            rate_vintage_year,
-            rate_vintage_source,
-            loads_kw,
-            surplus_export,
-            direct_ownership,
-        ),
-    }
+    assumptions = _assumptions(
+        case_config,
+        financial,
+        technologies,
+        esco_contract,
+        tariff_config,
+        dppa_inputs,
+        rate_vintage_year,
+        rate_vintage_source,
+        loads_kw,
+        surplus_export,
+        direct_ownership,
+    )
+    # Report-only PVWatts irradiance (W/m2); carried on assumptions so it reaches
+    # the report builder without entering the REopt payload.
+    if poa_irradiance_series is not None:
+        assumptions["pv_poa_irradiance_series"] = poa_irradiance_series
+
+    return {"payload": payload, "assumptions": assumptions}
 
 
 def _read_8760_load_csv(path):
@@ -230,14 +233,23 @@ def _financial_inputs(financial):
 
 
 def _pv_inputs(pv_config, site):
+    """Return ``(pv_payload, poa_irradiance_series)``.
+
+    The POA irradiance series (W/m2) is report-only — it is not a valid REopt
+    input key, so it rides ``assumptions`` rather than the payload. It is
+    ``None`` when the caller supplied their own production factor series (no
+    PVWatts fetch, so no irradiance is available).
+    """
     pv = _allowlisted(pv_config, PV_PAYLOAD_KEYS)
-    if "production_factor_series" not in pv:
-        pv["production_factor_series"] = pvwatts_client.fetch_production_factor_series(
-            latitude=site["latitude"],
-            longitude=site["longitude"],
-            overrides=pv_config.get("pvwatts"),
-        )
-    return pv
+    if "production_factor_series" in pv:
+        return pv, None
+    pv_series = pvwatts_client.fetch_pv_series(
+        latitude=site["latitude"],
+        longitude=site["longitude"],
+        overrides=pv_config.get("pvwatts"),
+    )
+    pv["production_factor_series"] = pv_series["production_factor"]
+    return pv, pv_series.get("poa_wm2") or None
 
 
 def _storage_inputs(storage_config, esco_contract, dppa_inputs):
