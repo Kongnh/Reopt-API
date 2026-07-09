@@ -33,6 +33,37 @@ class PVWattsClientTests(TestCase):
         cached_files = list(self.cache_dir.glob("*.json"))
         self.assertEqual(len(cached_files), 1)
 
+    def test_fetch_pv_series_returns_production_factor_and_poa(self):
+        ac_w = [200.0] * 8760
+        poa = [850.5] * 8760
+        urlopen = _stub_urlopen({"outputs": {"ac": ac_w, "poa": poa}, "errors": []})
+
+        with patch.object(pvwatts_client.request, "urlopen", urlopen):
+            series = pvwatts_client.fetch_pv_series(
+                latitude=10.0,
+                longitude=106.0,
+                api_key="dummy-key",
+            )
+
+        self.assertEqual(series["production_factor"][0], 0.2)
+        self.assertEqual(len(series["production_factor"]), 8760)
+        self.assertEqual(series["poa_wm2"][0], 850.5)
+        self.assertEqual(len(series["poa_wm2"]), 8760)
+
+    def test_fetch_pv_series_returns_empty_poa_when_absent(self):
+        ac_w = [200.0] * 8760
+        urlopen = _stub_urlopen({"outputs": {"ac": ac_w}, "errors": []})
+
+        with patch.object(pvwatts_client.request, "urlopen", urlopen):
+            series = pvwatts_client.fetch_pv_series(
+                latitude=10.0,
+                longitude=106.0,
+                api_key="dummy-key",
+            )
+
+        self.assertEqual(series["poa_wm2"], [])
+        self.assertEqual(len(series["production_factor"]), 8760)
+
     def test_fetch_uses_cache_on_repeat_call_with_same_params(self):
         ac_w = [100.0] * 8760
         urlopen = _stub_urlopen({"outputs": {"ac": ac_w}, "errors": []})

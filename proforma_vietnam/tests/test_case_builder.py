@@ -12,14 +12,18 @@ from proforma_vietnam.run_dppa_negotiation_sweep import (
 
 
 STUB_PV_SERIES = [0.25] * 8760
+STUB_POA_SERIES = [800.0] * 8760
 
 
 class VietnamCaseBuilderTests(TestCase):
 
     def setUp(self):
         patcher = patch(
-            "proforma_vietnam.case_builder.pvwatts_client.fetch_production_factor_series",
-            return_value=list(STUB_PV_SERIES),
+            "proforma_vietnam.case_builder.pvwatts_client.fetch_pv_series",
+            return_value={
+                "production_factor": list(STUB_PV_SERIES),
+                "poa_wm2": list(STUB_POA_SERIES),
+            },
         )
         self.fetch_pv = patcher.start()
         self.addCleanup(patcher.stop)
@@ -481,6 +485,12 @@ class VietnamCaseBuilderTests(TestCase):
             case["payload"]["PV"]["production_factor_series"],
             list(STUB_PV_SERIES),
         )
+        # POA irradiance rides assumptions (report-only), not the REopt payload.
+        self.assertEqual(
+            case["assumptions"]["pv_poa_irradiance_series"],
+            list(STUB_POA_SERIES),
+        )
+        self.assertNotIn("pv_poa_irradiance_series", case["payload"]["PV"])
 
     def test_passes_pvwatts_overrides_and_drops_pvwatts_key_from_payload(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
@@ -531,6 +541,8 @@ class VietnamCaseBuilderTests(TestCase):
             case["payload"]["PV"]["production_factor_series"],
             user_series,
         )
+        # No PVWatts fetch means no irradiance is available for the report.
+        self.assertNotIn("pv_poa_irradiance_series", case["assumptions"])
 
     def test_dppa_block_is_omitted_when_dppa_type_is_none_or_missing(self):
         load_csv_path = _write_load_csv([500.0] * 8760)

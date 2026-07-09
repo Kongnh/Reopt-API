@@ -88,6 +88,18 @@ RESULTS_COMPARISON_ROWS = [
     ("Demand Charge Savings (USD)", "demand_charge_savings_usd"),
 ]  # keys are genuinely USD (report_data._results_comparison)
 
+SOLAR_RESOURCE_ROWS = [
+    ("Annual POA Irradiation (kWh/m²)", "annual_poa_irradiation_kwh_per_m2"),
+    ("Performance Ratio (Year 1)", "performance_ratio"),
+]
+
+# Solar Resource keys use unit suffixes the schema heuristic does not cover
+# (literals, since FORMAT_AMOUNT/FORMAT_PERCENT are defined further down).
+SOLAR_RESOURCE_FORMATS = {
+    "annual_poa_irradiation_kwh_per_m2": "#,##0",
+    "performance_ratio": "0.0%",
+}
+
 ANNUAL_PRODUCTION_ROWS = [
     ("PV to Load (kWh)", "pv_to_load_kwh"),
     ("PV to Storage (kWh)", "pv_to_storage_kwh"),
@@ -99,12 +111,12 @@ ANNUAL_PRODUCTION_ROWS = [
 ]
 
 # Hourly dispatch table. "PV Generation Total" is the original PV output before
-# the dispatch split; the production factor is the hourly solar-resource signal
-# (REopt does not persist raw irradiance — see Model Basis).
+# the dispatch split; column C carries the PVWatts plane-of-array irradiance
+# (W/m2), the raw hourly solar-resource signal.
 DISPATCH_COLUMNS = [
     ("Hour", "hour"),
     ("Load (kW)", "load_kw"),
-    ("PV Production Factor (kWh/kW) — irradiation proxy", "pv_production_factor"),
+    ("PV Irradiation (W/m²)", "pv_irradiance"),
     ("PV Generation Total (kW)", "pv_total_kw"),
     ("PV to Load (kW)", "pv_to_load_kw"),
     ("PV to Storage (kW)", "pv_to_storage_kw"),
@@ -115,9 +127,14 @@ DISPATCH_COLUMNS = [
     ("Storage to Load (kW)", "storage_to_load_kw"),
 ]
 
+# Charging flows shown as negative on the Dispatch sheet (presentation only —
+# report_data / annual_production keep the positive magnitudes).
+DISPATCH_CHARGING_KEYS = ("pv_to_storage_kw", "grid_to_storage_kw")
+
 DISPATCH_CHART_SERIES = [
     ("Load (kW)", 2),
     ("PV Generation Total (kW)", 4),
+    ("PV to Storage (kW)", 6),
     ("Grid to Load (kW)", 9),
     ("Storage to Load (kW)", 11),
 ]
@@ -266,7 +283,22 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         if title in workbook.sheetnames:
             workbook[title].sheet_properties.tabColor = NAVY
 
+    _strip_em_dashes(workbook)
     return workbook
+
+
+def _strip_em_dashes(workbook):
+    """Replace the em dash with a hyphen in every string cell of the report.
+
+    A single central pass guarantees no cell carries an em dash regardless of
+    which schema label, note, or audit string produced it. Chart titles are not
+    cells and are handled at their source.
+    """
+    for worksheet in workbook.worksheets:
+        for row in worksheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and "—" in cell.value:
+                    cell.value = cell.value.replace("—", "-")
 
 
 def _minimum_debt_service_dscr(cash_flow_result):
@@ -739,6 +771,13 @@ def _write_technical_results(worksheet, report_data):
         ("Year-1 Utility Bill Comparison", RESULTS_COMPARISON_ROWS,
          report_data.get("results_comparison", {})),
     ]
+    # Solar Resource only when PVWatts irradiance was available (PR is None
+    # otherwise — see report_data._solar_resource).
+    solar_resource = report_data.get("solar_resource") or {}
+    if solar_resource.get("performance_ratio") is not None:
+        sections.append(
+            ("Solar Resource (Year 1)", SOLAR_RESOURCE_ROWS, solar_resource)
+        )
 
     worksheet.cell(row=1, column=1, value="Metric").font = HEADER_FONT
     worksheet.cell(row=1, column=2, value="Value").font = HEADER_FONT
@@ -756,7 +795,7 @@ def _write_technical_results(worksheet, report_data):
         for label, key in rows:
             worksheet.cell(row=row_index, column=1, value=label)
             value_cell = worksheet.cell(row=row_index, column=2, value=_lookup(values, key))
-            number_format = _number_format_for(key)
+            number_format = SOLAR_RESOURCE_FORMATS.get(key) or _number_format_for(key)
             if number_format:
                 value_cell.number_format = number_format
             row_index += 1
@@ -789,10 +828,12 @@ def _write_dispatch_sheet(worksheet, rows):
 
     for row_index, row in enumerate(rows, start=2):
         for column_index, (_header, key) in enumerate(DISPATCH_COLUMNS, start=1):
-            cell = worksheet.cell(row=row_index, column=column_index, value=_lookup(row, key))
-            if key == "pv_production_factor":
-                cell.number_format = "0.000"
-            elif key != "hour":
+            value = _lookup(row, key)
+            # Charging flows shown negative so the chart dips below zero.
+            if key in DISPATCH_CHARGING_KEYS and value:
+                value = -value
+            cell = worksheet.cell(row=row_index, column=column_index, value=value)
+            if key != "hour":
                 cell.number_format = FORMAT_AMOUNT
 
     worksheet.freeze_panes = "A2"
@@ -810,7 +851,7 @@ def _write_dispatch_sheet(worksheet, rows):
 
     chart = LineChart()
     chart.title = (
-        f"Dispatch — Peak-Load Week (hours {week_start + 1}-{week_end})"
+        f"Dispatch - Peak-Load Week (hours {week_start + 1}-{week_end})"
     )
     for series_title, column in DISPATCH_CHART_SERIES:
         values = Reference(

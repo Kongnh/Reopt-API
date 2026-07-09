@@ -94,14 +94,23 @@ class VietnamXlsxBuilderTests(TestCase):
             for col in range(1, dispatch.max_column + 1)
         ]
         self.assertIn("PV Generation Total (kW)", headers)
-        self.assertIn("PV Production Factor (kWh/kW) — irradiation proxy", headers)
+        self.assertIn("PV Irradiation (W/m²)", headers)
+        self.assertNotIn("PV Production Factor (kWh/kW) — irradiation proxy", headers)
         self.assertIn("PV to Storage (kW)", headers)
         self.assertIn("Grid to Storage (kW)", headers)
         self.assertEqual(dispatch["A2"].value, 1)
+        # Column C carries the raw PVWatts irradiance (W/m2).
+        self.assertEqual(dispatch["C2"].value, 300)
+        # Charging flows are shown negative (PV to Storage col F, Grid to Storage col J).
+        self.assertEqual(dispatch["F2"].value, -1)
+        self.assertEqual(dispatch["J3"].value, -1)
 
         self.assertEqual(len(dispatch._charts), 1)
         chart = dispatch._charts[0]
         self.assertIn("Peak-Load Week", chart.title.tx.rich.p[0].r[0].t)
+        # The PV-to-Storage line (column F) is charted so the charging dip shows.
+        val_refs = [series.val.numRef.ref for series in chart.series]
+        self.assertTrue(any("$F$" in ref for ref in val_refs), val_refs)
         # chart spans at most one week of rows, not the whole series
         values_ref = chart.series[0].val.numRef.ref
         first, last = values_ref.split("!")[1].split(":")
@@ -112,6 +121,51 @@ class VietnamXlsxBuilderTests(TestCase):
 
         self.assertEqual(workbook["Load Duration"]["B2"].value, 20)
         self.assertGreater(len(workbook["Load Duration"]._charts), 0)
+
+    def test_technical_results_has_solar_resource_section(self):
+        workbook = build_vietnam_esco_workbook(
+            _cash_flow_result(),
+            report_data=_report_data(),
+        )
+
+        sheet = workbook["Technical Results"]
+        labels = {
+            sheet.cell(row=row, column=1).value: sheet.cell(row=row, column=2)
+            for row in range(1, sheet.max_row + 1)
+        }
+        self.assertIn("Solar Resource (Year 1)", labels)
+        self.assertEqual(
+            labels["Annual POA Irradiation (kWh/m²)"].value, 1650.0
+        )
+        pr_cell = labels["Performance Ratio (Year 1)"]
+        self.assertEqual(pr_cell.value, 0.81)
+        self.assertEqual(pr_cell.number_format, "0.0%")
+
+    def test_report_contains_no_em_dash(self):
+        cash_flow = _cash_flow_result()
+        cash_flow["annual_cash_flows"][0].update({
+            "c_dn_vnd": 100.0,
+            "c_dppa_vnd": 20.0,
+            "c_cl_vnd": 10.0,
+            "c_bl_vnd": 40.0,
+            "cfd_net_vnd": 5.0,
+            "generator_revenue_vnd": 150.0,
+            "dppa_offtaker_cost_vnd": 175.0,
+        })
+        workbook = build_vietnam_esco_workbook(
+            cash_flow,
+            assumptions={
+                "esco_energy_discount_fraction": 0.9,
+                "dppa": {"type": "grid_dppa_cfd"},
+            },
+            report_data=_report_data(),
+        )
+
+        for worksheet in workbook.worksheets:
+            for row in worksheet.iter_rows():
+                for cell in row:
+                    if isinstance(cell.value, str):
+                        self.assertNotIn("—", cell.value, f"{worksheet.title}!{cell.coordinate}")
 
 
     def test_executive_summary_presents_both_sides_kpis(self):
@@ -334,11 +388,15 @@ def _report_data():
             "pv_curtailed_kwh": 5,
             "grid_to_storage_kwh": 0,
         },
+        "solar_resource": {
+            "annual_poa_irradiation_kwh_per_m2": 1650.0,
+            "performance_ratio": 0.81,
+        },
         "dispatch_profile": [
             {
                 "hour": 1,
                 "load_kw": 10,
-                "pv_production_factor": 0.2,
+                "pv_irradiance": 300,
                 "pv_total_kw": 4,
                 "pv_to_load_kw": 3,
                 "pv_to_storage_kw": 1,
@@ -351,7 +409,7 @@ def _report_data():
             {
                 "hour": 2,
                 "load_kw": 20,
-                "pv_production_factor": 0.5,
+                "pv_irradiance": 600,
                 "pv_total_kw": 7,
                 "pv_to_load_kw": 4,
                 "pv_to_storage_kw": 2,
