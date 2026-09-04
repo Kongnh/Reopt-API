@@ -28,6 +28,8 @@ class ThailandDefaultsTests(TestCase):
             "pv_installed_cost_per_kw",
             "bess_installed_cost_per_kw",
             "bess_installed_cost_per_kwh",
+            "bess_replace_cost_per_kw",
+            "bess_replace_cost_per_kwh",
             "annual_om_per_kw",
             "debt_fraction",
             "debt_interest_rate",

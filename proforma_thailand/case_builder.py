@@ -120,6 +120,9 @@ def build_thailand_case(case_config):
                 "installed_cost_per_kw",
                 value_of(FINANCIAL_DEFAULTS, "pv_installed_cost_per_kw"),
             ),
+            "om_cost_per_kw": pv_config.get(
+                "om_cost_per_kw", value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
+            ),
             "production_factor_series": production["production_factor"],
             # PEA pays nothing for exported energy, so the system must curtail
             # rather than export. See spec section 3.
@@ -143,6 +146,17 @@ def build_thailand_case(case_config):
             ),
             "installed_cost_constant": storage_config.get(
                 "installed_cost_constant", 0.0
+            ),
+            # REopt schedules battery_replacement_year at 10 but defaults every
+            # replace_cost field to 0.0, which models a free replacement and
+            # overstates the BESS case across a 25-year analysis.
+            "replace_cost_per_kw": storage_config.get(
+                "replace_cost_per_kw",
+                value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kw"),
+            ),
+            "replace_cost_per_kwh": storage_config.get(
+                "replace_cost_per_kwh",
+                value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kwh"),
             ),
             "can_grid_charge": storage_config.get("can_grid_charge", True),
         }

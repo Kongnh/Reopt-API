@@ -144,3 +144,42 @@ class ThailandCaseBuilderTests(TestCase):
             financial["offtaker_discount_rate_fraction"],
             financial["owner_discount_rate_fraction"],
         )
+
+
+class PayloadDefaultInheritanceTests(TestCase):
+    """Fields REopt would otherwise silently default to non-Thai values."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+        self.load_csv = self.tmp / "load.csv"
+        self.load_csv.write_text(
+            "load_kw\n" + "\n".join("500.0" for _ in range(35040)), encoding="utf-8"
+        )
+        self.off_peak = self.tmp / "off_peak.json"
+        self.off_peak.write_text(json.dumps(["2026-01-04"]), encoding="utf-8")
+        patcher = mock.patch(
+            "proforma_thailand.case_builder.pvwatts_client.fetch_pv_series",
+            return_value={"production_factor": [0.5] * 8760, "poa_wm2": []},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_bess_replacement_is_not_free(self):
+        # battery_replacement_year defaults to 10 while every replace_cost
+        # defaults to 0.0, so an omitted value models a free replacement.
+        config = _case_config(self.tmp, self.load_csv, self.off_peak)
+        config["technologies"]["storage"] = {"max_kw": 500, "max_kwh": 1000}
+
+        storage = build_thailand_case(config)["payload"]["ElectricStorage"]
+
+        self.assertGreater(storage["replace_cost_per_kw"], 0.0)
+        self.assertGreater(storage["replace_cost_per_kwh"], 0.0)
+
+    def test_pv_om_cost_comes_from_the_thailand_defaults(self):
+        pv = build_thailand_case(
+            _case_config(self.tmp, self.load_csv, self.off_peak)
+        )["payload"]["PV"]
+
+        self.assertEqual(pv["om_cost_per_kw"], 12.0)
