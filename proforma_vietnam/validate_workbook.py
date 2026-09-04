@@ -240,10 +240,18 @@ def main(argv=None):
 def validate_no_unmarked_placeholders(workbook, marker, headline_labels):
     """Fail when a headline metric is present but no placeholder is disclosed.
 
-    A stubbed capex quietly producing a confident-looking IRR is the failure
-    mode this prevents. If the workbook reports any headline metric, at least
-    one cell must carry the placeholder marker, otherwise the reader has no
-    signal that the inputs are provisional.
+    This is a disclosure smoke test, not a per-input audit. The check is
+    workbook-global: if any headline metric is reported, at least one cell
+    somewhere must carry the placeholder marker, otherwise the reader gets a
+    confident-looking IRR with no signal that the inputs are provisional. It
+    deliberately does NOT verify that each placeholder-backed input is
+    individually marked, and it does not correlate markers with the metrics
+    they feed, so it will pass a workbook where only one of many provisional
+    inputs is marked. Its job is to catch disclosure being absent or lost
+    wholesale, for example a rendering regression that drops the markers.
+
+    Returns a list for the caller's convenience but reports only the first
+    offending metric, which is enough to fail a release.
     """
     has_marker = any(
         isinstance(value, str) and marker in value
