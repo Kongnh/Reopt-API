@@ -1966,7 +1966,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 Append to `proforma_vietnam/tests/test_validate_workbook.py`:
 
 ```python
-class PlaceholderGuardTests(TestCase):
+class PlaceholderGuardTests(unittest.TestCase):
 
     MARKER = "PLACEHOLDER - pending Keen confirmation"
     HEADLINES = ("IRR", "NPV", "Payback")
@@ -2083,8 +2083,22 @@ Expected: PASS, 3 tests
 Run: `./.venv/Scripts/python.exe -m unittest discover -s proforma_vietnam/tests -t .`
 Expected: `OK`
 
-Run the gate command from Task 3 Step 5.
-Expected: all 8 `OK`.
+Run the Vietnam regression gate:
+
+```bash
+./.venv/Scripts/python.exe -c "
+from proforma_vietnam.tools.compare_workbooks import rebuild_all_cases, compare_workbooks
+built = rebuild_all_cases('.', 'gate_check')
+bad = 0
+for name, path in built.items():
+    diffs = compare_workbooks('baseline_workbooks/%s/%s' % (name, path.name), path)
+    print(name, 'OK' if not diffs else diffs[:3])
+    bad += len(diffs)
+raise SystemExit(1 if bad else 0)
+"
+```
+
+Expected: all 8 `OK`, exit code 0.
 
 - [ ] **Step 6: Commit**
 
