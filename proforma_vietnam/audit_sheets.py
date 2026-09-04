@@ -32,6 +32,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
 from proforma_vietnam.cash_flow import calculate_fx_sensitivity
+from proforma_vietnam.country_profile import VIETNAM_PROFILE
 from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
@@ -122,7 +123,8 @@ def _define_name(workbook, name, sheet_title, cell):
 # Assumptions
 # ---------------------------------------------------------------------------
 
-def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
+def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
+                            profile=VIETNAM_PROFILE):
     """Grouped assumptions with units, sources and workbook-scope named cells.
 
     Returns True when the engine derivation block was available (i.e. the
@@ -199,7 +201,9 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
     elif is_physical:
         structure_label = "Physical (private-wire) DPPA (ND57 Điều 25; Decree 243/2026)"
     elif is_direct:
-        structure_label = "Direct ownership — factory self-invest (avoided EVN bill)"
+        structure_label = "Direct ownership - factory self-invest (avoided {} bill)".format(
+            profile.utility_label
+        )
     else:
         structure_label = "ESCO discount-to-EVN (behind-the-meter)"
 
@@ -225,10 +229,13 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
 
     section("Currency & FX")
     entry("Model currency", "USD",
-          source="EVN tariff converted VND→USD before REopt; see Model Basis")
+          source="{} tariff converted {}→USD before REopt; see Model Basis".format(
+              profile.utility_label, profile.local_currency_code
+          ))
     entry("Contract exchange rate",
           d.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd"),
-          unit="VND per USD", source="case.json tariff.exchange_rate_vnd_per_usd",
+          unit="{} per USD".format(profile.local_currency_code),
+          source="case.json tariff.exchange_rate_vnd_per_usd",
           name="FX_VND_PER_USD", fmt=FMT_AMOUNT)
     entry("FX treatment", "Held flat over the analysis period",
           source="Simplification — see FX Sensitivity sheet")
@@ -260,10 +267,12 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
               fmt="0")
 
     section("Tariff & Escalation")
-    entry("EVN energy escalation", get("evn_energy_escalation_rate"), unit="per year",
+    entry("{} energy escalation".format(profile.utility_label),
+          get("evn_energy_escalation_rate"), unit="per year",
           source="case.json tariff.evn_energy_escalation_rate",
           name="ESC_ENERGY", fmt=FMT_PERCENT)
-    entry("EVN capacity (demand) escalation", get("evn_capacity_escalation_rate"),
+    entry("{} capacity (demand) escalation".format(profile.utility_label),
+          get("evn_capacity_escalation_rate"),
           unit="per year", source="case.json tariff.evn_capacity_escalation_rate",
           name="ESC_CAPACITY", fmt=FMT_PERCENT)
     entry("PV degradation", get("pv_degradation_rate") or 0.0, unit="per year",
@@ -278,7 +287,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
               unit="yes/no", source="case.json tariff.two_component_pilot_enabled")
 
     section("Contract Terms")
-    entry("ESCO energy price (fraction of EVN tariff)",
+    entry("ESCO energy price (fraction of {} tariff)".format(profile.utility_label),
           get("esco_energy_discount_fraction"), unit="fraction",
           source="case.json esco_contract.esco_energy_discount_fraction",
           name="ESCO_DISCOUNT", fmt=FMT_PERCENT)
@@ -342,7 +351,8 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
         # Gated on the engine derivation so disabled cases carry no surplus names
         # or rows.
         section("Surplus Export (Decree 243/2026)")
-        entry("Year-1 surplus sold to EVN", surplus.get("sold_kwh_year1"),
+        entry("Year-1 surplus sold to {}".format(profile.utility_label),
+              surplus.get("sold_kwh_year1"),
               unit="kWh/yr",
               source="min(PV grid export + curtailed, cap × PV output)",
               name="SURPLUS_KWH_Y1", fmt=FMT_AMOUNT)
@@ -354,7 +364,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
         entry("Surplus price escalation", surplus.get("price_escalation_rate"),
               unit="per year",
               source="case.json surplus_export.price_escalation_rate "
-                     "(default: EVN energy escalation)",
+                     "(default: {} energy escalation)".format(profile.utility_label),
               name="SURPLUS_ESC", fmt=FMT_PERCENT)
         entry("Surplus export cap", surplus.get("cap_fraction"),
               unit="of PV output",
@@ -537,10 +547,12 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
               name="VAT_REFUND_YEAR", fmt="0")
 
     section("Year-1 Engine Outputs (hardcoded — dispatch × tariff, not derivable in-sheet)")
-    entry("Year-1 BAU EVN bill", d.get("bau_evn_bill_year1_usd"), unit="USD",
+    entry("Year-1 BAU {} bill".format(profile.utility_label),
+          d.get("bau_evn_bill_year1_usd"), unit="USD",
           source="REopt ElectricTariff.year_one_bill_before_tax_bau",
           name="BAU_BILL_Y1", fmt=FMT_AMOUNT)
-    entry("Year-1 optimized EVN bill", d.get("optimized_evn_bill_year1_usd"), unit="USD",
+    entry("Year-1 optimized {} bill".format(profile.utility_label),
+          d.get("optimized_evn_bill_year1_usd"), unit="USD",
           source="REopt ElectricTariff.year_one_bill_before_tax",
           name="OPT_BILL_Y1", fmt=FMT_AMOUNT)
     entry("Year-1 BAU demand charge", d.get("bau_demand_charge_year1_usd"), unit="USD",
@@ -553,7 +565,9 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation):
           source="max(BAU − optimized demand charge, 0)",
           name="BASE_DEMAND_SAVINGS", fmt=FMT_AMOUNT)
     entry("Year-1 served-energy retail value", d.get("base_served_retail_value_usd"),
-          unit="USD", source="Σ project-served kWh × EVN TOU rate (8760 h)",
+          unit="USD", source="Σ project-served kWh × {} TOU rate (8760 h)".format(
+              profile.utility_label
+          ),
           name="BASE_SERVED_RETAIL", fmt=FMT_AMOUNT)
     if is_dppa:
         dp = d.get("dppa_year_one_usd", {})
@@ -770,7 +784,8 @@ class _ProFormaWriter:
         return row
 
 
-def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
+def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
+                                profile=VIETNAM_PROFILE):
     """Rebuild the cash flow with live Excel formulas + engine tie-out.
 
     Returns a refs dict used by the FX Sensitivity sheet and the Cover status:
@@ -832,10 +847,10 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         return f"IF({year_ref(c)}<=CONTRACT_YEARS,{expr},0)"
 
     r_fac_energy = w.line(
-        "fac_energy", "EVN energy escalation factor", "index",
+        "fac_energy", "{} energy escalation factor".format(profile.utility_label), "index",
         formula=lambda y, c: f"=(1+ESC_ENERGY)^({year_ref(c)}-1)", fmt=FMT_FACTOR)
     r_fac_capacity = w.line(
-        "fac_capacity", "EVN capacity escalation factor", "index",
+        "fac_capacity", "{} capacity escalation factor".format(profile.utility_label), "index",
         formula=lambda y, c: f"=(1+ESC_CAPACITY)^({year_ref(c)}-1)", fmt=FMT_FACTOR)
     r_fac_om = w.line(
         "fac_om", "O&M escalation factor", "index",
@@ -884,7 +899,9 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         # discount / 80/20 demand split. Same trajectories as the offtaker block:
         # BAU − optimized, the residual bill grown by the degradation repurchase.
         r_energy_rev = w.line(
-            "energy_rev", "Bill savings (avoided EVN bill: BAU − optimized)", "USD",
+            "energy_rev",
+            "Bill savings (avoided {} bill: BAU − optimized)".format(profile.utility_label),
+            "USD",
             formula=lambda y, c:
                 f"=BAU_BILL_Y1*{c}{r_fac_energy}"
                 f"-(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))*{c}{r_fac_energy}",
@@ -1285,7 +1302,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
     # --- offtaker -------------------------------------------------------------
     w.section("OFFTAKER (BUYER) POSITION (USD)")
     r_bau = w.line(
-        "bau_bill", "BAU EVN bill (energy + demand)", "USD",
+        "bau_bill", "BAU {} bill (energy + demand)".format(profile.utility_label), "USD",
         formula=lambda y, c: f"=BAU_BILL_Y1*{c}{r_fac_energy}")
     if is_dppa:
         r_c_dn = w.line(
@@ -1315,7 +1332,9 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions):
         # degradation repurchase). Savings = BAU − optimized = the bill-savings
         # revenue line above — the buyer view equals the developer view.
         r_post = w.line(
-            "post_cost", "Buyer cost with project (residual EVN bill)", "USD",
+            "post_cost",
+            "Buyer cost with project (residual {} bill)".format(profile.utility_label),
+            "USD",
             formula=lambda y, c:
                 f"=(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))"
                 f"*{c}{r_fac_energy}",
@@ -1544,7 +1563,8 @@ def _minimum_dscr(annual_rows):
 # FX Sensitivity
 # ---------------------------------------------------------------------------
 
-def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
+def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs,
+                               profile=VIETNAM_PROFILE):
     """USD equity returns under annual VND depreciation — live formulas.
 
     For USD-denominated debt (gated on the engine derivation) the debt service
@@ -1566,30 +1586,36 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs):
 
     worksheet.sheet_view.showGridLines = False
     worksheet.merge_cells("A1:H1" if show_dscr else "A1:F1")
-    title = worksheet.cell(row=1, column=1, value="FX Sensitivity — VND depreciation vs USD returns")
+    title = worksheet.cell(
+        row=1, column=1,
+        value="FX Sensitivity — {} depreciation vs USD returns".format(
+            profile.local_currency_code
+        ),
+    )
     title.fill = TITLE_FILL
     title.font = TITLE_FONT
     worksheet.row_dimensions[1].height = 24
     if is_usd_debt:
         note = (
-            "Cash flows are VND-denominated (EVN tariff / DPPA settlement) but reported in USD at "
+            "Cash flows are {0}-denominated ({1} tariff / DPPA settlement) but reported in USD at "
             "the fixed contract rate. Debt is USD-denominated, so its service is FX-fixed while the "
             "rest of the equity flow (CFADS) deflates by (1+d)^t: adjusted_t = CFADS_t/(1+d)^t − "
             "debt_service_t, and DSCR erodes as (CFADS_t/(1+d)^t)/debt_service_t. CIT is not "
             "recomputed under drift; FX revaluation of the USD principal is not modelled. The rate "
             "cells are editable; engine columns validate the default scenarios."
-        )
+        ).format(profile.local_currency_code, profile.utility_label)
     else:
         note = (
-            "Cash flows are VND-denominated (EVN tariff / DPPA settlement) but reported in USD "
+            "Cash flows are {0}-denominated ({1} tariff / DPPA settlement) but reported in USD "
             "at the fixed contract rate. Each scenario deflates the year-t USD equity cash flow "
-            "by (1+d)^t. Debt is assumed VND-denominated, so DSCR is unchanged. The rate cells "
+            "by (1+d)^t. Debt is assumed {0}-denominated, so DSCR is unchanged. The rate cells "
             "are editable; engine columns validate the default scenarios."
-        )
+        ).format(profile.local_currency_code, profile.utility_label)
     worksheet.cell(row=2, column=1, value=note).font = NOTE_FONT
 
     header_row = 4
-    headers = ["VND depreciation (per year)", "Equity IRR (USD)", "Equity NPV (USD)",
+    headers = ["{} depreciation (per year)".format(profile.local_currency_code),
+               "Equity IRR (USD)", "Equity NPV (USD)",
                "Equity IRR (engine)", "Equity NPV (engine)", "Status"]
     if show_dscr:
         headers += ["Min DSCR (USD)", "Min DSCR (engine)"]
@@ -1743,7 +1769,8 @@ def _settlement_title_suffix(is_dppa, is_physical, is_direct=False):
     return " — ESCO discount-to-EVN"
 
 
-def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable_host=True):
+def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable_host=True,
+                         profile=VIETNAM_PROFILE):
     if is_dppa:
         return [
             "Q_adj[h] = Q_re_meter[h] / K_pp × delta — quantity conversion generator→customer uses "
@@ -1786,14 +1813,14 @@ def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable
         )
         return [
             "The factory self-invests: it owns the PV/BESS asset, borrows the debt, and pays O&M and "
-            "replacements. Its benefit is the FULL avoided EVN bill — the buyer's natural benchmark against "
-            "an ESCO or DPPA offer (\"what if we just built it ourselves?\").",
-            "Bill savings = BAU EVN bill − optimized residual EVN bill, the full delta (energy + demand). "
+            "replacements. Its benefit is the FULL avoided {0} bill — the buyer's natural benchmark against "
+            "an ESCO or DPPA offer (\"what if we just built it ourselves?\").".format(profile.utility_label),
+            "Bill savings = BAU {0} bill − optimized residual {0} bill, the full delta (energy + demand). "
             "There is NO ESCO discount and NO 80/20 demand-savings split — the factory captures everything; "
-            "the buyer-analysis savings view therefore equals the developer view.",
-            "May sell rooftop surplus to EVN under Decree 243/2026 (PV→grid + would-be-curtailed), capped "
+            "the buyer-analysis savings view therefore equals the developer view.".format(profile.utility_label),
+            "May sell rooftop surplus to {0} under Decree 243/2026 (PV→grid + would-be-curtailed), capped "
             "at the Decision 988 regional ceiling and 50% of PV output — the same machinery as the ESCO "
-            "surplus leg; omitted → surplus not monetized (conservative).",
+            "surplus leg; omitted → surplus not monetized (conservative).".format(profile.utility_label),
             "CIT: flat standard 20% every year (standard_flat) — no first-profit holiday and no RE-producer "
             "preferential rate. A factory adding rooftop solar to an existing operation gets no new-project "
             "incentive on its general income and is not a licensed RE generator.",
@@ -1810,7 +1837,7 @@ def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable
     ]
 
 
-def write_model_basis_sheet(worksheet, assumptions, derivation):
+def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_PROFILE):
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
     is_physical = derivation.get("structure") == PHYSICAL_DPPA
@@ -1862,15 +1889,15 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
     usd_debt = derivation.get("debt_currency") == "USD"
     usd_debt_register_bullets = []
     if usd_debt:
-        debt_bullets.append(
-            "Debt currency: USD (international financing, ~5% default rate vs the 8.5% VND commercial-"
+        debt_bullets.append((
+            "Debt currency: USD (international financing, ~5% default rate vs the 8.5% {0} commercial-"
             "bank rate). The base case holds the contract FX flat, so the debt schedule, IDC, DSCR "
-            "and interest tax deduction run in USD exactly as VND debt would — only the default rate "
-            "differs. The FX exposure is surfaced on the FX Sensitivity sheet: under VND depreciation "
-            "d, USD debt service is FX-fixed while VND revenue (CFADS) deflates by (1+d)^t, so "
+            "and interest tax deduction run in USD exactly as {0} debt would — only the default rate "
+            "differs. The FX exposure is surfaced on the FX Sensitivity sheet: under {0} depreciation "
+            "d, USD debt service is FX-fixed while {0} revenue (CFADS) deflates by (1+d)^t, so "
             "adjusted equity = CFADS_t/(1+d)^t − debt_service_t and DSCR erodes as "
-            "(CFADS_t/(1+d)^t)/debt_service_t (VND debt keeps a depreciation-invariant DSCR)."
-        )
+            "(CFADS_t/(1+d)^t)/debt_service_t ({0} debt keeps a depreciation-invariant DSCR)."
+        ).format(profile.local_currency_code))
         usd_debt_register_bullets.append(
             "USD-denominated debt FX exposure is quantified on the FX Sensitivity sheet as a "
             "deflation overlay only: CIT is NOT recomputed under FX drift (including the interest "
@@ -2052,7 +2079,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
     sections = [
         ("1. Model architecture", [
             "REopt (NLR optimization engine) selects PV/BESS sizing and hourly dispatch against the "
-            "EVN time-of-use tariff over an 8760-hour year.",
+            "{} time-of-use tariff over an 8760-hour year.".format(profile.utility_label),
             "proforma_vietnam post-processes the REopt run: an hourly ND57/2025 DPPA settlement layer "
             "(when applicable) and a 25-year developer cash flow with Vietnam tax and debt.",
             "This workbook is generated from that engine. The Pro Forma (Audit) sheet re-derives the "
@@ -2060,24 +2087,28 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "the Checks block ties every metric back to the engine (PASS/REVIEW).",
         ]),
         ("2. Currency & FX", [
-            f"All money flows are computed in USD at the fixed contract rate ({fx:,.0f} VND/USD)."
+            f"All money flows are computed in USD at the fixed contract rate ({fx:,.0f} {profile.local_currency_code}/USD)."
             if fx else
             "All money flows are computed in USD at the fixed contract exchange rate.",
-            "Underlying revenue is VND-denominated (EVN tariff, FMP market, DPPA fees). Holding FX flat "
+            "Underlying revenue is {0}-denominated ({1} tariff, FMP market, DPPA fees). Holding FX flat "
             "for the analysis period is a simplification: the FX Sensitivity sheet quantifies USD-reported "
-            "returns under 0-3%/yr VND depreciation.",
-            "Sheets that show VND amounts (Hourly/Monthly Settlement, DPPA fee inputs) are VND-native "
-            "regulatory quantities, not conversions.",
+            "returns under 0-3%/yr {0} depreciation.".format(
+                profile.local_currency_code, profile.utility_label
+            ),
+            "Sheets that show {0} amounts (Hourly/Monthly Settlement, DPPA fee inputs) are {0}-native "
+            "regulatory quantities, not conversions.".format(profile.local_currency_code),
             "Debt is USD-denominated (international financing), so DSCR is FX-exposed — see the FX "
             "Sensitivity sheet."
             if usd_debt else
-            "Debt is assumed VND-denominated (local bank), so DSCR is FX-neutral.",
+            "Debt is assumed {}-denominated (local bank), so DSCR is FX-neutral.".format(
+                profile.local_currency_code
+            ),
         ]),
         ("3. Settlement math" + _settlement_title_suffix(is_dppa, is_physical, is_direct),
-         _settlement_bullets(is_dppa, is_physical, is_direct, assume_profitable_host)),
+         _settlement_bullets(is_dppa, is_physical, is_direct, assume_profitable_host, profile)),
         ("4. Multi-year mechanics", [
             "PV degradation compounds on generation-linked terms; energy lost to degradation is repurchased "
-            "from EVN at retail (added to the buyer's residual bill / C_BL).",
+            "from {} at retail (added to the buyer's residual bill / C_BL).".format(profile.utility_label),
             "O&M escalates at its own rate; battery replacement is booked in the configured year at REopt "
             "replacement unit costs.",
             *debt_bullets,
@@ -2123,7 +2154,9 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
             "Law 67/2025/QH15 + Decree 320/2025/NĐ-CP — CIT rates, RE-producer preferential incentive, "
             "holiday & loss carryforward (legacy Circular 78/2014 Art. 9, 18 shape kept for the standard regime).",
             "Circular 45/2013/TT-BTC — fixed-asset depreciation bands.",
-            "EVN retail tariff (current & QĐ963 TOU structures) as configured in the case file.",
+            "{} retail tariff (current & QĐ963 TOU structures) as configured in the case file.".format(
+                profile.utility_label
+            ),
         ]),
     ]
 
@@ -2150,7 +2183,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation):
 # ---------------------------------------------------------------------------
 
 def write_cover_sheet(worksheet, workbook, assumptions, derivation,
-                      check_ranges=None):
+                      check_ranges=None, profile=VIETNAM_PROFILE):
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
     is_physical = derivation.get("structure") == PHYSICAL_DPPA
@@ -2169,7 +2202,9 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
     elif is_physical:
         subtitle = "Physical (private-wire) DPPA — ND57 Điều 25 (Decree 243/2026)"
     elif is_direct:
-        subtitle = "Direct ownership — factory self-invest benchmark (avoided EVN bill)"
+        subtitle = "Direct ownership — factory self-invest benchmark (avoided {} bill)".format(
+            profile.utility_label
+        )
     else:
         subtitle = "ESCO discount-to-EVN tariff (behind-the-meter)"
     worksheet.cell(
@@ -2228,7 +2263,9 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
         ("Assumptions", "Every case input & contract term with unit, source and named cell"),
         ("Model Basis", "Methodology, settlement math, simplifications register"),
         (PRO_FORMA_SHEET, "Full cash flow rebuilt with live formulas + engine tie-out"),
-        ("FX Sensitivity", "USD returns under VND depreciation (editable)"),
+        ("FX Sensitivity", "USD returns under {} depreciation (editable)".format(
+            profile.local_currency_code
+        )),
         ("Buyer Analysis", "Offtaker savings vs business-as-usual"),
         ("Developer Returns", "Sources & uses, coverage, equity cash flow"),
         ("Technical Results", "System sizing, year-1 energy balance, bill comparison"),

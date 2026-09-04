@@ -6,6 +6,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from proforma_vietnam import audit_sheets
 from proforma_vietnam import proforma_schema as schema
+from proforma_vietnam.country_profile import VIETNAM_PROFILE
 from proforma_vietnam.dppa_settlement import DPPA_TYPE_GRID_CFD
 
 # Proforma line-item columns (Cash Flow, Tax, Debt, DPPA Annual) and the
@@ -198,7 +199,8 @@ DEVELOPER_ANNUAL_COLUMNS = [
 ]
 
 
-def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=None):
+def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=None,
+                                profile=VIETNAM_PROFILE):
     report_data = report_data or {}
     assumptions = assumptions or {}
     dppa_config = _active_dppa_config(assumptions)
@@ -209,13 +211,14 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     cover_sheet.title = "Cover"
     _write_executive_summary(
         workbook.create_sheet("Executive Summary"),
-        cash_flow_result, assumptions, report_data, dppa_config,
+        cash_flow_result, assumptions, report_data, dppa_config, profile,
     )
     audit_sheets.write_assumptions_sheet(
-        workbook.create_sheet("Assumptions"), workbook, assumptions, derivation
+        workbook.create_sheet("Assumptions"), workbook, assumptions, derivation,
+        profile=profile,
     )
     audit_sheets.write_model_basis_sheet(
-        workbook.create_sheet("Model Basis"), assumptions, derivation
+        workbook.create_sheet("Model Basis"), assumptions, derivation, profile=profile,
     )
     check_ranges = []
     if derivation:
@@ -223,17 +226,19 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
             workbook.create_sheet(audit_sheets.PRO_FORMA_SHEET),
             cash_flow_result,
             assumptions,
+            profile=profile,
         )
         check_ranges.append((proforma_refs["sheet"], proforma_refs["status_range"]))
         fx_refs = audit_sheets.write_fx_sensitivity_sheet(
-            workbook.create_sheet("FX Sensitivity"), cash_flow_result, proforma_refs
+            workbook.create_sheet("FX Sensitivity"), cash_flow_result, proforma_refs,
+            profile=profile,
         )
         check_ranges.append((fx_refs["sheet"], fx_refs["status_range"]))
     audit_sheets.write_cover_sheet(
-        cover_sheet, workbook, assumptions, derivation, check_ranges
+        cover_sheet, workbook, assumptions, derivation, check_ranges, profile=profile,
     )
     _write_buyer_analysis(
-        workbook.create_sheet("Buyer Analysis"), cash_flow_result, dppa_config
+        workbook.create_sheet("Buyer Analysis"), cash_flow_result, dppa_config, profile,
     )
     _write_developer_returns(
         workbook.create_sheet("Developer Returns"), cash_flow_result
@@ -350,7 +355,8 @@ def _write_kpi_rows(worksheet, start_row, rows):
     return row
 
 
-def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_data, dppa_config):
+def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_data,
+                              dppa_config, profile=VIETNAM_PROFILE):
     summary = cash_flow_result.get("summary", {})
     annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
     year_one = annual_rows[0]
@@ -359,7 +365,7 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
     case_name = assumptions.get("case_name") or "Vietnam ESCO / DPPA Case"
     contract_label = (
         "Grid-connected DPPA with CfD (ND57/2025)" if dppa_config else
-        "ESCO discount-to-EVN tariff (behind-the-meter)"
+        "ESCO discount-to-{} tariff (behind-the-meter)".format(profile.utility_label)
     )
     _write_title(
         worksheet,
@@ -402,7 +408,7 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         ])
     else:
         terms.extend([
-            ("ESCO Energy Price (fraction of EVN tariff)", assumptions.get("esco_energy_discount_fraction"), FORMAT_PERCENT, None),
+            ("ESCO Energy Price (fraction of {} tariff)".format(profile.utility_label), assumptions.get("esco_energy_discount_fraction"), FORMAT_PERCENT, None),
             ("Demand Savings Share to ESCO", assumptions.get("demand_savings_esco_share"), FORMAT_PERCENT, None),
         ])
     terms.append(("Analysis Period (Years)", len(annual_rows), None, None))
@@ -445,7 +451,9 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         "Buyer settlement quantity Q_Khc = min(hourly load, loss-adjusted generation Q_adj); "
         "excess generation is sold by the generator at FMP and never billed to the buyer."
         if dppa_config else
-        "ESCO is paid a discount to the time-specific EVN tariff for project-served energy.",
+        "ESCO is paid a discount to the time-specific {} tariff for project-served energy.".format(
+            profile.utility_label
+        ),
         "PV degradation, O&M escalation and battery replacement (REopt schedule) are applied across the analysis period.",
         (
             "PV straight-line depreciation over "
@@ -455,7 +463,9 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         "Vietnam CIT: 4-year exemption + 9-year 50% reduction from first profitable year; "
         "5-year tax-loss carryforward.",
         "All USD figures at the fixed contract exchange rate (see Assumptions); FX drift "
-        "between VND revenue and USD reporting is quantified on the FX Sensitivity sheet.",
+        "between {} revenue and USD reporting is quantified on the FX Sensitivity sheet.".format(
+            profile.local_currency_code
+        ),
     ]
     for note in notes:
         row += 1
@@ -467,7 +477,7 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
     worksheet.column_dimensions["D"].width = 36
 
 
-def _write_buyer_analysis(worksheet, cash_flow_result, dppa_config):
+def _write_buyer_analysis(worksheet, cash_flow_result, dppa_config, profile=VIETNAM_PROFILE):
     annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
     year_one = annual_rows[0]
     summary = cash_flow_result.get("summary", {})
@@ -475,7 +485,9 @@ def _write_buyer_analysis(worksheet, cash_flow_result, dppa_config):
     _write_title(
         worksheet,
         "Buyer Analysis — Cost vs Business-As-Usual",
-        "Annual electricity cost with the project compared against the EVN-only baseline (USD)",
+        "Annual electricity cost with the project compared against the {}-only baseline (USD)".format(
+            profile.utility_label
+        ),
         last_column=6,
     )
 

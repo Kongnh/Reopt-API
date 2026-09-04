@@ -329,6 +329,37 @@ def _cash_flow_result_with_derivation():
     )
 
 
+def build_direct_ownership_cash_flow_result():
+    # Factory self-invest (DIRECT_OWNERSHIP) with the surplus leg enabled, so
+    # callers exercise the live bill-savings formula, the shared surplus
+    # cells, and the flat-CIT (profitable-host) row. This mirrors
+    # test_audit_sheets._direct_result(), which delegates here so the
+    # fixture is defined once instead of duplicated across test modules.
+    from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
+
+    return calculate_vietnam_esco_cash_flow(
+        project_served_pv_kwh=[1000.0] * 8760,
+        evn_energy_rates_vnd_per_kwh=[0.08] * 8760,
+        bau_evn_bill_vnd=900000,
+        optimized_evn_bill_vnd=630000,
+        bau_demand_charge_vnd=180000,
+        optimized_demand_charge_vnd=120000,
+        pv_capex_vnd=2100000,
+        bess_capex_vnd=900000,
+        annual_om_vnd=45000,
+        esco_energy_discount_fraction=0.9,
+        pv_degradation_rate=0.005,
+        om_escalation_rate=0.02,
+        replacement_costs_by_year=[0.0] * 10 + [250000.0],
+        exchange_rate_vnd_per_usd=25000,
+        direct_ownership={},
+        surplus_export_kwh_year1=500000.0,
+        surplus_export_price_usd_per_kwh=0.04,
+        surplus_price_escalation_rate=0.04,
+        surplus_cap_fraction=0.5,
+    )
+
+
 def _cash_flow_result():
     return {
         "summary": {

@@ -124,14 +124,13 @@ def _direct_result():
     # audit sheet exercises the live bill-savings formula, the shared surplus
     # cells, and the flat-CIT (profitable-host) row. The year-11 replacement
     # (inherited from _esco_result) also drives an EBT sign flip, so the negative
-    # CIT shield is covered by the Excel tie-out.
-    return _esco_result(
-        direct_ownership={},
-        surplus_export_kwh_year1=500000.0,
-        surplus_export_price_usd_per_kwh=0.04,
-        surplus_price_escalation_rate=0.04,
-        surplus_cap_fraction=0.5,
+    # CIT shield is covered by the Excel tie-out. Delegates to test_xlsx_builder
+    # so this fixture is defined once rather than duplicated across modules.
+    from proforma_vietnam.tests.test_xlsx_builder import (
+        build_direct_ownership_cash_flow_result,
     )
+
+    return build_direct_ownership_cash_flow_result()
 
 
 DIRECT_ASSUMPTIONS = {
