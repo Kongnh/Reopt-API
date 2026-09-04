@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "description": "Thailand proforma defaults for the Rofu (Keen) case. Entries whose source is the placeholder marker are benchmark estimates awaiting confirmation from Keen and must render with a visible marker on the Assumptions sheet.",
+  "placeholder_marker": "PLACEHOLDER - pending Keen confirmation",
+  "financial": {
+    "project_years": {"value": 25, "source": "Analysis convention, matches the Vietnam cases"},
+    "exchange_rate_thb_per_usd": {"value": 32.5, "source": "Planning rate; revise at contract"},
+    "pea_tariff_escalation_rate": {"value": 0.03, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "ft_forecast_per_kwh": {"value": 0.1572, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "om_escalation_rate": {"value": 0.03, "source": "Matches the Vietnam default"},
+    "pv_installed_cost_per_kw": {"value": 700.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "bess_installed_cost_per_kw": {"value": 300.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "bess_installed_cost_per_kwh": {"value": 250.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "annual_om_per_kw": {"value": 12.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "debt_fraction": {"value": 0.70, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "debt_interest_rate": {"value": 0.06, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "debt_term_years": {"value": 10, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "insurance_rate_fraction": {"value": 0.005, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "grid_connection_cost": {"value": 0.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "permitting_and_eia_cost": {"value": 0.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "power_factor_mitigation_cost": {"value": 6000.0, "source": "PLACEHOLDER - pending Keen confirmation"}
+  },
+  "tax": {
+    "cit_standard_rate": {"value": 0.20, "source": "Thai Revenue Code standard corporate income tax rate"},
+    "cit_loss_carryforward_years": {"value": 5, "source": "Thai Revenue Code"},
+    "vat_rate_fraction": {"value": 0.07, "source": "Verified on the Rofu 06/2025 invoice"},
+    "pv_depreciation_years": {"value": 5, "source": "TO BE CITED IN TASK 13 - Thai Revenue Code machinery treatment"},
+    "bess_depreciation_years": {"value": 5, "source": "TO BE CITED IN TASK 13 - Thai Revenue Code machinery treatment"}
+  },
+  "site": {
+    "latitude": {"value": 15.209427, "source": "RTS Data Collection, Rofu Phimai"},
+    "longitude": {"value": 102.475687, "source": "RTS Data Collection, Rofu Phimai"},
+    "transformer_capacity_kva": {"value": 3230, "source": "RTS Data Collection: 500 x2 + 1600 + 630"},
+    "usable_roof_area_m2": {"value": 8424.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "pv_max_kw": {"value": 1685.0, "source": "PLACEHOLDER - pending Keen confirmation"}
+  }
+}
