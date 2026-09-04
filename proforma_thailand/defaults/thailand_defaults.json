@@ -2,6 +2,8 @@
   "version": 1,
   "description": "Thailand proforma defaults for the Rofu (Keen) case. Entries whose source is the placeholder marker are benchmark estimates awaiting confirmation from Keen and must render with a visible marker on the Assumptions sheet.",
   "placeholder_marker": "PLACEHOLDER - pending Keen confirmation",
+  "cost_currency": "usd",
+  "cost_currency_note": "Every per-kW, per-kWh and lump-sum cost in the \"financial\" block is USD, matching REopt's own installed_cost_per_kw convention. PEA tariff figures are THB and live in pea_tariff_rates.json. Convert with financial.exchange_rate_thb_per_usd.",
   "financial": {
     "project_years": {"value": 25, "source": "Analysis convention, matches the Vietnam cases"},
     "exchange_rate_thb_per_usd": {"value": 32.5, "source": "Planning rate; revise at contract"},
