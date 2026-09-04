@@ -115,3 +115,29 @@ def _days_in_month(year, month):
         days.append(current)
         current += timedelta(days=1)
     return days
+
+
+PEAK_START_MINUTE = 9 * 60
+PEAK_END_MINUTE = 22 * 60
+
+
+def build_month_buckets(intervals):
+    """Aggregate intervals into PEA billing buckets per (year, month).
+
+    Peak is 09:00 < t <= 22:00 on non-holiday days; holiday days go entirely to
+    the holiday bucket. This split is what reconciles to the invoice.
+    """
+    buckets = {}
+    for interval in intervals:
+        day = interval["date"]
+        key = (day.year, day.month)
+        bucket = buckets.setdefault(
+            key, {"peak_kwh": 0.0, "off_peak_kwh": 0.0, "holiday_kwh": 0.0}
+        )
+        if interval["day_type"] == "Holiday":
+            bucket["holiday_kwh"] += interval["kwh"]
+        elif PEAK_START_MINUTE < interval["end_minute"] <= PEAK_END_MINUTE:
+            bucket["peak_kwh"] += interval["kwh"]
+        else:
+            bucket["off_peak_kwh"] += interval["kwh"]
+    return buckets
