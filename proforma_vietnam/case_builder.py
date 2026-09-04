@@ -187,7 +187,7 @@ def build_vietnam_case(case_config):
     return {"payload": payload, "assumptions": assumptions}
 
 
-def _read_8760_load_csv(path):
+def _read_load_values(path):
     values = []
     with open(path, newline="") as csv_file:
         for row in csv.reader(csv_file):
@@ -201,10 +201,30 @@ def _read_8760_load_csv(path):
                 raise ValueError("Load profile cannot contain negative values.")
             values.append(value)
 
-    if len(values) != 8760:
-        raise ValueError("Vietnam case builder requires exactly 8760 hourly load values.")
-
     return values
+
+
+def _read_load_csv(path, time_steps_per_hour=1):
+    """Read a single-column load CSV at the given dispatch resolution.
+
+    Vietnam cases are hourly (8760); Thailand cases are 15-minute (35040),
+    because PEA bills demand on the 15-minute on-peak maximum.
+    """
+    expected = 8760 * time_steps_per_hour
+    values = _read_load_values(path)
+    if len(values) != expected:
+        raise ValueError(
+            "Load CSV must contain exactly {} values at "
+            "time_steps_per_hour={}; got {}.".format(
+                expected, time_steps_per_hour, len(values)
+            )
+        )
+    return values
+
+
+def _read_8760_load_csv(path):
+    """Backwards-compatible hourly reader (Vietnam cases)."""
+    return _read_load_csv(path, time_steps_per_hour=1)
 
 
 def _build_tariff(tariff_config):

@@ -461,7 +461,7 @@ class VietnamCaseBuilderTests(TestCase):
                 }
             )
 
-        self.assertIn("8760 hourly load values", str(context.exception))
+        self.assertIn("8760", str(context.exception))
 
     def test_auto_fetches_pv_production_series_when_missing(self):
         load_csv_path = _write_load_csv([500.0] * 8760)
@@ -1334,3 +1334,51 @@ def _write_load_csv(values):
         for value in values:
             writer.writerow([value])
     return path
+
+
+class ReadLoadCsvResolutionTests(TestCase):
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def _write_csv(self, name, count):
+        path = self.tmp / name
+        path.write_text(
+            "load_kw\n" + "\n".join(str(float(i % 100)) for i in range(count)),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_hourly_csv_reads_at_default_resolution(self):
+        from proforma_vietnam.case_builder import _read_load_csv
+
+        values = _read_load_csv(self._write_csv("hourly.csv", 8760))
+
+        self.assertEqual(len(values), 8760)
+
+    def test_fifteen_minute_csv_reads_at_four_steps_per_hour(self):
+        from proforma_vietnam.case_builder import _read_load_csv
+
+        values = _read_load_csv(
+            self._write_csv("quarter.csv", 35040), time_steps_per_hour=4
+        )
+
+        self.assertEqual(len(values), 35040)
+
+    def test_wrong_length_names_the_expected_count(self):
+        from proforma_vietnam.case_builder import _read_load_csv
+
+        with self.assertRaises(ValueError) as caught:
+            _read_load_csv(self._write_csv("short.csv", 8760), time_steps_per_hour=4)
+
+        self.assertIn("35040", str(caught.exception))
+
+    def test_legacy_wrapper_still_enforces_8760(self):
+        from proforma_vietnam.case_builder import _read_8760_load_csv
+
+        with self.assertRaises(ValueError):
+            _read_8760_load_csv(self._write_csv("quarter.csv", 35040))
