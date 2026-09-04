@@ -2823,7 +2823,6 @@ from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
 # Assumption keys that map straight onto cash-flow keyword arguments.
 PASSTHROUGH_OVERRIDE_KEYS = (
-    "annual_om_usd",
     "debt_fraction",
     "debt_interest_rate_fraction",
     "debt_term_years",
@@ -2844,6 +2843,12 @@ def cash_flow_overrides_from_assumptions(assumptions):
     presentation keys carry THB.
     """
     overrides = {}
+    # The cash-flow engine keeps Vietnam's _vnd parameter names by explicit
+    # decision: vietnam is the shared core and nothing was renamed. The suffix
+    # is a legacy label, not a currency assertion - the engine is
+    # currency-agnostic and this value is USD like the rest of the payload.
+    if assumptions.get("annual_om_usd") is not None:
+        overrides["annual_om_vnd"] = assumptions["annual_om_usd"]
     for key in PASSTHROUGH_OVERRIDE_KEYS:
         if assumptions.get(key) is not None:
             overrides[key] = assumptions[key]
@@ -2936,9 +2941,23 @@ Expected: PASS, 7 tests
 Run: `./.venv/Scripts/python.exe -m unittest discover -s proforma_vietnam/tests -t .`
 Expected: `OK`
 
-Run the gate command from Task 3 Step 5.
-Expected: all 8 `OK`. The Step 4 change touches a shared writer, so this check
-matters.
+Run the Vietnam regression gate:
+
+```bash
+./.venv/Scripts/python.exe -c "
+from proforma_vietnam.tools.compare_workbooks import rebuild_all_cases, compare_workbooks
+built = rebuild_all_cases('.', 'gate_check')
+bad = 0
+for name, path in built.items():
+    diffs = compare_workbooks('baseline_workbooks/%s/%s' % (name, path.name), path)
+    print(name, 'OK' if not diffs else diffs[:3])
+    bad += len(diffs)
+raise SystemExit(1 if bad else 0)
+"
+```
+
+Expected: all 8 `OK`, exit code 0. The Step 4 change touches a shared writer, so
+this check matters. Delete the scratch `gate_check/` directory afterwards.
 
 - [ ] **Step 7: Commit**
 
