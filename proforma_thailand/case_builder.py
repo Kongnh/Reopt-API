@@ -94,8 +94,26 @@ def build_thailand_case(case_config):
             "can_export_beyond_nem_limit": False,
             "can_curtail": True,
         },
+        # Every FinancialInputs field is null=True with no Django default, so
+        # anything omitted here silently takes REopt.jl's US-centric default.
+        # Send the Thai values we hold rather than inheriting those.
         "Financial": {
             "analysis_years": value_of(FINANCIAL_DEFAULTS, "project_years"),
+            "elec_cost_escalation_rate_fraction": value_of(
+                FINANCIAL_DEFAULTS, "pea_tariff_escalation_rate"
+            ),
+            "om_cost_escalation_rate_fraction": value_of(
+                FINANCIAL_DEFAULTS, "om_escalation_rate"
+            ),
+            "offtaker_tax_rate_fraction": TAX_DEFAULTS["cit_standard_rate"],
+            "offtaker_discount_rate_fraction": value_of(
+                FINANCIAL_DEFAULTS, "discount_rate"
+            ),
+            # Direct ownership: the offtaker IS the owner, so both rates match.
+            "owner_discount_rate_fraction": value_of(
+                FINANCIAL_DEFAULTS, "discount_rate"
+            ),
+            "owner_tax_rate_fraction": TAX_DEFAULTS["cit_standard_rate"],
         },
     }
 
@@ -110,6 +128,9 @@ def build_thailand_case(case_config):
             "installed_cost_per_kwh": storage_config.get(
                 "installed_cost_per_kwh",
                 value_of(FINANCIAL_DEFAULTS, "bess_installed_cost_per_kwh"),
+            ),
+            "installed_cost_constant": storage_config.get(
+                "installed_cost_constant", 0.0
             ),
             "can_grid_charge": storage_config.get("can_grid_charge", True),
         }

@@ -107,3 +107,22 @@ class ThailandCaseBuilderTests(TestCase):
             assumptions["service_charge_per_month_thb"], 312.24, places=2
         )
         self.assertEqual(assumptions["vat_rate_fraction"], 0.07)
+
+    def test_storage_does_not_inherit_the_reopt_fixed_cost_default(self):
+        config = _case_config(self.tmp, self.load_csv, self.off_peak)
+        config["technologies"]["storage"] = {"max_kw": 500, "max_kwh": 1000}
+
+        storage = build_thailand_case(config)["payload"]["ElectricStorage"]
+
+        self.assertEqual(storage["installed_cost_constant"], 0.0)
+
+    def test_financial_sends_thai_rates_not_reopt_defaults(self):
+        financial = self._build()["payload"]["Financial"]
+
+        self.assertEqual(financial["offtaker_tax_rate_fraction"], 0.20)
+        self.assertEqual(financial["owner_tax_rate_fraction"], 0.20)
+        self.assertEqual(financial["elec_cost_escalation_rate_fraction"], 0.03)
+        self.assertEqual(
+            financial["offtaker_discount_rate_fraction"],
+            financial["owner_discount_rate_fraction"],
+        )

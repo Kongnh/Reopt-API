@@ -32,6 +32,7 @@ class ThailandDefaultsTests(TestCase):
             "debt_fraction",
             "debt_interest_rate",
             "debt_term_years",
+            "discount_rate",
             "insurance_rate_fraction",
             "grid_connection_cost",
             "permitting_and_eia_cost",

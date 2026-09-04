@@ -10,6 +10,7 @@
     "pea_tariff_escalation_rate": {"value": 0.03, "source": "PLACEHOLDER - pending Keen confirmation"},
     "ft_forecast_per_kwh": {"value": 0.1572, "source": "PLACEHOLDER - pending Keen confirmation"},
     "om_escalation_rate": {"value": 0.03, "source": "Matches the Vietnam default"},
+    "discount_rate": {"value": 0.08, "source": "PLACEHOLDER - pending Keen confirmation"},
     "pv_installed_cost_per_kw": {"value": 700.0, "source": "PLACEHOLDER - pending Keen confirmation"},
     "bess_installed_cost_per_kw": {"value": 300.0, "source": "PLACEHOLDER - pending Keen confirmation"},
     "bess_installed_cost_per_kwh": {"value": 250.0, "source": "PLACEHOLDER - pending Keen confirmation"},
