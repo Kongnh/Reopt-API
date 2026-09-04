@@ -2651,7 +2651,7 @@ factor compensation from spec section 4 into project capex as a one-time cost.
 - Test: `proforma_thailand/tests/test_report.py`
 
 **Interfaces:**
-- Consumes: `power_factor_charge` (Task 8), defaults (Task 9),
+- Consumes: defaults (Task 9),
   `validate_no_unmarked_placeholders` (Task 10), `THAILAND_PROFILE` (Task 2),
   and from `proforma_vietnam`: `calculate_esco_pro_forma_from_reopt_results`,
   `build_vietnam_report_data`, `build_vietnam_esco_workbook`.
