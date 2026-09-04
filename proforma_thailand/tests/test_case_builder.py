@@ -62,6 +62,13 @@ class ThailandCaseBuilderTests(TestCase):
             len(case["payload"]["ElectricLoad"]["loads_kw"]), 35040
         )
 
+    def test_electric_load_declares_the_calendar_year(self):
+        # REopt errors with "Must provide ElectricLoad.year when using loads_kw"
+        # if this is absent, and the year must match the synthetic calendar.
+        load = self._build()["payload"]["ElectricLoad"]
+
+        self.assertEqual(load["year"], 2026)
+
     def test_tariff_uses_coincident_peak_not_monthly_demand(self):
         tariff = self._build()["payload"]["ElectricTariff"]
 
@@ -76,6 +83,17 @@ class ThailandCaseBuilderTests(TestCase):
         self.assertFalse(pv["can_wholesale"])
         self.assertFalse(pv["can_export_beyond_nem_limit"])
         self.assertTrue(pv["can_curtail"])
+
+    def test_a_zero_pv_case_omits_the_pv_block_entirely(self):
+        # validators.py:226 skips production_factor_series resampling when
+        # max_kw is 0, so declaring PV here ships an unresampled 8760 series
+        # into a 35040 model and the solver dies on a DimensionMismatch.
+        config = _case_config(self.tmp, self.load_csv, self.off_peak)
+        config["technologies"]["pv"] = {"max_kw": 0}
+
+        payload = build_thailand_case(config)["payload"]
+
+        self.assertNotIn("PV", payload)
 
     def test_rate_vintage_is_routed_to_assumptions_not_the_payload(self):
         case = self._build()

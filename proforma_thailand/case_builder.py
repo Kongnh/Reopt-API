@@ -72,28 +72,20 @@ def build_thailand_case(case_config):
 
     pv_config = technologies.get("pv", {})
     storage_config = technologies.get("storage", {})
+    pv_max_kw = pv_config.get("max_kw", value_of(SITE_DEFAULTS, "pv_max_kw"))
 
     payload = {
         "Settings": {"time_steps_per_hour": profile.time_steps_per_hour},
         "Site": {"latitude": site["latitude"], "longitude": site["longitude"]},
-        "ElectricLoad": {"loads_kw": loads_kw},
-        "ElectricTariff": tariff,
-        "PV": {
-            "max_kw": pv_config.get(
-                "max_kw", value_of(SITE_DEFAULTS, "pv_max_kw")
-            ),
-            "installed_cost_per_kw": pv_config.get(
-                "installed_cost_per_kw",
-                value_of(FINANCIAL_DEFAULTS, "pv_installed_cost_per_kw"),
-            ),
-            "production_factor_series": production["production_factor"],
-            # PEA pays nothing for exported energy, so the system must curtail
-            # rather than export. See spec section 3.
-            "can_net_meter": False,
-            "can_wholesale": False,
-            "can_export_beyond_nem_limit": False,
-            "can_curtail": True,
+        # REopt rejects loads_kw without a year (core_electric_load.jl:137).
+        # Take it from the synthetic calendar rather than hardcoding, so the
+        # two cannot drift apart. Jan-Jun are tagged 2026, which is not a leap
+        # year, matching the 365-day / 35040-interval series.
+        "ElectricLoad": {
+            "loads_kw": loads_kw,
+            "year": calendar_months[0][0],
         },
+        "ElectricTariff": tariff,
         # Every FinancialInputs field is null=True with no Django default, so
         # anything omitted here silently takes REopt.jl's US-centric default.
         # Send the Thai values we hold rather than inheriting those.
@@ -116,6 +108,26 @@ def build_thailand_case(case_config):
             "owner_tax_rate_fraction": TAX_DEFAULTS["cit_standard_rate"],
         },
     }
+
+    # validators.py:226 only resamples production_factor_series when max_kw > 0,
+    # so an 8760 series on a zero-PV case reaches Julia unresampled and fails
+    # against the 35040 container. A case with no PV should not declare the
+    # technology at all, the same way storage is handled below.
+    if pv_max_kw:
+        payload["PV"] = {
+            "max_kw": pv_max_kw,
+            "installed_cost_per_kw": pv_config.get(
+                "installed_cost_per_kw",
+                value_of(FINANCIAL_DEFAULTS, "pv_installed_cost_per_kw"),
+            ),
+            "production_factor_series": production["production_factor"],
+            # PEA pays nothing for exported energy, so the system must curtail
+            # rather than export. See spec section 3.
+            "can_net_meter": False,
+            "can_wholesale": False,
+            "can_export_beyond_nem_limit": False,
+            "can_curtail": True,
+        }
 
     if storage_config.get("max_kw") or storage_config.get("max_kwh"):
         payload["ElectricStorage"] = {
