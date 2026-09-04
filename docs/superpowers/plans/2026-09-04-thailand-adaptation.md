@@ -1938,7 +1938,7 @@ Expected: PASS, 5 tests
 - [ ] **Step 6: Commit**
 
 ```bash
-git add proforma_thailand/defaults
+git add proforma_thailand/defaults proforma_thailand/tests/test_thailand_defaults.py
 git commit -m "Add Thailand defaults with explicit placeholder provenance
 
 Every financing input Keen has not confirmed carries the placeholder
