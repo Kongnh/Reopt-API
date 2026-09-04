@@ -24,31 +24,44 @@ def extract_intervals(xlsm_path):
     from openpyxl import load_workbook
 
     workbook = load_workbook(xlsm_path, read_only=True, data_only=True)
-    worksheet = workbook[SHEET_NAME]
-    rows = []
-    for index, row in enumerate(worksheet.iter_rows(values_only=True)):
-        if index == 0 or row[0] is None:
-            continue
-        timestamp = row[0]
-        clock = row[2]
-        if isinstance(clock, timedelta):
-            # openpyxl cannot express a time-of-day of exactly 24:00 as a
-            # datetime.time, so the interval labelled 00:00 (end of day,
-            # Excel serial 1.0) comes back as timedelta(days=1) instead.
-            end_minute = int(clock.total_seconds() // 60)
-        else:
-            end_minute = clock.hour * 60 + clock.minute
-            if end_minute == 0:
-                end_minute = 24 * 60
-        rows.append(
-            {
-                "date": timestamp.date(),
-                "end_minute": end_minute,
-                "day_type": row[4],
-                "kwh": float(row[9] or 0.0),
-            }
-        )
-    return rows
+    try:
+        worksheet = workbook[SHEET_NAME]
+        rows = []
+        for index, row in enumerate(worksheet.iter_rows(values_only=True)):
+            if index == 0 or row[0] is None:
+                continue
+            timestamp = row[0]
+            clock = row[2]
+            if isinstance(clock, timedelta):
+                # openpyxl cannot express a time-of-day of exactly 24:00 as a
+                # datetime.time, so the interval labelled 00:00 (end of day,
+                # Excel serial 1.0) comes back as timedelta(days=1) instead.
+                end_minute = int(clock.total_seconds() // 60)
+            else:
+                end_minute = clock.hour * 60 + clock.minute
+                if end_minute == 0:
+                    end_minute = 24 * 60
+            kwh = row[9]
+            if kwh is None:
+                # An empty cell is missing data and must not be silently
+                # padded with 0.0 - a real 0.0 reading is legitimate data
+                # and is handled below, but `None` is the error case.
+                raise ValueError(
+                    "Missing kWh reading for {} interval ending minute {}.".format(
+                        timestamp.date().isoformat(), end_minute
+                    )
+                )
+            rows.append(
+                {
+                    "date": timestamp.date(),
+                    "end_minute": end_minute,
+                    "day_type": row[4],
+                    "kwh": float(kwh),
+                }
+            )
+        return rows
+    finally:
+        workbook.close()
 
 
 def build_calendar_year(intervals, calendar_year_months):
