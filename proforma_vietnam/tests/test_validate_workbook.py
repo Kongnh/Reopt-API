@@ -296,5 +296,68 @@ class ResolvePathsTests(unittest.TestCase):
                 _resolve_paths([tmp])
 
 
+class PlaceholderGuardTests(unittest.TestCase):
+
+    MARKER = "PLACEHOLDER - pending Keen confirmation"
+    HEADLINES = ("IRR", "NPV", "Payback")
+
+    def _workbook(self, assumption_rows, summary_rows):
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        assumptions = workbook.active
+        assumptions.title = "Assumptions"
+        for row in assumption_rows:
+            assumptions.append(row)
+        summary = workbook.create_sheet("Executive Summary")
+        for row in summary_rows:
+            summary.append(row)
+        return workbook
+
+    def test_marked_placeholder_with_headline_metric_passes(self):
+        from proforma_vietnam.validate_workbook import (
+            validate_no_unmarked_placeholders,
+        )
+
+        workbook = self._workbook(
+            [["PV capex", 700.0, self.MARKER]],
+            [["Project IRR", 0.14]],
+        )
+
+        self.assertEqual(
+            validate_no_unmarked_placeholders(workbook, self.MARKER, self.HEADLINES),
+            [],
+        )
+
+    def test_headline_metric_without_any_marker_fails(self):
+        from proforma_vietnam.validate_workbook import (
+            validate_no_unmarked_placeholders,
+        )
+
+        workbook = self._workbook(
+            [["PV capex", 700.0, "benchmark estimate"]],
+            [["Project IRR", 0.14]],
+        )
+
+        failures = validate_no_unmarked_placeholders(
+            workbook, self.MARKER, self.HEADLINES
+        )
+
+        self.assertEqual(len(failures), 1)
+        self.assertIn("IRR", failures[0])
+
+    def test_no_headline_metric_means_nothing_to_guard(self):
+        from proforma_vietnam.validate_workbook import (
+            validate_no_unmarked_placeholders,
+        )
+
+        workbook = self._workbook([["PV capex", 700.0, "confirmed"]], [["Notes", 1]])
+
+        self.assertEqual(
+            validate_no_unmarked_placeholders(workbook, self.MARKER, self.HEADLINES),
+            [],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

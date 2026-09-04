@@ -237,5 +237,39 @@ def main(argv=None):
     return 0 if all_ok else 1
 
 
+def validate_no_unmarked_placeholders(workbook, marker, headline_labels):
+    """Fail when a headline metric is present but no placeholder is disclosed.
+
+    A stubbed capex quietly producing a confident-looking IRR is the failure
+    mode this prevents. If the workbook reports any headline metric, at least
+    one cell must carry the placeholder marker, otherwise the reader has no
+    signal that the inputs are provisional.
+    """
+    has_marker = any(
+        isinstance(value, str) and marker in value
+        for worksheet in workbook.worksheets
+        for row in worksheet.iter_rows(values_only=True)
+        for value in row
+    )
+    if has_marker:
+        return []
+
+    failures = []
+    for worksheet in workbook.worksheets:
+        for row in worksheet.iter_rows(values_only=True):
+            for value in row:
+                if not isinstance(value, str):
+                    continue
+                for label in headline_labels:
+                    if label in value:
+                        failures.append(
+                            "{}: headline metric {!r} is reported but no "
+                            "placeholder marker is disclosed anywhere in the "
+                            "workbook.".format(worksheet.title, value)
+                        )
+                        return failures
+    return failures
+
+
 if __name__ == "__main__":
     sys.exit(main())
