@@ -384,8 +384,9 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
         # resolved rate is already surfaced by the DEBT_RATE cell above; this
         # only labels the currency the FX Sensitivity sheet treats as FX-fixed.
         entry("Debt currency", d.get("debt_currency"), unit="",
-              source="case.json financial.debt_currency (default VND; USD debt "
-                     "service is FX-fixed — see FX Sensitivity)",
+              source="case.json financial.debt_currency (default {}; USD debt "
+                     "service is FX-fixed — see FX Sensitivity)".format(
+                         profile.local_currency_code),
               name="DEBT_CURRENCY")
     entry("Debt term", get("debt_term_years"), unit="years",
           source="vietnam_defaults.json / case.json financial.debt_term_years",

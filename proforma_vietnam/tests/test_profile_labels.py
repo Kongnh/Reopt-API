@@ -17,8 +17,8 @@ def _all_strings(workbook):
 
 class ProfileLabelTests(TestCase):
 
-    def _workbook(self, profile):
-        result = build_direct_ownership_cash_flow_result()
+    def _workbook(self, profile, **cash_flow_overrides):
+        result = build_direct_ownership_cash_flow_result(**cash_flow_overrides)
         return build_vietnam_esco_workbook(
             result,
             assumptions={"country": profile.country},
@@ -35,6 +35,24 @@ class ProfileLabelTests(TestCase):
         ]
 
         self.assertEqual(offenders, [], "Thailand render leaked Vietnam labels")
+
+    def test_thailand_workbook_with_usd_debt_contains_no_vnd_or_evn_labels(self):
+        # USD-denominated debt (case.json financial.debt_currency="USD") is
+        # orthogonal to financing structure and gates its own Assumptions /
+        # FX Sensitivity / Model Basis text independently of DIRECT_OWNERSHIP
+        # vs ESCO vs DPPA. The base fixture above never sets debt_currency,
+        # so it can't exercise that branch; this case does.
+        workbook = self._workbook(THAILAND_PROFILE, debt_currency="USD")
+
+        offenders = [
+            (sheet, text)
+            for sheet, text in _all_strings(workbook)
+            if "VND" in text or "EVN" in text
+        ]
+
+        self.assertEqual(
+            offenders, [], "Thailand USD-debt render leaked Vietnam labels"
+        )
 
     def test_thailand_workbook_uses_thb_and_pea(self):
         workbook = self._workbook(THAILAND_PROFILE)
