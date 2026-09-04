@@ -63,3 +63,23 @@ class ThailandDefaultsTests(TestCase):
                 if key in block:
                     self.assertIsNotNone(block[key]["value"])
                     break
+
+
+class DepreciationCitationTests(TestCase):
+
+    def test_depreciation_entries_are_cited_not_left_as_task_stubs(self):
+        from proforma_thailand.defaults import TAX_DEFAULTS_RAW
+
+        for key in ("pv_depreciation_years", "bess_depreciation_years"):
+            source = TAX_DEFAULTS_RAW[key]["source"]
+            self.assertNotIn("TO BE CITED", source)
+            self.assertGreater(
+                len(source), 20, "{} needs a real citation".format(key)
+            )
+
+    def test_depreciation_lives_are_plausible(self):
+        from proforma_thailand.defaults import TAX_DEFAULTS
+
+        for key in ("pv_depreciation_years", "bess_depreciation_years"):
+            self.assertGreaterEqual(TAX_DEFAULTS[key], 3)
+            self.assertLessEqual(TAX_DEFAULTS[key], 25)
