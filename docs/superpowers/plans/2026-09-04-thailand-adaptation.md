@@ -2259,15 +2259,11 @@ from proforma_vietnam.case_builder import _read_load_csv
 from proforma_vietnam.country_profile import THAILAND_PROFILE
 from reoptjl.src.thailand.pea_tariff import build_pea_tariff
 
-RATE_VINTAGE_KEYS = ("rate_vintage_year", "rate_vintage_source")
-# Returned by build_pea_tariff for the proforma but not valid REopt inputs.
-NON_PAYLOAD_TARIFF_KEYS = RATE_VINTAGE_KEYS + (
-    "service_charge_per_month",
-    "vat_fraction",
-    "power_factor_charge_per_kvar",
-    "power_factor_allowance_fraction",
-    "ft_per_kwh_by_month",
-)
+# The producer owns the audit-key list; importing it means adding a key to
+# build_pea_tariff cannot silently leak into a REopt payload.
+from reoptjl.src.thailand.pea_tariff import AUDIT_METADATA_KEYS, RATE_VINTAGE_KEYS
+
+NON_PAYLOAD_TARIFF_KEYS = AUDIT_METADATA_KEYS
 
 
 def build_thailand_case(case_config):
@@ -2370,7 +2366,9 @@ def build_thailand_case(case_config):
         "power_factor_allowance_fraction": tariff_extras[
             "power_factor_allowance_fraction"
         ],
-        "ft_per_kwh_by_month": tariff_extras["ft_per_kwh_by_month"],
+        "ft_per_kwh_by_month_thb": [
+            value * exchange_rate for value in tariff_extras["ft_per_kwh_by_month"]
+        ],
         "cit_regime": "standard_flat",
         "cit_standard_rate": TAX_DEFAULTS["cit_standard_rate"],
         "pv_depreciation_years": TAX_DEFAULTS["pv_depreciation_years"],
