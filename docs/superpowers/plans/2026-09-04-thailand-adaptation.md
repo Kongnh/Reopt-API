@@ -2170,7 +2170,7 @@ class ThailandCaseBuilderTests(TestCase):
         self.off_peak.write_text(json.dumps(["2026-01-04"]), encoding="utf-8")
         patcher = mock.patch(
             "proforma_thailand.case_builder.pvwatts_client."
-            "fetch_production_factor_series",
+            "fetch_pv_series",
             return_value={"production_factor": [0.5] * 8760, "poa_wm2": []},
         )
         patcher.start()
@@ -2315,8 +2315,11 @@ def build_thailand_case(case_config):
     )
     tariff_extras = {key: tariff.pop(key) for key in NON_PAYLOAD_TARIFF_KEYS}
 
-    production = pvwatts_client.fetch_production_factor_series(
-        latitude=site["latitude"], longitude=site["longitude"]
+    # fetch_pv_series returns the dict; fetch_production_factor_series
+    # returns only the bare list. proforma_vietnam/case_builder.py:266
+    # uses the same call for the same reason.
+    production = pvwatts_client.fetch_pv_series(
+        site["latitude"], site["longitude"]
     )
 
     pv_config = technologies.get("pv", {})
