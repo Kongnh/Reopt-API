@@ -121,6 +121,24 @@ The residual is meter rounding (readings are scaled by the 2000 multiplier). The
 `DayType` column therefore reproduces PEA's own billing day classification
 exactly, and the end-time interval convention is confirmed.
 
+### PV alone cannot reduce billed demand by much; BESS is what unlocks it
+
+Every one of the twelve monthly on-peak maxima in the 2025-07 to 2026-06 window
+occurs between 09:15 and 16:30, so PV does erode the current peak. But the
+on-peak window runs to 22:00, and the 18:00-22:00 block has no sun. The maximum
+demand in that evening block is a **floor** on what PV alone can achieve:
+
+| | Average over 12 months |
+|---|---|
+| On-peak maximum | 1,378.7 kW |
+| Evening (18:00-22:00) maximum | 1,120.7 kW |
+| Maximum PV-only reduction | **18.7%** |
+
+Monthly the floor ranges from 971.2 kW (Oct 2025) to 1,342.4 kW (Jun 2026), so
+PV-only demand reduction varies between 6.7% and 28.1% by month. Any demand
+saving beyond that requires storage discharging into the evening. This shapes
+both the sizing narrative for Keen and the power factor exposure in section 4.
+
 ## Current architecture (relevant facts)
 
 - `esco_pro_forma.py` normalizes all money to **USD** before calling
@@ -236,21 +254,59 @@ end time.
 Rates are converted THB to USD at the contract FX rate before optimization,
 mirroring the Vietnam VND to USD convention.
 
-### 4. Power factor: a cost of solar that is easy to miss
+### 4. Power factor: a design requirement, not a cash flow line
 
-The June 2025 invoice records 664.00 kVAR against 1,368 kW billed demand. PEA
-charges 56.07 THB/kVAR on the portion of kVAR exceeding 61.97% of billed kW. At
-1,368 kW the threshold is about 848 kVAR, so 664 kVAR incurs nothing today.
+PEA charges 56.07 THB/kVAR on the portion of monthly maximum kVAR exceeding
+61.97% of billed kW. That threshold is equivalent to **PF 0.85**.
 
-PV reduces kW but does **not** reduce kVAR. If PV cuts billed on-peak demand to,
-say, 900 kW, the threshold falls to about 558 kVAR and the unchanged 664 kVAR
-becomes chargeable, costing roughly 6,000 THB/month that did not exist before.
+Measured from the invoices, reactive demand is stable and the site sits above the
+threshold today:
 
-The proforma therefore computes the power factor charge in **both** the BAU and
-the optimized case from the post-PV billed demand, and reports it as its own
-line. It must not be assumed to net out. Where it becomes material, the
-mitigation (capacitor bank or inverter reactive support) is costed as a
-flagged stub.
+| Month | Billed kW | kVAR | PF | Allowance (0.6197 x kW) | Charge |
+|---|---|---|---|---|---|
+| Jun 2025 | 1,368 | 664 | 0.90 | 848 | none |
+| Nov 2025 | 1,360 | 656 | 0.90 | 843 | none |
+
+PV reduces kW but not kVAR, so the allowance shrinks as demand falls. Using the
+evening (18:00-22:00) on-peak floor as the bound on PV-only demand reduction, and
+a nominal 800 kW for a BESS case:
+
+| Case | Billed kW | Allowance | Excess kVAR | Annual charge |
+|---|---|---|---|---|
+| Today | 1,379 | 854 | none | 0 |
+| PV only | ~1,121 | 694 | 0-58, a few months | ~10-15k THB |
+| PV + BESS | ~800 | 496 | ~164 | ~110k THB |
+
+Against demand-charge savings of roughly 412k THB/year (PV only) and 923k
+THB/year (PV + BESS), the exposure is about 3% and 12% respectively.
+
+**This is engineered away in practice, so it is not modelled as a recurring
+cost.** Compensating about 170-200 kVAR with an automatic capacitor bank costs
+on the order of 150,000-250,000 THB installed, which pays back against the
+BESS-case exposure in under two years; inverters specified with reactive
+capability can supply it with no additional hardware. Carrying a 25-year penalty
+stream would model a scenario competent engineering avoids and would understate
+the project.
+
+The treatment is therefore:
+
+1. **Post-processing check.** From the optimized dispatch, compute the required
+   compensation per month as `max(0, kVAR_max - 0.6197 * billed_kW)`, take the
+   annual maximum, and report it on Technical Results alongside the resulting PF.
+2. **One-time capex.** If the requirement is positive, size a reactive
+   compensation capex line from it and include it in project capex as a flagged
+   stub. It is small relative to total capex and barely moves IRR either way.
+3. **Escalation only if implausible.** A requirement beyond roughly 500 kVAR
+   would indicate an electrical design problem rather than a tariff line item,
+   and is surfaced as a warning rather than silently costed.
+
+Assumption, recorded because it drives the above: reactive demand is unchanged by
+PV and BESS. This is supported by the two invoice readings (656 and 664 kVAR at
+near-identical PF) but is confirmed across all available bills in Phase 2.
+
+Note that the interconnection agreement for a zero-export system may constrain
+inverter reactive support, so the capacitor bank is the default assumption and
+inverter-supplied Q is treated as a tender option, not a given.
 
 ### 5. Load pipeline
 
