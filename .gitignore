@@ -133,3 +133,7 @@ compare_run_*.json
 # Regenerable tooling artifacts (knowledge graph, brainstorm/skill scratch)
 graphify-out/
 .superpowers/
+
+# Scratch baseline for the Vietnam workbook regression gate (see
+# proforma_vietnam/tools/compare_workbooks.py). Regenerate, never commit.
+baseline_workbooks/
