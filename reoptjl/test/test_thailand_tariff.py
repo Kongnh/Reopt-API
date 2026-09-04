@@ -1,11 +1,18 @@
 from datetime import date
 from unittest import TestCase
 
-from reoptjl.src.thailand.pea_tariff import build_pea_tariff
+from reoptjl.src.thailand.pea_tariff import AUDIT_METADATA_KEYS, build_pea_tariff
 
 # Synthetic calendar year used by the Rofu case: Jan-Jun from 2026,
 # Jul-Dec from 2025. See the plan's Global Constraints.
 CALENDAR_MONTHS = [(2026, m) for m in range(1, 7)] + [(2025, m) for m in range(7, 13)]
+
+# The real REopt.jl ElectricTariffInputs fields build_pea_tariff() produces.
+REOPT_PAYLOAD_KEYS = {
+    "tou_energy_rates_per_kwh",
+    "coincident_peak_load_charge_per_kw",
+    "coincident_peak_load_active_time_steps",
+}
 
 
 class PeaTariffTests(TestCase):
@@ -85,6 +92,7 @@ class PeaTariffTests(TestCase):
             self.assertGreater(rates[timestep - 1], 4.0)
 
     def test_usd_conversion_divides_every_money_field(self):
+        thb_tariff = build_pea_tariff(CALENDAR_MONTHS, all_off_peak_dates=set())
         tariff = build_pea_tariff(
             CALENDAR_MONTHS,
             all_off_peak_dates=set(),
@@ -97,6 +105,21 @@ class PeaTariffTests(TestCase):
         )
         self.assertAlmostEqual(
             tariff["coincident_peak_load_charge_per_kw"][0], 132.93 / 32.5, places=8
+        )
+        self.assertAlmostEqual(
+            tariff["service_charge_per_month"],
+            thb_tariff["service_charge_per_month"] / 32.5,
+            places=8,
+        )
+        self.assertAlmostEqual(
+            tariff["power_factor_charge_per_kvar"],
+            thb_tariff["power_factor_charge_per_kvar"] / 32.5,
+            places=8,
+        )
+        self.assertAlmostEqual(
+            tariff["ft_per_kwh_by_month"][0],
+            thb_tariff["ft_per_kwh_by_month"][0] / 32.5,
+            places=8,
         )
 
     def test_usd_without_an_exchange_rate_raises(self):
@@ -112,3 +135,10 @@ class PeaTariffTests(TestCase):
     def test_calendar_months_must_be_twelve(self):
         with self.assertRaises(ValueError):
             build_pea_tariff(CALENDAR_MONTHS[:11], all_off_peak_dates=set())
+
+    def test_returned_keys_are_exactly_payload_plus_audit_metadata(self):
+        tariff = build_pea_tariff(CALENDAR_MONTHS, all_off_peak_dates=set())
+
+        self.assertEqual(
+            set(tariff.keys()), REOPT_PAYLOAD_KEYS | set(AUDIT_METADATA_KEYS)
+        )

@@ -27,12 +27,51 @@ from proforma_thailand.defaults import ft_for_month, pea_rates_for_year
 PEAK_START_MINUTE = 9 * 60
 PEAK_END_MINUTE = 22 * 60
 DEFAULT_VOLTAGE_LEVEL = "22_33kv"
-MONEY_KEYS_PER_MONTH = ("coincident_peak_load_charge_per_kw",)
+
+# Vintage-disclosure keys carried on build_pea_tariff()'s output. They are
+# audit metadata, not REopt.jl ElectricTariff scenario fields.
+RATE_VINTAGE_KEYS = ("rate_vintage_year", "rate_vintage_source")
+
+# All non-payload keys on build_pea_tariff()'s output: the vintage pair above
+# plus proforma-only figures with no REopt.jl ElectricTariffInputs field
+# (service charge, VAT, power-factor charge/allowance, and the disclosed Ft
+# adder). Callers that submit the tariff dict to REopt.jl must strip these
+# keys first; only tou_energy_rates_per_kwh, coincident_peak_load_charge_per_kw,
+# and coincident_peak_load_active_time_steps are real REopt.jl payload fields.
+AUDIT_METADATA_KEYS = RATE_VINTAGE_KEYS + (
+    "service_charge_per_month",
+    "vat_fraction",
+    "power_factor_charge_per_kvar",
+    "power_factor_allowance_fraction",
+    "ft_per_kwh_by_month",
+)
+
+# Money fields on the result dict that must run through _convert() when
+# currency="usd". List-valued fields are converted element-by-element;
+# scalar fields directly. A future money field must be added to one of these
+# tuples, or it will silently stay in THB when currency="usd".
+MONEY_LIST_KEYS = (
+    "tou_energy_rates_per_kwh",
+    "coincident_peak_load_charge_per_kw",
+    "ft_per_kwh_by_month",
+)
+MONEY_SCALAR_KEYS = (
+    "service_charge_per_month",
+    "power_factor_charge_per_kvar",
+)
 
 
 def build_pea_tariff(calendar_year_months, all_off_peak_dates,
                      voltage_level=DEFAULT_VOLTAGE_LEVEL, currency="thb",
                      exchange_rate_thb_per_usd=None, time_steps_per_hour=4):
+    """Build a PEA Schedule 4.2 (Large General Service, TOU) tariff.
+
+    Weekends are always treated as all-off-peak automatically
+    (``day.weekday() >= 5``); callers do not need to list them.
+    ``all_off_peak_dates`` is for PUBLIC HOLIDAYS ONLY -- additional dates
+    PEA bills at the off-peak/holiday rate that do not already fall on a
+    weekend.
+    """
     if len(calendar_year_months) != 12:
         raise ValueError(
             "calendar_year_months must hold exactly 12 (year, month) pairs in "
@@ -80,25 +119,25 @@ def build_pea_tariff(calendar_year_months, all_off_peak_dates,
     demand_rates = [rates["on_peak_demand_per_kw"]] * 12
 
     result = {
-        "tou_energy_rates_per_kwh": [
-            _convert(rate, currency, exchange_rate_thb_per_usd) for rate in energy_rates
-        ],
-        "coincident_peak_load_charge_per_kw": [
-            _convert(rate, currency, exchange_rate_thb_per_usd) for rate in demand_rates
-        ],
+        "tou_energy_rates_per_kwh": energy_rates,
+        "coincident_peak_load_charge_per_kw": demand_rates,
         "coincident_peak_load_active_time_steps": coincident_steps,
         "rate_vintage_year": vintage_year,
         "rate_vintage_source": values["source"],
-        "service_charge_per_month": _convert(
-            values["service_charge_per_month"], currency, exchange_rate_thb_per_usd
-        ),
+        "service_charge_per_month": values["service_charge_per_month"],
         "vat_fraction": values["vat_fraction"],
-        "power_factor_charge_per_kvar": _convert(
-            values["power_factor_charge_per_kvar"], currency, exchange_rate_thb_per_usd
-        ),
+        "power_factor_charge_per_kvar": values["power_factor_charge_per_kvar"],
         "power_factor_allowance_fraction": values["power_factor_allowance_fraction"],
         "ft_per_kwh_by_month": ft_by_month,
     }
+
+    for key in MONEY_LIST_KEYS:
+        result[key] = [
+            _convert(value, currency, exchange_rate_thb_per_usd) for value in result[key]
+        ]
+    for key in MONEY_SCALAR_KEYS:
+        result[key] = _convert(result[key], currency, exchange_rate_thb_per_usd)
+
     return result
 
 
