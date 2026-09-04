@@ -1,3 +1,12 @@
+"""Project finance cash flow engine.
+
+The ``_vnd`` suffix denotes THE LOCAL CONTRACT CURRENCY, not Vietnamese dong
+specifically. It is VND on Vietnam runs and THB on Thailand runs. The suffix is
+historical and was deliberately not renamed; the rendered currency code comes
+from the run's CountryProfile (see proforma_vietnam/country_profile.py), and
+every emitted assumptions block carries an explicit ``local_currency_code``.
+"""
+
 from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
 from proforma_vietnam.structures import (
     DIRECT_OWNERSHIP,

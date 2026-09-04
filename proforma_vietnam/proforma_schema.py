@@ -12,6 +12,12 @@ SSC module) stays imperative and owns the formulas; the schema only declares how
 each computed value is presented and which structures it belongs to. "Views" are
 thin, ordered lists of keys naming the columns of one sheet — the labels and
 formats are never repeated, only referenced.
+
+The ``_vnd`` suffix denotes THE LOCAL CONTRACT CURRENCY, not Vietnamese dong
+specifically. It is VND on Vietnam runs and THB on Thailand runs. The suffix is
+historical and was deliberately not renamed; the rendered currency code comes
+from the run's CountryProfile (see proforma_vietnam/country_profile.py), and
+every emitted assumptions block carries an explicit ``local_currency_code``.
 """
 
 from dataclasses import dataclass, field
