@@ -45,6 +45,9 @@ class ThailandDefaultsTests(TestCase):
             "power_factor_mitigation_cost",
             "inverter_replacement_year",
             "inverter_replacement_fraction_of_pv_capex",
+            "bess_min_duration_hours",
+            "bess_om_fraction_of_installed_cost",
+            "pv_tilt_degrees",
         }
 
         self.assertEqual(placeholder_keys(), expected)

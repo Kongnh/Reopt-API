@@ -67,7 +67,9 @@ def build_thailand_case(case_config):
     # returns only the bare list. proforma_vietnam/case_builder.py:266
     # uses the same call for the same reason.
     production = pvwatts_client.fetch_pv_series(
-        site["latitude"], site["longitude"]
+        site["latitude"],
+        site["longitude"],
+        overrides={"tilt": site.get("tilt", value_of(SITE_DEFAULTS, "pv_tilt_degrees"))},
     )
 
     pv_config = technologies.get("pv", {})
@@ -165,6 +167,16 @@ def build_thailand_case(case_config):
                 "replace_cost_per_kwh",
                 value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kwh"),
             ),
+            # REopt inherits 0.0 for both, which permits a physically meaningless
+            # zero-duration battery and prices O&M at the US default of 2.5 percent.
+            "min_duration_hours": storage_config.get(
+                "min_duration_hours",
+                value_of(FINANCIAL_DEFAULTS, "bess_min_duration_hours"),
+            ),
+            "om_cost_fraction_of_installed_cost": storage_config.get(
+                "om_cost_fraction_of_installed_cost",
+                value_of(FINANCIAL_DEFAULTS, "bess_om_fraction_of_installed_cost"),
+            ),
             # Same US incentives as PV above, same reason for zeroing them.
             "total_itc_fraction": 0.0,
             "macrs_option_years": 0,
@@ -181,6 +193,7 @@ def build_thailand_case(case_config):
         "utility_label": profile.utility_label,
         "time_steps_per_hour": profile.time_steps_per_hour,
         "exchange_rate_thb_per_usd": exchange_rate,
+        "pv_tilt_degrees": site.get("tilt", value_of(SITE_DEFAULTS, "pv_tilt_degrees")),
         "calendar_year_months": [list(pair) for pair in calendar_months],
         "service_charge_per_month_thb": (
             tariff_extras["service_charge_per_month"] * exchange_rate

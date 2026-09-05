@@ -31,7 +31,11 @@
     "inverter_replacement_year": {"value": 11, "source": "PLACEHOLDER - pending Keen confirmation",
       "note": "String inverters are normally replaced once inside a 25-year analysis. Year 11 matches the ENS SolarStorage calculation form supplied in the client folder"},
     "inverter_replacement_fraction_of_pv_capex": {"value": 0.10, "source": "PLACEHOLDER - pending Keen confirmation",
-      "note": "Inverter share of PV capex, from the ENS SolarStorage calculation form. Re-benchmarked for Thailand in Task 15"}
+      "note": "Inverter share of PV capex, from the ENS SolarStorage calculation form. Re-benchmarked for Thailand in Task 15"},
+    "bess_min_duration_hours": {"value": 1.5, "source": "PLACEHOLDER - pending Keen confirmation",
+      "note": "REopt inherits 0.0, which permits a physically meaningless zero-duration battery. 1.5 hours is the shortest duration a C&I lithium system is normally offered at"},
+    "bess_om_fraction_of_installed_cost": {"value": 0.01, "source": "PLACEHOLDER - pending Keen confirmation",
+      "note": "REopt's own default is 2.5 percent, a US figure. Re-benchmarked for Thailand in Task 15"}
   },
   "tax": {
     "cit_standard_rate": {"value": 0.20, "source": "Thai Revenue Code standard corporate income tax rate"},
@@ -45,6 +49,8 @@
     "longitude": {"value": 102.475687, "source": "RTS Data Collection, Rofu Phimai"},
     "transformer_capacity_kva": {"value": 3230, "source": "RTS Data Collection: 500 x2 + 1600 + 630"},
     "usable_roof_area_m2": {"value": 8424.0, "source": "PLACEHOLDER - pending Keen confirmation"},
-    "pv_max_kw": {"value": 1685.0, "source": "PLACEHOLDER - pending Keen confirmation"}
+    "pv_max_kw": {"value": 1685.0, "source": "PLACEHOLDER - pending Keen confirmation"},
+    "pv_tilt_degrees": {"value": 15, "source": "PLACEHOLDER - pending Keen confirmation",
+      "note": "Approximates both the site latitude of 15.21N and a typical industrial metal roof pitch. Actual roof pitch is not recorded in the RTS Data Collection sheet and is an information request to Ou"}
   }
 }

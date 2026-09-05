@@ -4,22 +4,30 @@ from pathlib import Path
 from unittest import TestCase, mock
 
 from proforma_thailand.case_builder import build_thailand_case
+from proforma_vietnam import pvwatts_client
 
 CALENDAR_MONTHS = [[2026, m] for m in range(1, 7)] + [[2025, m] for m in range(7, 13)]
 
+# Real RTS case data, the same files proforma_thailand/cases/rts/case.json points
+# at. Used as the default load/off-peak source so _case_config() is callable with
+# no args; existing callers still pass their own tmp-dir fixtures positionally.
+_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+_DEFAULT_LOAD_CSV = _DATA_DIR / "rofu_load_15min.csv"
+_DEFAULT_OFF_PEAK = _DATA_DIR / "rofu_all_off_peak_dates.json"
 
-def _case_config(tmp, load_csv, off_peak_json):
+
+def _case_config(tmp=None, load_csv=None, off_peak_json=None, storage=None):
     return {
         "site": {"latitude": 15.209427, "longitude": 102.475687},
         "load_profile": {
-            "path": str(load_csv),
-            "all_off_peak_dates_path": str(off_peak_json),
+            "path": str(load_csv or _DEFAULT_LOAD_CSV),
+            "all_off_peak_dates_path": str(off_peak_json or _DEFAULT_OFF_PEAK),
             "calendar_year_months": CALENDAR_MONTHS,
         },
         "tariff": {"voltage_level": "22_33kv", "exchange_rate_thb_per_usd": 32.5},
         "technologies": {
             "pv": {"max_kw": 1685.0, "installed_cost_per_kw": 700.0},
-            "storage": {"max_kw": 0, "max_kwh": 0},
+            "storage": storage or {"max_kw": 0, "max_kwh": 0},
         },
         "direct_ownership": {"enabled": True},
     }
@@ -224,3 +232,85 @@ class UsIncentivesAreDisabledTests(TestCase):
         self.assertEqual(storage["total_itc_fraction"], 0.0)
         self.assertEqual(storage["macrs_option_years"], 0)
         self.assertEqual(storage["macrs_bonus_fraction"], 0.0)
+
+
+class PayloadDefaultsTests(TestCase):
+    """Fields REopt would otherwise silently default to US-centric values:
+    a zero-duration battery, 2.5 percent storage O&M, and the Vietnam-tuned
+    PVWatts tilt of 10 degrees."""
+
+    def setUp(self):
+        # test_storage_* below do not care about the PV series, but
+        # build_thailand_case always calls fetch_pv_series, and the default
+        # tilt override (15) does not match anything already cached on disk,
+        # so an unmocked call would hit the live PVWatts API.
+        patcher = mock.patch.object(
+            pvwatts_client,
+            "fetch_pv_series",
+            return_value={"production_factor": [0.5] * 8760, "poa_wm2": []},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_storage_declares_a_minimum_duration(self):
+        case = build_thailand_case(_case_config(storage={"max_kw": 500, "max_kwh": 1000}))
+        self.assertEqual(
+            case["payload"]["ElectricStorage"]["min_duration_hours"], 1.5
+        )
+
+    def test_storage_om_fraction_is_explicit(self):
+        case = build_thailand_case(_case_config(storage={"max_kw": 500, "max_kwh": 1000}))
+        # assertIn alone would also pass if the key held REopt's own 0.025
+        # default by coincidence, so pin the actual Thailand value too.
+        self.assertIn(
+            "om_cost_fraction_of_installed_cost",
+            case["payload"]["ElectricStorage"],
+        )
+        self.assertEqual(
+            case["payload"]["ElectricStorage"]["om_cost_fraction_of_installed_cost"],
+            0.01,
+        )
+
+    def test_case_can_override_min_duration_hours(self):
+        storage = build_thailand_case(
+            _case_config(
+                storage={"max_kw": 500, "max_kwh": 1000, "min_duration_hours": 2.0}
+            )
+        )["payload"]["ElectricStorage"]
+        self.assertEqual(storage["min_duration_hours"], 2.0)
+
+    def test_case_can_override_om_cost_fraction(self):
+        storage = build_thailand_case(
+            _case_config(
+                storage={
+                    "max_kw": 500,
+                    "max_kwh": 1000,
+                    "om_cost_fraction_of_installed_cost": 0.02,
+                }
+            )
+        )["payload"]["ElectricStorage"]
+        self.assertEqual(storage["om_cost_fraction_of_installed_cost"], 0.02)
+
+    def test_tilt_defaults_to_fifteen_degrees(self):
+        captured = {}
+
+        def _fake_fetch(latitude, longitude, overrides=None, api_key=None):
+            captured["overrides"] = overrides
+            return {"production_factor": [0.0] * 8760, "poa_wm2": [0.0] * 8760}
+
+        with mock.patch.object(pvwatts_client, "fetch_pv_series", _fake_fetch):
+            build_thailand_case(_case_config())
+        self.assertEqual(captured["overrides"]["tilt"], 15)
+
+    def test_case_can_override_tilt(self):
+        captured = {}
+
+        def _fake_fetch(latitude, longitude, overrides=None, api_key=None):
+            captured["overrides"] = overrides
+            return {"production_factor": [0.0] * 8760, "poa_wm2": [0.0] * 8760}
+
+        config = _case_config()
+        config["site"]["tilt"] = 7
+        with mock.patch.object(pvwatts_client, "fetch_pv_series", _fake_fetch):
+            build_thailand_case(config)
+        self.assertEqual(captured["overrides"]["tilt"], 7)
