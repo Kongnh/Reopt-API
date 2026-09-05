@@ -77,3 +77,36 @@ class PollCompletenessTests(TestCase):
         from proforma_thailand.run_case import _is_complete
 
         self.assertTrue(_is_complete({"status": "error", "outputs": {}}))
+
+
+class PlaceholderGuardTests(TestCase):
+
+    def _workbook(self, cells):
+        import openpyxl
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        for index, value in enumerate(cells, start=1):
+            sheet.cell(row=index, column=1, value=value)
+        return workbook
+
+    def test_marked_workbook_passes(self):
+        from proforma_thailand.run_case import assert_placeholders_disclosed
+
+        workbook = self._workbook([
+            "Equity IRR", "PLACEHOLDER - pending Keen confirmation",
+        ])
+        assert_placeholders_disclosed(workbook)
+
+    def test_unmarked_workbook_raises(self):
+        from proforma_thailand.run_case import assert_placeholders_disclosed
+
+        workbook = self._workbook(["Equity IRR", "all inputs confirmed"])
+        with self.assertRaises(RuntimeError) as caught:
+            assert_placeholders_disclosed(workbook)
+        self.assertIn("placeholder", str(caught.exception).lower())
+
+    def test_workbook_with_no_headline_metric_passes(self):
+        from proforma_thailand.run_case import assert_placeholders_disclosed
+
+        workbook = self._workbook(["Dispatch", "Interval"])
+        assert_placeholders_disclosed(workbook)

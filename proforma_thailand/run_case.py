@@ -18,6 +18,26 @@ from proforma_thailand.case_builder import build_thailand_case
 from proforma_thailand.report import build_thailand_report
 
 DEFAULT_API_URL = "http://localhost:8000/v3"
+HEADLINE_LABELS = ("IRR", "NPV", "Payback")
+
+
+def assert_placeholders_disclosed(workbook):
+    """Refuse to ship a workbook that reports returns without disclosing provisionality.
+
+    The validator checks that placeholders are MARKED, not that they are
+    absent, so failing hard here does not block legitimate provisional inputs.
+    It blocks a rendering regression that silently drops the markers.
+    """
+    from proforma_thailand.defaults import PLACEHOLDER_MARKER
+    from proforma_vietnam.validate_workbook import validate_no_unmarked_placeholders
+
+    failures = validate_no_unmarked_placeholders(
+        workbook, PLACEHOLDER_MARKER, HEADLINE_LABELS
+    )
+    if failures:
+        raise RuntimeError(
+            "Refusing to write the workbook: {}".format(" ".join(failures))
+        )
 POLLING_STATUSES = ("Optimizing...", "optimizing...", "queued")
 BODY_BEARING_ERROR_CODES = (400, 404, 500)
 
@@ -91,6 +111,7 @@ def main(argv=None):
 
     assumptions = dict(case["assumptions"], run_uuid=run_uuid)
     workbook, extras = build_thailand_report(results, assumptions)
+    assert_placeholders_disclosed(workbook)
     workbook.save(out_dir / "thailand_report_{}.xlsx".format(run_uuid))
     _write_json(out_dir / "summary.json", summarize_results(results, extras))
     return 0
