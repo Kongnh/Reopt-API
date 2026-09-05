@@ -151,6 +151,7 @@ def build_thailand_report(reopt_results, assumptions):
     if isinstance(pv_outputs, list):
         pv_outputs = pv_outputs[0] if pv_outputs else {}
     storage_outputs = outputs.get("ElectricStorage") or {}
+    financial_outputs = outputs.get("Financial") or {}
     pv_capex = pv_outputs.get("initial_capital_cost") or 0.0
 
     # Copy so the caller's assumptions dict is untouched; the derived cost
@@ -167,16 +168,24 @@ def build_thailand_report(reopt_results, assumptions):
         )
 
     # Insurance is a real annual expense on an owned asset, so it belongs in
-    # opex where it escalates with O&M and is deducted for CIT.
+    # opex where it escalates with O&M and is deducted for CIT. This must run
+    # unconditionally: a case that leaves annual_om_usd unset (the production
+    # default) never puts annual_om_vnd in overrides, and the engine falls
+    # back to its own outputs.Financial.year_one_om_costs_before_tax with no
+    # premium added. Base O&M is the case's own figure when it supplied one,
+    # otherwise that same REopt fallback, read here so the override always
+    # carries the insured total.
     insurance_rate = value_of(FINANCIAL_DEFAULTS, "insurance_rate_fraction")
-    if overrides.get("annual_om_vnd") is not None:
-        overrides["annual_om_vnd"] = annual_opex_usd(
-            pv_capex,
-            storage_outputs.get("initial_capital_cost") or 0.0,
-            overrides.get("other_capex_vnd") or 0.0,
-            overrides["annual_om_vnd"],
-            insurance_rate,
-        )
+    base_om = assumptions.get("annual_om_usd")
+    if base_om is None:
+        base_om = financial_outputs.get("year_one_om_costs_before_tax") or 0.0
+    overrides["annual_om_vnd"] = annual_opex_usd(
+        pv_capex,
+        storage_outputs.get("initial_capital_cost") or 0.0,
+        overrides.get("other_capex_vnd") or 0.0,
+        base_om,
+        insurance_rate,
+    )
 
     cash_flow_result = calculate_esco_pro_forma_from_reopt_results(
         reopt_results,

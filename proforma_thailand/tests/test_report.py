@@ -24,7 +24,7 @@ ASSUMPTIONS = {
     "pv_depreciation_years": 5,
     "direct_ownership": {"enabled": True},
     "placeholder_keys": ["debt_interest_rate"],
-    "annual_om_usd": 20000.0,
+    "annual_om_usd": None,
     "debt_fraction": 0.7,
     "debt_interest_rate_fraction": 0.06,
     "debt_term_years": 10,
@@ -280,3 +280,43 @@ class InsuranceTests(TestCase):
             annual_opex_usd(1_000_000.0, 0.0, 0.0, 20_000.0, None),
             20_000.0,
         )
+
+
+class InsuranceReachesTheEngineTests(TestCase):
+    """Task 4 Finding 1: production never sets annual_om_usd (case_builder.py
+    always leaves it None), so annual_opex_usd() passing in isolation proves
+    nothing about whether the premium actually reaches the cash-flow engine.
+    This drives the real build_thailand_report entry point at that exact
+    production shape and reads the number the engine derived, off the
+    workbook's OM_YEAR1 named cell (audit_sheets.write_assumptions_sheet
+    sources it from cash_flow_result["derivation"]["annual_om_year1_usd"]).
+    """
+
+    def _results_with_capex(self):
+        # PV/BESS capex and REopt's own year-one O&M: the inputs
+        # annual_opex_usd's insurance base and the fallback O&M read from.
+        results = _results()
+        results["outputs"]["PV"]["initial_capital_cost"] = 1_000_000.0
+        results["outputs"]["ElectricStorage"]["initial_capital_cost"] = 150_000.0
+        results["outputs"]["Financial"] = {"year_one_om_costs_before_tax": 20_000.0}
+        return results
+
+    def _om_year1_from_workbook(self, workbook):
+        defined_name = workbook.defined_names["OM_YEAR1"]
+        sheet_title, coordinate = next(iter(defined_name.destinations))
+        return workbook[sheet_title][coordinate].value
+
+    def test_insurance_premium_reaches_the_engine_when_annual_om_usd_is_unset(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+
+        self.assertIsNone(ASSUMPTIONS["annual_om_usd"])  # the production shape
+        workbook, _ = build_thailand_report(self._results_with_capex(), ASSUMPTIONS)
+
+        insurance_rate = value_of(FINANCIAL_DEFAULTS, "insurance_rate_fraction")
+        expected = annual_opex_usd(
+            1_000_000.0, 150_000.0, 0.0, 20_000.0, insurance_rate,
+        )
+        # Exact, not >=: proves the premium landed, not merely that O&M is
+        # nonzero (which the pre-fix REopt fallback alone would also give).
+        self.assertAlmostEqual(self._om_year1_from_workbook(workbook), expected)
+        self.assertNotAlmostEqual(expected, 20_000.0)

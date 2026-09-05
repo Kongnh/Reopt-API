@@ -78,7 +78,7 @@ CURATED_ASSUMPTION_KEYS = {
     "target_min_dscr", "contract_years", "contract_residual_value_usd",
     "vat_rate_fraction", "vat_refund_year",
     "owner_discount_rate_fraction", "analysis_years",
-    "case_config", "dppa",
+    "case_config", "dppa", "insurance_rate_fraction",
 }
 
 STORAGE_CASE_ROWS = [
