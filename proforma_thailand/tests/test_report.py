@@ -413,3 +413,84 @@ class InsuranceReachesTheEngineTests(TestCase):
         # nonzero (which the pre-fix REopt fallback alone would also give).
         self.assertAlmostEqual(self._om_year1_from_workbook(workbook), expected)
         self.assertNotAlmostEqual(expected, 20_000.0)
+
+
+class NoReoptEmissionsOutputTests(TestCase):
+    """Task 14 Finding 4: Scope 2 is computed in-house in emissions.py because
+    REopt's own AVERT/Cambium/EASIUR emissions figures are US datasets, always
+    zero outside the US, and must never be quoted to the client. Nothing
+    before this test asserted those figures stay out of the workbook.
+    """
+
+    BANNED_DATASET_NAMES = ("AVERT", "Cambium", "EASIUR")
+    REOPT_EMISSIONS_SENTINEL = 918273.0
+
+    def test_no_reopt_emissions_dataset_name_or_value_reaches_the_workbook(self):
+        results = _results()
+        # A distinctive non-zero sentinel: the real case's own AVERT/Cambium
+        # output fields are all 0.0 (a US-only dataset outside the US), so
+        # asserting "0.0 does not appear" would pass vacuously. This proves
+        # the wiring never reads these fields at all, not merely that they
+        # happen to be zero today.
+        results["outputs"]["Site"] = dict(
+            results["outputs"].get("Site") or {},
+            annual_emissions_tonnes_CO2=self.REOPT_EMISSIONS_SENTINEL,
+            lifecycle_emissions_tonnes_CO2=self.REOPT_EMISSIONS_SENTINEL,
+        )
+        results["outputs"]["ElectricUtility"]["annual_emissions_tonnes_CO2"] = (
+            self.REOPT_EMISSIONS_SENTINEL
+        )
+
+        workbook, _ = build_thailand_report(results, ASSUMPTIONS)
+
+        texts = []
+        numbers = []
+        for worksheet in workbook.worksheets:
+            for row in worksheet.iter_rows(values_only=True):
+                for value in row:
+                    if isinstance(value, str):
+                        texts.append(value)
+                    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                        numbers.append(value)
+
+        for banned in self.BANNED_DATASET_NAMES:
+            self.assertFalse(
+                any(banned.lower() in text.lower() for text in texts),
+                "{} leaked into the Thailand workbook".format(banned),
+            )
+        self.assertNotIn(self.REOPT_EMISSIONS_SENTINEL, numbers)
+
+
+class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
+    """Task 14 Finding 5: the emissions rows reaching the workbook, and the
+    CURATED_ASSUMPTION_KEYS fix that stopped them double-rendering into the
+    "Other Assumptions" echo, were previously verified only by one-off
+    scripts against the real RTS case. Locks both down as a committed test,
+    reusing the row-finding idiom from proforma_vietnam/tests/test_audit_sheets.py.
+    """
+
+    def _rows_with_label(self, sheet, label):
+        return [
+            row for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=2).value == label
+        ]
+
+    def test_avoided_emissions_rows_render_exactly_once_each(self):
+        workbook, extras = build_thailand_report(_results(), ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+
+        for label in (
+            "Grid emission factor",
+            "Grid emission factor vintage",
+            "Avoided emissions, year 1",
+        ):
+            rows = self._rows_with_label(sheet, label)
+            self.assertEqual(
+                len(rows), 1,
+                "expected exactly one {!r} row, found {}".format(label, len(rows)),
+            )
+
+        row = self._rows_with_label(sheet, "Avoided emissions, year 1")[0]
+        self.assertAlmostEqual(
+            sheet.cell(row=row, column=3).value, extras["annual_avoided_tco2e"],
+        )

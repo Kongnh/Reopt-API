@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 from proforma_thailand.defaults import (
+    EMISSIONS_DEFAULTS,
     FINANCIAL_DEFAULTS,
     PLACEHOLDER_MARKER,
     SITE_DEFAULTS,
@@ -48,13 +49,15 @@ class ThailandDefaultsTests(TestCase):
             "bess_min_duration_hours",
             "bess_om_fraction_of_installed_cost",
             "pv_tilt_degrees",
+            "grid_emission_factor_kg_co2e_per_kwh",
+            "grid_emission_factor_vintage",
         }
 
         self.assertEqual(placeholder_keys(), expected)
 
     def test_placeholder_entries_carry_the_marker_string(self):
         for key in placeholder_keys():
-            for block in (FINANCIAL_DEFAULTS, SITE_DEFAULTS, TAX_DEFAULTS_RAW):
+            for block in (FINANCIAL_DEFAULTS, SITE_DEFAULTS, TAX_DEFAULTS_RAW, EMISSIONS_DEFAULTS):
                 if key in block:
                     self.assertEqual(
                         block[key]["source"], PLACEHOLDER_MARKER,
@@ -66,7 +69,7 @@ class ThailandDefaultsTests(TestCase):
 
     def test_placeholder_entries_still_expose_a_usable_value(self):
         for key in placeholder_keys():
-            for block in (FINANCIAL_DEFAULTS, SITE_DEFAULTS, TAX_DEFAULTS_RAW):
+            for block in (FINANCIAL_DEFAULTS, SITE_DEFAULTS, TAX_DEFAULTS_RAW, EMISSIONS_DEFAULTS):
                 if key in block:
                     self.assertIsNotNone(block[key]["value"])
                     break

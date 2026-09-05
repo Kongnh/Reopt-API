@@ -256,6 +256,9 @@ def build_thailand_report(reopt_results, assumptions):
     workbook_assumptions["grid_emission_factor_source"] = EMISSIONS_DEFAULTS[
         "grid_emission_factor_kg_co2e_per_kwh"
     ]["source"]
+    workbook_assumptions["grid_emission_factor_vintage"] = value_of(
+        EMISSIONS_DEFAULTS, "grid_emission_factor_vintage"
+    )
 
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
@@ -282,7 +285,9 @@ def build_thailand_report(reopt_results, assumptions):
         "lifetime_avoided_tco2e": lifetime_avoided_tco2e(
             annual_tco2e,
             assumptions.get("project_years") or 25,
-            assumptions.get("pv_degradation_rate") or 0.0,
+            (cash_flow_result.get("derivation") or {}).get("pv_degradation_rate")
+            or assumptions.get("pv_degradation_rate")
+            or 0.0,
         ),
         "grid_emission_factor_kg_co2e_per_kwh": emission_factor,
     }

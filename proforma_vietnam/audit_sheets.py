@@ -81,7 +81,7 @@ CURATED_ASSUMPTION_KEYS = {
     "owner_discount_rate_fraction", "analysis_years",
     "case_config", "dppa", "insurance_rate_fraction",
     "annual_avoided_tco2e", "grid_emission_factor_kg_co2e_per_kwh",
-    "grid_emission_factor_source",
+    "grid_emission_factor_source", "grid_emission_factor_vintage",
 }
 
 STORAGE_CASE_ROWS = [
@@ -769,6 +769,13 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
             "Grid emission factor",
             (assumptions or {}).get("grid_emission_factor_kg_co2e_per_kwh"),
             unit="kg CO2e/kWh",
+            source=(assumptions or {}).get(
+                "grid_emission_factor_source", "See Assumptions"
+            ),
+        )
+        entry(
+            "Grid emission factor vintage",
+            (assumptions or {}).get("grid_emission_factor_vintage"),
             source=(assumptions or {}).get(
                 "grid_emission_factor_source", "See Assumptions"
             ),
