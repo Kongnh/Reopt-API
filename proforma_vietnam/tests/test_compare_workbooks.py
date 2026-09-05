@@ -47,11 +47,15 @@ class CompareWorkbooksTests(TestCase):
         # DEFAULT_IGNORE_SUBSTRINGS is now empty (see NarrowedIgnoreRulesTests),
         # so this exercises the ignore_substrings parameter explicitly rather
         # than relying on a default that no longer ignores anything.
-        a = _write(self.tmp, "a.xlsx", [["prepared 2026-07-07"]])
-        b = _write(self.tmp, "b.xlsx", [["prepared 2026-09-04"]])
+        #
+        # These fixtures must NOT be date-shaped: _normalize_prepared_date
+        # runs before the substring check, so a "prepared <date>" pair would
+        # already compare equal and never reach _both_ignored at all.
+        a = _write(self.tmp, "a.xlsx", [["DRAFT: revision alpha"]])
+        b = _write(self.tmp, "b.xlsx", [["DRAFT: revision beta"]])
 
         self.assertEqual(
-            compare_workbooks(a, b, ignore_substrings=("prepared ",)), [])
+            compare_workbooks(a, b, ignore_substrings=("DRAFT: ",)), [])
 
     def test_ignored_substring_must_match_both_sides(self):
         a = _write(self.tmp, "a.xlsx", [["prepared 2026-07-07"]])
