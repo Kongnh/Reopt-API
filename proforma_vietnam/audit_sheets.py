@@ -633,6 +633,17 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
         for key in sorted(leftover):
             entry(key, leftover[key], source="assumptions.json")
 
+    # Gated on the key, so Vietnam workbooks, which never set it, are unchanged.
+    insurance_rate = (assumptions or {}).get("insurance_rate_fraction")
+    if insurance_rate is not None:
+        entry(
+            "Insurance (fraction of installed capex per year)",
+            insurance_rate,
+            unit="per year",
+            source="Included in annual operating cost",
+            fmt="0.000%",
+        )
+
     # Provisional inputs get a row each, so the reader can see WHICH numbers are
     # awaiting confirmation rather than just that some are. Gated on the key, so
     # Vietnam workbooks, which never set it, are unchanged.

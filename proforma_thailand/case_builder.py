@@ -220,16 +220,9 @@ def build_thailand_case(case_config):
         "inverter_replacement_year": value_of(
             FINANCIAL_DEFAULTS, "inverter_replacement_year"
         ),
-        "inverter_replacement_cost_usd": (
-            pv_max_kw
-            * pv_config.get(
-                "installed_cost_per_kw",
-                value_of(FINANCIAL_DEFAULTS, "pv_installed_cost_per_kw"),
-            )
-            * value_of(
-                FINANCIAL_DEFAULTS, "inverter_replacement_fraction_of_pv_capex"
-            )
-        ),
+        # inverter_replacement_cost_usd is NOT set here: pv_max_kw is the
+        # roof-area cap handed to REopt, not the size the optimizer actually
+        # chose. report.py derives the cost from the solved PV capex instead.
         "direct_ownership": case_config.get("direct_ownership", {"enabled": True}),
         "placeholder_keys": sorted(placeholder_keys()),
         "pv_poa_irradiance_series": production.get("poa_wm2") or None,

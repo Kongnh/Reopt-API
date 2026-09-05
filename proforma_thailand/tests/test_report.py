@@ -1,6 +1,7 @@
 from unittest import TestCase
 
 from proforma_thailand.report import (
+    annual_opex_usd,
     build_thailand_report,
     cash_flow_overrides_from_assumptions,
 )
@@ -257,3 +258,25 @@ class DepreciationAndInverterReplacementTests(TestCase):
         series = cash_flow_result["derivation"]["replacement_costs_by_year_usd"]
         self.assertEqual(series[9], 52_000.0)
         self.assertEqual(series[10], 118_000.0)
+
+
+class InsuranceTests(TestCase):
+
+    def test_insurance_is_a_fraction_of_total_installed_capex(self):
+        # 0.5 percent of 1,200,000 is 6,000, on top of 20,000 of O&M.
+        self.assertAlmostEqual(
+            annual_opex_usd(1_000_000.0, 150_000.0, 50_000.0, 20_000.0, 0.005),
+            26_000.0,
+        )
+
+    def test_zero_rate_leaves_om_untouched(self):
+        self.assertAlmostEqual(
+            annual_opex_usd(1_000_000.0, 0.0, 0.0, 20_000.0, 0.0),
+            20_000.0,
+        )
+
+    def test_none_rate_is_treated_as_zero(self):
+        self.assertAlmostEqual(
+            annual_opex_usd(1_000_000.0, 0.0, 0.0, 20_000.0, None),
+            20_000.0,
+        )

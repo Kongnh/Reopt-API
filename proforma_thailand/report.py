@@ -125,14 +125,57 @@ def billed_demand_kw_by_month(reopt_results):
     ]
 
 
+def annual_opex_usd(pv_capex_usd, bess_capex_usd, other_capex_usd,
+                    annual_om_usd, insurance_rate_fraction):
+    """Year-one operating cost including insurance.
+
+    Insurance was costed nowhere. It is a real annual expense on an owned
+    asset, so it belongs in opex where it escalates with O&M and is deducted
+    for CIT. The base is total installed capex, which is how underwriters quote
+    an all-risk premium.
+    """
+    total_capex = (pv_capex_usd or 0.0) + (bess_capex_usd or 0.0) + (other_capex_usd or 0.0)
+    return (annual_om_usd or 0.0) + total_capex * (insurance_rate_fraction or 0.0)
+
+
 def build_thailand_report(reopt_results, assumptions):
     """Return ``(workbook, extras)`` for a Thailand DIRECT_OWNERSHIP run."""
     required_kvar, mitigation_cost = compute_power_factor_compensation(assumptions)
+
+    # Capex comes from the solved results, not the roof-area cap handed to
+    # REopt, so the inverter replacement (below) and insurance (further down)
+    # are both derived here rather than in the case builder, which does not
+    # yet know the optimized sizes.
+    outputs = reopt_results.get("outputs") or {}
+    pv_outputs = outputs.get("PV") or {}
+    if isinstance(pv_outputs, list):
+        pv_outputs = pv_outputs[0] if pv_outputs else {}
+    storage_outputs = outputs.get("ElectricStorage") or {}
+    pv_capex = pv_outputs.get("initial_capital_cost") or 0.0
+
+    # Copy so the caller's assumptions dict is untouched; the derived cost
+    # only needs to reach cash_flow_overrides_from_assumptions below.
+    assumptions = dict(assumptions)
+    assumptions["inverter_replacement_cost_usd"] = pv_capex * value_of(
+        FINANCIAL_DEFAULTS, "inverter_replacement_fraction_of_pv_capex"
+    )
 
     overrides = cash_flow_overrides_from_assumptions(assumptions)
     if mitigation_cost:
         overrides["other_capex_vnd"] = (
             overrides.get("other_capex_vnd", 0.0) + mitigation_cost
+        )
+
+    # Insurance is a real annual expense on an owned asset, so it belongs in
+    # opex where it escalates with O&M and is deducted for CIT.
+    insurance_rate = value_of(FINANCIAL_DEFAULTS, "insurance_rate_fraction")
+    if overrides.get("annual_om_vnd") is not None:
+        overrides["annual_om_vnd"] = annual_opex_usd(
+            pv_capex,
+            storage_outputs.get("initial_capital_cost") or 0.0,
+            overrides.get("other_capex_vnd") or 0.0,
+            overrides["annual_om_vnd"],
+            insurance_rate,
         )
 
     cash_flow_result = calculate_esco_pro_forma_from_reopt_results(
@@ -153,6 +196,7 @@ def build_thailand_report(reopt_results, assumptions):
     workbook_assumptions["placeholder_marker"] = PLACEHOLDER_MARKER
     workbook_assumptions["power_factor_compensation_kvar"] = required_kvar
     workbook_assumptions["power_factor_mitigation_cost_usd"] = mitigation_cost
+    workbook_assumptions["insurance_rate_fraction"] = insurance_rate
 
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
