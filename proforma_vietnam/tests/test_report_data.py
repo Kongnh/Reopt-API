@@ -84,6 +84,45 @@ class UpsampleSeriesTests(TestCase):
         self.assertEqual(len(_upsample_series([0.5] * 8760, 4)), 35040)
 
 
+class DispatchIrradianceResolutionTests(TestCase):
+    """Locks in the Task 8 split: _dispatch_rows must see irradiance
+    up-sampled to the model's resolution, while _solar_resource must keep
+    the original hourly series. Feeding the up-sampled series into
+    _solar_resource instead would 4x annual_poa_irradiation_kwh_per_m2 -
+    silently, since the dispatch row count and length checks alone would
+    still pass.
+    """
+
+    def test_dispatch_rows_are_upsampled_while_solar_resource_stays_hourly(self):
+        poa_series = [100.0] * 8760
+        poa_series[0] = 500.0  # distinct first hour, so four equal values at
+        # the start of the dispatch column can only come from the hour being
+        # repeated, not from reading the raw hourly array by row index.
+
+        report = build_vietnam_report_data(
+            _fake_reopt_results(),
+            _cash_flow_result(),
+            poa_irradiance_series=poa_series,
+            time_steps_per_hour=4,
+        )
+
+        rows = report["dispatch_profile"]
+        self.assertEqual(len(rows), 35040)
+        self.assertEqual(
+            [row["pv_irradiance"] for row in rows[:4]],
+            [500.0, 500.0, 500.0, 500.0],
+        )
+
+        # annual_poa_irradiation_kwh_per_m2 = sum(original 8760 series) / 1000
+        # = (500.0 + 100.0 * 8759) / 1000 = 876.4. If _solar_resource were fed
+        # the up-sampled 35040-row series instead, this would come out 4x too
+        # high (3505.6) - the same bug class as this branch's founding
+        # Critical (a Performance Ratio above 1.0, which is impossible).
+        self.assertAlmostEqual(
+            report["solar_resource"]["annual_poa_irradiation_kwh_per_m2"], 876.4
+        )
+
+
 def _fake_reopt_results():
     return {
         "inputs": {
