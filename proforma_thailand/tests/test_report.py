@@ -191,3 +191,69 @@ class NoVietnamProvenanceTests(TestCase):
                 offenders[:8]
             ),
         )
+
+
+class DepreciationAndInverterReplacementTests(TestCase):
+
+    def test_bess_life_is_passed_through(self):
+        overrides = cash_flow_overrides_from_assumptions(
+            dict(ASSUMPTIONS, bess_depreciation_years=5)
+        )
+        self.assertEqual(overrides["bess_depreciation_years"], 5)
+
+    def test_inverter_replacement_lands_in_the_right_year(self):
+        overrides = cash_flow_overrides_from_assumptions(dict(
+            ASSUMPTIONS,
+            inverter_replacement_year=11,
+            inverter_replacement_cost_usd=118_000.0,
+        ))
+        series = overrides["extra_replacement_costs_by_year"]
+        self.assertEqual(len(series), 11)
+        self.assertEqual(series[10], 118_000.0)
+        self.assertEqual(sum(series[:10]), 0.0)
+
+    def test_no_inverter_replacement_emits_no_series(self):
+        overrides = cash_flow_overrides_from_assumptions(dict(ASSUMPTIONS))
+        self.assertNotIn("extra_replacement_costs_by_year", overrides)
+
+    def test_cit_rate_is_passed_through(self):
+        overrides = cash_flow_overrides_from_assumptions(
+            dict(ASSUMPTIONS, cit_standard_rate=0.20)
+        )
+        self.assertAlmostEqual(overrides["cit_standard_rate"], 0.20)
+
+    def test_inverter_replacement_does_not_displace_a_battery_replacement(self):
+        # extra_replacement_costs_by_year is merged ADDITIVELY onto the battery
+        # schedule (proforma_vietnam/esco_pro_forma.py:_merge_replacement_costs).
+        # A wholesale override would silently zero out the battery cost, so this
+        # checks the full merged series rather than just the inverter value.
+        from proforma_vietnam.esco_pro_forma import (
+            calculate_esco_pro_forma_from_reopt_results,
+        )
+
+        results = _results()
+        results["inputs"]["ElectricStorage"] = {
+            "can_grid_charge": False,
+            "battery_replacement_year": 10,
+            "replace_cost_per_kw": 100.0,
+            "replace_cost_per_kwh": 80.0,
+        }
+        results["outputs"]["ElectricStorage"] = {"size_kw": 200.0, "size_kwh": 400.0}
+        # battery replacement cost = 200*100 + 400*80 = 52,000
+
+        assumptions = dict(
+            ASSUMPTIONS,
+            inverter_replacement_year=11,
+            inverter_replacement_cost_usd=118_000.0,
+        )
+        overrides = cash_flow_overrides_from_assumptions(assumptions)
+
+        cash_flow_result = calculate_esco_pro_forma_from_reopt_results(
+            results,
+            esco_energy_discount_fraction=0.0,
+            **overrides
+        )
+
+        series = cash_flow_result["derivation"]["replacement_costs_by_year_usd"]
+        self.assertEqual(series[9], 52_000.0)
+        self.assertEqual(series[10], 118_000.0)

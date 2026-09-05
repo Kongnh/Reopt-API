@@ -35,6 +35,8 @@ PASSTHROUGH_OVERRIDE_KEYS = (
     "time_steps_per_hour",
     "pv_degradation_rate",
     "battery_replacement_year",
+    "bess_depreciation_years",
+    "cit_standard_rate",
 )
 
 
@@ -71,6 +73,15 @@ def cash_flow_overrides_from_assumptions(assumptions):
     )
     if assumptions.get("direct_ownership") is not None:
         overrides["direct_ownership"] = assumptions["direct_ownership"]
+    # REopt.jl models no PV inverter replacement, and neither did this proforma,
+    # which overstates a 25-year case. Book it as its own replacement event so it
+    # hits the year it actually falls in rather than being smeared into O&M.
+    inverter_year = assumptions.get("inverter_replacement_year")
+    inverter_cost = assumptions.get("inverter_replacement_cost_usd")
+    if inverter_year and inverter_cost:
+        series = [0.0] * int(inverter_year)
+        series[int(inverter_year) - 1] = float(inverter_cost)
+        overrides["extra_replacement_costs_by_year"] = series
     return overrides
 
 

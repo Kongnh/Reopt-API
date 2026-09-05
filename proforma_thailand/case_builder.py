@@ -216,6 +216,20 @@ def build_thailand_case(case_config):
         "cit_regime": "standard_flat",
         "cit_standard_rate": TAX_DEFAULTS["cit_standard_rate"],
         "pv_depreciation_years": TAX_DEFAULTS["pv_depreciation_years"],
+        "bess_depreciation_years": TAX_DEFAULTS["bess_depreciation_years"],
+        "inverter_replacement_year": value_of(
+            FINANCIAL_DEFAULTS, "inverter_replacement_year"
+        ),
+        "inverter_replacement_cost_usd": (
+            pv_max_kw
+            * pv_config.get(
+                "installed_cost_per_kw",
+                value_of(FINANCIAL_DEFAULTS, "pv_installed_cost_per_kw"),
+            )
+            * value_of(
+                FINANCIAL_DEFAULTS, "inverter_replacement_fraction_of_pv_capex"
+            )
+        ),
         "direct_ownership": case_config.get("direct_ownership", {"enabled": True}),
         "placeholder_keys": sorted(placeholder_keys()),
         "pv_poa_irradiance_series": production.get("poa_wm2") or None,

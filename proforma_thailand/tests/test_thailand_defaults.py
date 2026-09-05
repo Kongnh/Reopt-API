@@ -43,6 +43,8 @@ class ThailandDefaultsTests(TestCase):
             "usable_roof_area_m2",
             "pv_max_kw",
             "power_factor_mitigation_cost",
+            "inverter_replacement_year",
+            "inverter_replacement_fraction_of_pv_capex",
         }
 
         self.assertEqual(placeholder_keys(), expected)
