@@ -295,8 +295,13 @@ class InsuranceReachesTheEngineTests(TestCase):
     def _results_with_capex(self):
         # PV/BESS capex and REopt's own year-one O&M: the inputs
         # annual_opex_usd's insurance base and the fallback O&M read from.
+        # PVOutputs has no initial_capital_cost field in production (a field
+        # that name only exists on ElectricStorageOutputs), so the fixture
+        # mirrors the real shape: size_kw * installed_cost_per_kw = capex,
+        # not a fabricated initial_capital_cost key on PV. ElectricStorage
+        # genuinely carries initial_capital_cost, so that one stays as-is.
         results = _results()
-        results["outputs"]["PV"]["initial_capital_cost"] = 1_000_000.0
+        results["outputs"]["PV"]["installed_cost_per_kw"] = 1_000.0
         results["outputs"]["ElectricStorage"]["initial_capital_cost"] = 150_000.0
         results["outputs"]["Financial"] = {"year_one_om_costs_before_tax": 20_000.0}
         return results

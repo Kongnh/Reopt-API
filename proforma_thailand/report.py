@@ -17,6 +17,13 @@ from proforma_thailand.defaults import (
 from proforma_vietnam.country_profile import THAILAND_PROFILE
 from proforma_vietnam.esco_pro_forma import (
     calculate_esco_pro_forma_from_reopt_results,
+    # Private-by-convention, imported anyway: esco_pro_forma.py already uses
+    # _pv_capex to compute pv_capex_vnd, the depreciation basis. If Thailand
+    # derived its own PV/BESS capex instead of reusing these, the insurance
+    # base here and the depreciation base there could silently diverge on any
+    # future change to either. Consistency beats the underscore convention.
+    _pv_capex,
+    _storage_capex,
 )
 from proforma_vietnam.report_data import build_vietnam_report_data
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
@@ -147,12 +154,21 @@ def build_thailand_report(reopt_results, assumptions):
     # are both derived here rather than in the case builder, which does not
     # yet know the optimized sizes.
     outputs = reopt_results.get("outputs") or {}
-    pv_outputs = outputs.get("PV") or {}
-    if isinstance(pv_outputs, list):
-        pv_outputs = pv_outputs[0] if pv_outputs else {}
+    inputs = reopt_results.get("inputs") or {}
+    # PVOutputs carries no initial_capital_cost field (that only exists on
+    # ElectricStorageOutputs), so reading it here always evaluated to 0.0 on
+    # real runs. _pv_capex sums size_kw * installed_cost_per_kw instead, the
+    # same figure esco_pro_forma.py uses as the depreciation basis, and wants
+    # the PV output list rather than a single dict.
+    pv_outputs_raw = outputs.get("PV")
+    pv_outputs_list = (
+        pv_outputs_raw if isinstance(pv_outputs_raw, list)
+        else ([pv_outputs_raw] if pv_outputs_raw else [])
+    )
+    storage_inputs = inputs.get("ElectricStorage") or {}
     storage_outputs = outputs.get("ElectricStorage") or {}
     financial_outputs = outputs.get("Financial") or {}
-    pv_capex = pv_outputs.get("initial_capital_cost") or 0.0
+    pv_capex = _pv_capex(pv_outputs_list)
 
     # Copy so the caller's assumptions dict is untouched; the derived cost
     # only needs to reach cash_flow_overrides_from_assumptions below.
@@ -181,7 +197,7 @@ def build_thailand_report(reopt_results, assumptions):
         base_om = financial_outputs.get("year_one_om_costs_before_tax") or 0.0
     overrides["annual_om_vnd"] = annual_opex_usd(
         pv_capex,
-        storage_outputs.get("initial_capital_cost") or 0.0,
+        _storage_capex(storage_inputs, storage_outputs),
         overrides.get("other_capex_vnd") or 0.0,
         base_om,
         insurance_rate,
