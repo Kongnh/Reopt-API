@@ -1,3 +1,4 @@
+import unittest
 from unittest import TestCase
 
 from openpyxl import Workbook
@@ -43,16 +44,21 @@ class CompareWorkbooksTests(TestCase):
         self.assertIn("col 2", differences[0])
 
     def test_ignored_substring_suppresses_the_difference(self):
+        # DEFAULT_IGNORE_SUBSTRINGS is now empty (see NarrowedIgnoreRulesTests),
+        # so this exercises the ignore_substrings parameter explicitly rather
+        # than relying on a default that no longer ignores anything.
         a = _write(self.tmp, "a.xlsx", [["prepared 2026-07-07"]])
         b = _write(self.tmp, "b.xlsx", [["prepared 2026-09-04"]])
 
-        self.assertEqual(compare_workbooks(a, b), [])
+        self.assertEqual(
+            compare_workbooks(a, b, ignore_substrings=("prepared ",)), [])
 
     def test_ignored_substring_must_match_both_sides(self):
         a = _write(self.tmp, "a.xlsx", [["prepared 2026-07-07"]])
         b = _write(self.tmp, "b.xlsx", [["something else"]])
 
-        self.assertEqual(len(compare_workbooks(a, b)), 1)
+        self.assertEqual(
+            len(compare_workbooks(a, b, ignore_substrings=("prepared ",))), 1)
 
     def test_sheet_name_mismatch_is_reported(self):
         a = _write(self.tmp, "a.xlsx", [["x"]], sheet="Alpha")
@@ -94,3 +100,34 @@ class VolatileRowTests(TestCase):
                    sheet="Assumptions")
 
         self.assertEqual(len(compare_workbooks(a, b)), 1)
+
+
+class NarrowedIgnoreRulesTests(unittest.TestCase):
+
+    def _workbook(self, path, rows):
+        import openpyxl
+        workbook = openpyxl.Workbook()
+        sheet = workbook.active
+        for row_index, row in enumerate(rows, start=1):
+            for column_index, value in enumerate(row, start=1):
+                sheet.cell(row=row_index, column=column_index, value=value)
+        workbook.save(path)
+        return path
+
+    def test_a_changed_subtitle_is_now_visible(self):
+        import tempfile, os
+        directory = tempfile.mkdtemp()
+        a = self._workbook(os.path.join(directory, "a.xlsx"),
+                           [["Case prepared for Factory A"]])
+        b = self._workbook(os.path.join(directory, "b.xlsx"),
+                           [["Case prepared for Factory B"]])
+        self.assertEqual(len(compare_workbooks(a, b)), 1)
+
+    def test_the_report_prepared_date_row_is_still_ignored(self):
+        import tempfile, os
+        directory = tempfile.mkdtemp()
+        a = self._workbook(os.path.join(directory, "a.xlsx"),
+                           [["Report prepared", "2026-09-04"]])
+        b = self._workbook(os.path.join(directory, "b.xlsx"),
+                           [["Report prepared", "2026-09-05"]])
+        self.assertEqual(compare_workbooks(a, b), [])

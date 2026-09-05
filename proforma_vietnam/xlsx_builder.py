@@ -357,6 +357,7 @@ def _write_kpi_rows(worksheet, start_row, rows):
 
 def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_data,
                               dppa_config, profile=VIETNAM_PROFILE):
+    prepared_on = (assumptions or {}).get("prepared_on") or date.today().isoformat()
     summary = cash_flow_result.get("summary", {})
     annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
     year_one = annual_rows[0]
@@ -372,7 +373,7 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
     _write_title(
         worksheet,
         f"Investment & PPA Negotiation Summary — {case_name}",
-        f"{contract_label}  ·  prepared {date.today().isoformat()}  ·  "
+        f"{contract_label}  ·  prepared {prepared_on}  ·  "
         "REopt dispatch + proforma_vietnam financial model",
         last_column=4,
     )

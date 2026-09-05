@@ -15,10 +15,12 @@ from proforma_vietnam.run_dppa_negotiation_sweep import cash_flow_overrides_from
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
 
-def rebuild_report(case_dir):
+def rebuild_report(case_dir, prepared_on=None):
     case_dir = Path(case_dir)
     results = json.loads((case_dir / "results.json").read_text(encoding="utf-8"))
     assumptions = json.loads((case_dir / "assumptions.json").read_text(encoding="utf-8"))
+    if prepared_on is not None:
+        assumptions["prepared_on"] = prepared_on
     case_path = case_dir / "case.json"
     if case_path.exists():
         # Surfaced on the Assumptions sheet so the workbook carries the full

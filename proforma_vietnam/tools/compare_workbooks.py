@@ -10,12 +10,20 @@ from pathlib import Path
 
 from openpyxl import load_workbook
 
-DEFAULT_IGNORE_SUBSTRINGS = ("prepared ",)
+# Nothing is ignored by substring. The precise DEFAULT_IGNORE_ROW_LABELS rule
+# below covers the one genuinely volatile row, the prepared-on date. A
+# substring of "prepared " also hid Cover and Executive Summary subtitles,
+# which is how a Vietnam-titled Thailand workbook passed the gate.
+DEFAULT_IGNORE_SUBSTRINGS = ()
 # The Assumptions sheet splits the run date into a label cell and a value cell
 # ("Report prepared" | "2026-09-05"), so the value carries no ignorable marker
 # and the substring rule above cannot see it. Skip the whole row instead, and
 # only when BOTH sides carry the label, so a renamed row still reports.
 DEFAULT_IGNORE_ROW_LABELS = ("Report prepared",)
+
+# Pinned so a rebuild and its baseline never differ by run date alone. The
+# gate compares content; the prepared-on date is metadata, not content.
+GATE_PREPARED_ON = "2026-01-01"
 
 
 def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRINGS,
@@ -95,7 +103,7 @@ CASE_DIRS = [
 ]
 
 
-def rebuild_all_cases(repo_root, out_dir):
+def rebuild_all_cases(repo_root, out_dir, prepared_on=GATE_PREPARED_ON):
     """Rebuild every saved case into ``out_dir``; return {case name: path}.
 
     Copies each case's results/assumptions/case JSON into a scratch directory so
@@ -117,5 +125,5 @@ def rebuild_all_cases(repo_root, out_dir):
             candidate = source / filename
             if candidate.exists():
                 shutil.copy2(candidate, target / filename)
-        built[name] = rebuild_report(target)
+        built[name] = rebuild_report(target, prepared_on=prepared_on)
     return built

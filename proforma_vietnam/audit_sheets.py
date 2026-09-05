@@ -67,7 +67,7 @@ PRO_FORMA_SHEET = "Pro Forma (Audit)"
 # assumptions.json keys already rendered in a curated Assumptions section; the
 # remainder is echoed raw at the bottom of the sheet so the file is complete.
 CURATED_ASSUMPTION_KEYS = {
-    "case_name", "run_uuid", "country", "tariff_year", "voltage_level",
+    "case_name", "run_uuid", "prepared_on", "country", "tariff_year", "voltage_level",
     "tou_schedule", "exchange_rate_vnd_per_usd", "evn_energy_escalation_rate",
     "evn_capacity_escalation_rate", "esco_energy_discount_fraction",
     "demand_savings_esco_share", "grid_charging_enabled",
@@ -131,6 +131,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     formula sheets can be built on top of these names).
     """
     derivation = derivation or {}
+    prepared_on = (assumptions or {}).get("prepared_on") or date.today().isoformat()
     dppa = assumptions.get("dppa") if assumptions else None
     # is_dppa is strictly the grid-CfD settlement (drives the CfD assumption
     # rows / labels). The private wire is its own branch.
@@ -213,7 +214,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
           source="proforma_vietnam.structures")
     if assumptions.get("run_uuid"):
         entry("REopt run UUID", assumptions["run_uuid"], source="REopt API")
-    entry("Report prepared", date.today().isoformat())
+    entry("Report prepared", prepared_on)
     entry("Analysis period", d.get("project_years", assumptions.get("analysis_years", 25)),
           unit="years", source="case.json financial.analysis_years",
           name="PROJECT_YEARS", fmt="0")
@@ -2223,6 +2224,7 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
     is_physical = derivation.get("structure") == PHYSICAL_DPPA
     is_direct = derivation.get("structure") == DIRECT_OWNERSHIP
     case_name = (assumptions or {}).get("case_name", "Vietnam ESCO / DPPA Case")
+    prepared_on = (assumptions or {}).get("prepared_on") or date.today().isoformat()
 
     worksheet.sheet_view.showGridLines = False
     worksheet.merge_cells("B2:E2")
@@ -2243,7 +2245,7 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
         subtitle = "ESCO discount-to-EVN tariff (behind-the-meter)"
     worksheet.cell(
         row=3, column=2,
-        value=f"{subtitle}  ·  prepared {date.today().isoformat()}  ·  "
+        value=f"{subtitle}  ·  prepared {prepared_on}  ·  "
               "REopt dispatch + proforma_vietnam financial engine",
     ).font = NOTE_FONT
     if (assumptions or {}).get("run_uuid"):
