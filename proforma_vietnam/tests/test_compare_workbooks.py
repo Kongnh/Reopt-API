@@ -131,3 +131,51 @@ class NarrowedIgnoreRulesTests(unittest.TestCase):
         b = self._workbook(os.path.join(directory, "b.xlsx"),
                            [["Report prepared", "2026-09-05"]])
         self.assertEqual(compare_workbooks(a, b), [])
+
+
+class PreparedDateNormalizationTests(TestCase):
+    """The "prepared <date>" token interpolated into the Cover and Executive
+    Summary subtitles is neutralised on both sides before comparison, but
+    every other character of the subtitle is still compared for real."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def test_subtitles_differing_only_by_prepared_date_compare_equal(self):
+        a = _write(self.tmp, "a.xlsx",
+                   [["Factory A  ·  prepared 2026-09-04  ·  REopt dispatch"]])
+        b = _write(self.tmp, "b.xlsx",
+                   [["Factory A  ·  prepared 2026-09-05  ·  REopt dispatch"]])
+
+        self.assertEqual(compare_workbooks(a, b), [])
+
+    def test_same_prepared_date_but_different_case_name_still_reports(self):
+        # This is the regression Task 11 exists to catch: a substring/whole-
+        # row ignore rule would hide this too, which is how a Vietnam-titled
+        # workbook reached a Thailand client.
+        a = _write(self.tmp, "a.xlsx",
+                   [["Factory A  ·  prepared 2026-09-04  ·  REopt dispatch"]])
+        b = _write(self.tmp, "b.xlsx",
+                   [["Factory B  ·  prepared 2026-09-04  ·  REopt dispatch"]])
+
+        self.assertEqual(len(compare_workbooks(a, b)), 1)
+
+    def test_prepared_date_and_case_name_both_differing_still_reports(self):
+        a = _write(self.tmp, "a.xlsx",
+                   [["Factory A  ·  prepared 2026-09-04  ·  REopt dispatch"]])
+        b = _write(self.tmp, "b.xlsx",
+                   [["Factory B  ·  prepared 2026-09-05  ·  REopt dispatch"]])
+
+        self.assertEqual(len(compare_workbooks(a, b)), 1)
+
+    def test_bare_date_not_preceded_by_prepared_is_compared_normally(self):
+        # A genuine date change with no "prepared " prefix must not be
+        # silently swallowed by the normalization.
+        a = _write(self.tmp, "a.xlsx", [["2026-09-04"]])
+        b = _write(self.tmp, "b.xlsx", [["2026-09-05"]])
+
+        self.assertEqual(len(compare_workbooks(a, b)), 1)

@@ -6,6 +6,7 @@ usable (and the zip container carries timestamps regardless). This compares
 cell values and skips pairs where both sides contain an ignored substring.
 """
 
+import re
 from pathlib import Path
 
 from openpyxl import load_workbook
@@ -20,6 +21,13 @@ DEFAULT_IGNORE_SUBSTRINGS = ()
 # and the substring rule above cannot see it. Skip the whole row instead, and
 # only when BOTH sides carry the label, so a renamed row still reports.
 DEFAULT_IGNORE_ROW_LABELS = ("Report prepared",)
+
+# The prepared-on date is metadata, not content, and it is interpolated
+# mid-string into the Cover and Executive Summary subtitles. Neutralise
+# exactly that token on both sides so every other character of those
+# subtitles is still compared. Ignoring the whole row instead is what let a
+# Vietnam-titled workbook reach a Thailand client.
+_PREPARED_DATE = re.compile(r"(?<=prepared )\d{4}-\d{2}-\d{2}")
 
 # Pinned so a rebuild and its baseline never differ by run date alone. The
 # gate compares content; the prepared-on date is metadata, not content.
@@ -64,6 +72,8 @@ def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRING
             for col_index, (value_a, value_b) in enumerate(zip(row_a, row_b), start=1):
                 if value_a == value_b:
                     continue
+                if _normalize_prepared_date(value_a) == _normalize_prepared_date(value_b):
+                    continue
                 if _both_ignored(value_a, value_b, ignore_substrings):
                     continue
                 differences.append(
@@ -72,6 +82,19 @@ def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRING
                     )
                 )
     return differences
+
+
+def _normalize_prepared_date(value):
+    """Replace a "prepared <date>" token with a fixed placeholder.
+
+    Only the ISO date immediately following "prepared " is touched, so a
+    bare date cell with no such prefix (e.g. the Assumptions sheet's
+    "Report prepared" value cell) is returned unchanged and still compared
+    for real.
+    """
+    if not isinstance(value, str):
+        return value
+    return _PREPARED_DATE.sub("0000-00-00", value)
 
 
 def _row_ignored(row, ignore_row_labels):
