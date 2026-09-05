@@ -11,9 +11,15 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 DEFAULT_IGNORE_SUBSTRINGS = ("prepared ",)
+# The Assumptions sheet splits the run date into a label cell and a value cell
+# ("Report prepared" | "2026-09-05"), so the value carries no ignorable marker
+# and the substring rule above cannot see it. Skip the whole row instead, and
+# only when BOTH sides carry the label, so a renamed row still reports.
+DEFAULT_IGNORE_ROW_LABELS = ("Report prepared",)
 
 
-def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRINGS):
+def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRINGS,
+                      ignore_row_labels=DEFAULT_IGNORE_ROW_LABELS):
     """Return a list of difference descriptions; empty means identical."""
     workbook_a = load_workbook(path_a)
     workbook_b = load_workbook(path_b)
@@ -44,6 +50,9 @@ def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRING
                     )
                 )
                 continue
+            if (_row_ignored(row_a, ignore_row_labels)
+                    and _row_ignored(row_b, ignore_row_labels)):
+                continue
             for col_index, (value_a, value_b) in enumerate(zip(row_a, row_b), start=1):
                 if value_a == value_b:
                     continue
@@ -55,6 +64,14 @@ def compare_workbooks(path_a, path_b, ignore_substrings=DEFAULT_IGNORE_SUBSTRING
                     )
                 )
     return differences
+
+
+def _row_ignored(row, ignore_row_labels):
+    """True when the row carries a label marking it as volatile by nature."""
+    return any(
+        isinstance(value, str) and any(label in value for label in ignore_row_labels)
+        for value in row
+    )
 
 
 def _both_ignored(value_a, value_b, ignore_substrings):

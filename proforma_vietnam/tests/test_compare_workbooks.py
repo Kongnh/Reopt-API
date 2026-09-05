@@ -62,3 +62,35 @@ class CompareWorkbooksTests(TestCase):
 
         self.assertEqual(len(differences), 1)
         self.assertIn("sheet names differ", differences[0])
+
+
+
+class VolatileRowTests(TestCase):
+    """The run-date row must not fail the gate once the clock rolls over."""
+
+    def setUp(self):
+        import tempfile
+        from pathlib import Path
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+
+    def test_a_differing_run_date_is_not_a_difference(self):
+        a = _write(self.tmp, "a.xlsx",
+                   [["Report prepared", "2026-09-04"], ["Analysis period", 25]],
+                   sheet="Assumptions")
+        b = _write(self.tmp, "b.xlsx",
+                   [["Report prepared", "2026-09-05"], ["Analysis period", 25]],
+                   sheet="Assumptions")
+
+        self.assertEqual(compare_workbooks(a, b), [])
+
+    def test_a_real_change_on_another_row_still_reports(self):
+        a = _write(self.tmp, "a.xlsx",
+                   [["Report prepared", "2026-09-04"], ["Analysis period", 25]],
+                   sheet="Assumptions")
+        b = _write(self.tmp, "b.xlsx",
+                   [["Report prepared", "2026-09-05"], ["Analysis period", 20]],
+                   sheet="Assumptions")
+
+        self.assertEqual(len(compare_workbooks(a, b)), 1)
