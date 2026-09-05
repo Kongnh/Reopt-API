@@ -1,7 +1,11 @@
+import unittest
 from unittest import TestCase
 from copy import deepcopy
 
-from proforma_vietnam.esco_pro_forma import calculate_esco_pro_forma_from_reopt_results
+from proforma_vietnam.esco_pro_forma import (
+    calculate_esco_pro_forma_from_reopt_results,
+    _merge_replacement_costs,
+)
 
 
 class VietnamEscoProFormaAdapterTests(TestCase):
@@ -800,6 +804,26 @@ def _battery_only_reopt_results():
     results = deepcopy(_fake_reopt_results(can_grid_charge=True))
     del results["outputs"]["PV"]
     return results
+
+
+class ExtraReplacementCostsTests(unittest.TestCase):
+    """Thailand books an inverter replacement without losing the BESS one."""
+
+    def test_extra_costs_add_to_the_existing_series(self):
+        merged = _merge_replacement_costs([0.0, 0.0, 100.0], [0.0, 50.0, 25.0])
+        self.assertEqual(merged, [0.0, 50.0, 125.0])
+
+    def test_longer_extra_series_extends_the_result(self):
+        merged = _merge_replacement_costs([0.0, 100.0], [0.0, 0.0, 0.0, 70.0])
+        self.assertEqual(merged, [0.0, 100.0, 0.0, 70.0])
+
+    def test_missing_base_series_is_treated_as_zeros(self):
+        merged = _merge_replacement_costs(None, [0.0, 40.0])
+        self.assertEqual(merged, [0.0, 40.0])
+
+    def test_missing_extra_series_leaves_the_base_untouched(self):
+        merged = _merge_replacement_costs([0.0, 100.0], None)
+        self.assertEqual(merged, [0.0, 100.0])
 
 
 def _fake_reopt_results(can_grid_charge):

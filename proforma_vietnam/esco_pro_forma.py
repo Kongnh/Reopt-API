@@ -26,6 +26,9 @@ def calculate_esco_pro_forma_from_reopt_results(
     surplus_export = cash_flow_overrides.pop("surplus_export", None)
     direct_ownership = cash_flow_overrides.pop("direct_ownership", None)
     battery_replacement_year = cash_flow_overrides.pop("battery_replacement_year", None)
+    extra_replacement_costs = cash_flow_overrides.pop(
+        "extra_replacement_costs_by_year", None
+    )
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
 
@@ -125,6 +128,17 @@ def calculate_esco_pro_forma_from_reopt_results(
             replacement_costs,
             exchange_rate_vnd_per_usd,
             tariff_money_values_currency,
+        )
+    if extra_replacement_costs:
+        # Added, not assigned: a bare override would silently delete the BESS
+        # replacement derived above.
+        cash_flow_inputs["replacement_costs_by_year"] = _merge_replacement_costs(
+            cash_flow_inputs.get("replacement_costs_by_year"),
+            _money_series(
+                extra_replacement_costs,
+                exchange_rate_vnd_per_usd,
+                tariff_money_values_currency,
+            ),
         )
 
     cash_flow_inputs.update(cash_flow_overrides)
@@ -396,6 +410,22 @@ def _bess_replacement_costs(storage_inputs, storage_outputs, replacement_year_ov
     costs = [0.0] * int(replacement_year)
     costs[int(replacement_year) - 1] = cost
     return costs
+
+
+def _merge_replacement_costs(base, extra):
+    """Element-wise sum of two replacement-cost series, either of which may be None.
+
+    Overriding replacement_costs_by_year wholesale would drop the BESS
+    replacement derived from the REopt inputs. Thailand books an inverter
+    replacement alongside it, so the two must add rather than compete.
+    """
+    base = list(base or [])
+    extra = list(extra or [])
+    length = max(len(base), len(extra))
+    return [
+        (base[i] if i < len(base) else 0.0) + (extra[i] if i < len(extra) else 0.0)
+        for i in range(length)
+    ]
 
 
 def _storage_capex(storage_inputs, storage_outputs):
