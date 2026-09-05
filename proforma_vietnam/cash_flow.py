@@ -111,6 +111,8 @@ def calculate_vietnam_esco_cash_flow(
     battery_replacement_treatment="capitalize",
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
+    bess_depreciation_years=None,
+    cit_standard_rate=None,
     time_steps_per_hour=1,
     pv_depreciation_years_min=None,
     pv_depreciation_years_max=None,
@@ -177,6 +179,15 @@ def calculate_vietnam_esco_cash_flow(
             "with a preferential/holiday regime."
         )
     replacement_costs_by_year = replacement_costs_by_year or []
+    # None means "use the shared-core default". Vietnam passes nothing and is
+    # unchanged; Thailand passes 5, its Royal Decree No. 145 machinery life.
+    if bess_depreciation_years is None:
+        bess_depreciation_years = BESS_DEPRECIATION_YEARS
+    # Same pattern for the CIT rate. Both countries sit at 0.20 today, so this
+    # is latent, but the rate was being read from a Vietnam constant regardless
+    # of what the caller asked for.
+    if cit_standard_rate is None:
+        cit_standard_rate = CIT_STANDARD_RATE
     _validate_construction_financing(
         construction_months, principal_grace_years, debt_term_years
     )
@@ -416,7 +427,9 @@ def calculate_vietnam_esco_cash_flow(
     )
     if capitalize_replacement:
         replacement_depreciation_by_year, replacement_schedules = (
-            _replacement_depreciation_schedules(replacement_costs_by_year, project_years)
+            _replacement_depreciation_schedules(
+                replacement_costs_by_year, project_years, bess_depreciation_years
+            )
         )
         replacement_cost_by_year = [
             _value_for_year(replacement_costs_by_year, year_index)
@@ -458,6 +471,7 @@ def calculate_vietnam_esco_cash_flow(
         )
         depreciation_by_year = _depreciation_schedule(
             pv_capex_vnd, bess_capex_vnd, project_years, pv_depreciation_years,
+            bess_depreciation_years,
             idc_vnd=idc_vnd,
         )
         if contract_years is not None:
@@ -498,6 +512,7 @@ def calculate_vietnam_esco_cash_flow(
             nbv_by_asset, nbv_total_vnd = _net_book_values_at_transfer(
                 pv_basis_vnd, bess_basis_vnd, pv_depreciation_years, contract_years,
                 replacement_schedules if capitalize_replacement else [],
+                bess_depreciation_years,
             )
             disposal_gain_vnd = contract_residual_value_usd - nbv_total_vnd
             transfer_index = contract_years - 1
@@ -511,6 +526,7 @@ def calculate_vietnam_esco_cash_flow(
             }
         cit_by_year = calculate_cit(
             taxable_income_by_year,
+            standard_rate=cit_standard_rate,
             holiday_years=holiday_years,
             reduced_rate_years=reduced_rate_years,
             preferential_rate=preferential_rate,
@@ -526,6 +542,7 @@ def calculate_vietnam_esco_cash_flow(
                     income - (disposal_gain_vnd if index == transfer_index else 0.0)
                     for index, income in enumerate(taxable_income_by_year)
                 ],
+                standard_rate=cit_standard_rate,
                 holiday_years=holiday_years,
                 reduced_rate_years=reduced_rate_years,
                 preferential_rate=preferential_rate,
@@ -832,10 +849,10 @@ def calculate_vietnam_esco_cash_flow(
         "debt_interest_rate_fraction": debt_interest_rate_fraction,
         "debt_term_years": debt_term_years,
         "pv_depreciation_years": pv_depreciation_years,
-        "bess_depreciation_years": BESS_DEPRECIATION_YEARS,
+        "bess_depreciation_years": bess_depreciation_years,
         "cit": {
             "regime": cit_regime,
-            "standard_rate": CIT_STANDARD_RATE,
+            "standard_rate": cit_standard_rate,
             "holiday_years": holiday_years,
             "reduced_rate_years": reduced_rate_years,
             "reduced_rate_fraction": CIT_REDUCED_RATE_FRACTION,
@@ -1242,12 +1259,13 @@ def _validate_vat(vat_rate_fraction, vat_refund_year, project_years):
         )
 
 
-def _replacement_depreciation_schedules(replacement_costs_by_year, project_years):
+def _replacement_depreciation_schedules(replacement_costs_by_year, project_years,
+                                        bess_depreciation_years):
     """Per-replacement-year straight-line depreciation (capitalize mode).
 
     Each year with a nonzero replacement cost spawns a new BESS-class fixed asset
     placed in service that year (Circular 45): its cost is depreciated straight-
-    line over ``BESS_DEPRECIATION_YEARS`` from the in-service year, truncated at
+    line over ``bess_depreciation_years`` from the in-service year, truncated at
     the analysis horizon — years beyond the horizon are simply not taken and the
     undepreciated remainder is NOT written off (disclosed convention). Returns
     ``(annual_total_by_year, schedules)`` where ``schedules`` is a self-describing
@@ -1258,17 +1276,17 @@ def _replacement_depreciation_schedules(replacement_costs_by_year, project_years
     for year_index, cost in enumerate(replacement_costs_by_year):
         if not cost:
             continue
-        annual_charge = cost / BESS_DEPRECIATION_YEARS
+        annual_charge = cost / bess_depreciation_years
         charged_years = []
         for charge_index in range(
-            year_index, min(year_index + BESS_DEPRECIATION_YEARS, project_years)
+            year_index, min(year_index + bess_depreciation_years, project_years)
         ):
             annual_total_by_year[charge_index] += annual_charge
             charged_years.append(charge_index + 1)  # 1-based project year
         schedules.append({
             "in_service_year": year_index + 1,
             "cost_usd": cost,
-            "life_years": BESS_DEPRECIATION_YEARS,
+            "life_years": bess_depreciation_years,
             "annual_charge_usd": annual_charge,
             "depreciation_years": charged_years,
         })
@@ -1295,7 +1313,8 @@ def _idc_capitalized_bases(pv_capex_vnd, bess_capex_vnd, idc_vnd=0.0):
 
 def _net_book_values_at_transfer(pv_basis_vnd, bess_basis_vnd,
                                  pv_depreciation_years, contract_years,
-                                 replacement_schedules):
+                                 replacement_schedules,
+                                 bess_depreciation_years):
     """Undepreciated remainder of every asset class at the end of contract year T.
 
     Straight-line NBV = basis − basis/life × min(T, life) for the initial PV and
@@ -1310,12 +1329,12 @@ def _net_book_values_at_transfer(pv_basis_vnd, bess_basis_vnd,
         return basis - basis / life * min(contract_years, life)
 
     pv_nbv_vnd = _remaining(pv_basis_vnd, pv_depreciation_years)
-    bess_nbv_vnd = _remaining(bess_basis_vnd, BESS_DEPRECIATION_YEARS)
+    bess_nbv_vnd = _remaining(bess_basis_vnd, bess_depreciation_years)
     by_asset = [
         {"asset": "initial_pv", "cost_usd": pv_basis_vnd,
          "life_years": pv_depreciation_years, "net_book_value_usd": pv_nbv_vnd},
         {"asset": "initial_bess", "cost_usd": bess_basis_vnd,
-         "life_years": BESS_DEPRECIATION_YEARS, "net_book_value_usd": bess_nbv_vnd},
+         "life_years": bess_depreciation_years, "net_book_value_usd": bess_nbv_vnd},
     ]
     total_vnd = pv_nbv_vnd + bess_nbv_vnd
     for schedule in replacement_schedules:
@@ -1338,7 +1357,8 @@ def _net_book_values_at_transfer(pv_basis_vnd, bess_basis_vnd,
 
 
 def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years,
-                           pv_depreciation_years, idc_vnd=0.0):
+                           pv_depreciation_years, bess_depreciation_years,
+                           idc_vnd=0.0):
     # Capitalized IDC rides each class's existing schedule (see
     # _idc_capitalized_bases); idc_vnd=0 leaves the bases unchanged.
     pv_basis_vnd, bess_basis_vnd = _idc_capitalized_bases(
@@ -1351,7 +1371,7 @@ def _depreciation_schedule(pv_capex_vnd, bess_capex_vnd, project_years,
     )
     bess_depreciation = straight_line_depreciation_schedule(
         bess_basis_vnd,
-        BESS_DEPRECIATION_YEARS,
+        bess_depreciation_years,
         project_years=project_years,
     )
 

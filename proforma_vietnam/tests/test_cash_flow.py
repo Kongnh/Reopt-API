@@ -1,6 +1,10 @@
 from unittest import TestCase
 
-from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
+from proforma_vietnam.cash_flow import (
+    BESS_DEPRECIATION_YEARS,
+    calculate_vietnam_esco_cash_flow,
+)
+from proforma_vietnam.tax_model import CIT_STANDARD_RATE
 
 
 class VietnamCashFlowTests(TestCase):
@@ -2542,3 +2546,107 @@ class VatOnCapexTests(TestCase):
     def test_refund_year_without_rate_is_rejected(self):
         with self.assertRaises(ValueError):
             self._run(vat_refund_year=2)
+
+
+class BessDepreciationYearsTests(TestCase):
+    """The BESS life must be injectable, the way the PV life already is."""
+
+    def _kwargs(self, **overrides):
+        base = dict(
+            project_served_pv_kwh=[1_000_000.0],
+            evn_energy_rates_vnd_per_kwh=[0.1],
+            bau_evn_bill_vnd=200_000.0,
+            optimized_evn_bill_vnd=150_000.0,
+            bau_demand_charge_vnd=60_000.0,
+            optimized_demand_charge_vnd=50_000.0,
+            pv_capex_vnd=1_000_000.0,
+            bess_capex_vnd=400_000.0,
+            annual_om_vnd=12_000.0,
+            esco_energy_discount_fraction=0.0,
+            project_years=25,
+        )
+        base.update(overrides)
+        return base
+
+    def test_defaults_to_the_module_constant(self):
+        result = calculate_vietnam_esco_cash_flow(**self._kwargs())
+        self.assertEqual(
+            result["derivation"]["bess_depreciation_years"],
+            BESS_DEPRECIATION_YEARS,
+        )
+
+    def test_explicit_life_is_reported(self):
+        result = calculate_vietnam_esco_cash_flow(
+            **self._kwargs(bess_depreciation_years=5)
+        )
+        self.assertEqual(result["derivation"]["bess_depreciation_years"], 5)
+
+    def test_shorter_life_front_loads_the_depreciation_shield(self):
+        """A 5-year life must charge more per year than an 8-year life."""
+        five = calculate_vietnam_esco_cash_flow(
+            **self._kwargs(bess_depreciation_years=5)
+        )
+        eight = calculate_vietnam_esco_cash_flow(
+            **self._kwargs(bess_depreciation_years=8)
+        )
+        self.assertGreater(
+            five["annual_cash_flows"][0]["depreciation_vnd"],
+            eight["annual_cash_flows"][0]["depreciation_vnd"],
+        )
+
+
+class CitStandardRateTests(TestCase):
+    """The CIT rate must be injectable, not read from a Vietnam module global."""
+
+    def _kwargs(self, **overrides):
+        base = dict(
+            project_served_pv_kwh=[1_000_000.0],
+            evn_energy_rates_vnd_per_kwh=[0.1],
+            bau_evn_bill_vnd=200_000.0,
+            optimized_evn_bill_vnd=150_000.0,
+            bau_demand_charge_vnd=60_000.0,
+            optimized_demand_charge_vnd=50_000.0,
+            pv_capex_vnd=1_000_000.0,
+            bess_capex_vnd=400_000.0,
+            annual_om_vnd=12_000.0,
+            esco_energy_discount_fraction=0.0,
+            project_years=25,
+        )
+        base.update(overrides)
+        return base
+
+    def test_defaults_to_the_module_constant(self):
+        result = calculate_vietnam_esco_cash_flow(**self._kwargs())
+        self.assertAlmostEqual(
+            result["derivation"]["cit"]["standard_rate"], CIT_STANDARD_RATE
+        )
+
+    def test_explicit_rate_is_reported(self):
+        result = calculate_vietnam_esco_cash_flow(
+            **self._kwargs(cit_standard_rate=0.17)
+        )
+        self.assertAlmostEqual(result["derivation"]["cit"]["standard_rate"], 0.17)
+
+    def test_a_higher_rate_takes_more_tax(self):
+        # The shared _kwargs() baseline (esco_energy_discount_fraction=0.0) is
+        # deliberately unprofitable for the other tests in this class, which
+        # only check that the rate is reported. That leaves taxable income
+        # negative in every year, so CIT is 0 regardless of rate and this
+        # assertion would compare 0.0 to 0.0. Give the ESCO real energy
+        # revenue here so some years are actually taxable.
+        low = calculate_vietnam_esco_cash_flow(
+            **self._kwargs(
+                cit_standard_rate=0.10, cit_regime="standard_flat",
+                esco_energy_discount_fraction=0.5,
+            )
+        )
+        high = calculate_vietnam_esco_cash_flow(
+            **self._kwargs(
+                cit_standard_rate=0.30, cit_regime="standard_flat",
+                esco_energy_discount_fraction=0.5,
+            )
+        )
+        self.assertGreater(
+            sum(row["cit_vnd"] for row in high["annual_cash_flows"]),
+            sum(row["cit_vnd"] for row in low["annual_cash_flows"]),
+        )
