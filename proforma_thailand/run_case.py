@@ -111,10 +111,22 @@ def _poll(api_base, run_uuid, poll_seconds, max_polls):
     url = "{}/job/{}/results".format(api_base, run_uuid)
     for _ in range(max_polls):
         body = _get(url)
-        if body.get("status") not in POLLING_STATUSES:
+        if body.get("status") not in POLLING_STATUSES and _is_complete(body):
             return body
         time.sleep(poll_seconds)
     raise TimeoutError("Timed out waiting for REopt results for {}.".format(run_uuid))
+
+
+def _is_complete(body):
+    """True when the results document is actually finished being written.
+
+    A run can report status "optimal" while process_results is still populating
+    outputs, which yields a document carrying only Financial and ElectricTariff
+    and a summary of all zeros. Only an error is complete without outputs.
+    """
+    if body.get("status") != "optimal":
+        return True
+    return bool(body.get("outputs", {}).get("ElectricLoad"))
 
 
 def _get(url):

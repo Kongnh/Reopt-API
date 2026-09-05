@@ -52,3 +52,28 @@ class SummarizeResultsTests(TestCase):
         summary = summarize_results(self._results(), extras={})
 
         self.assertEqual(summary["power_factor_compensation_kvar"], 0.0)
+
+
+class PollCompletenessTests(TestCase):
+    """status can read optimal while outputs are still being written."""
+
+    def test_an_optimal_run_without_outputs_is_not_complete(self):
+        from proforma_thailand.run_case import _is_complete
+
+        self.assertFalse(_is_complete({
+            "status": "optimal",
+            "outputs": {"Financial": {}, "ElectricTariff": {}},
+        }))
+
+    def test_an_optimal_run_with_outputs_is_complete(self):
+        from proforma_thailand.run_case import _is_complete
+
+        self.assertTrue(_is_complete({
+            "status": "optimal",
+            "outputs": {"ElectricLoad": {"annual_calculated_kwh": 1.0}},
+        }))
+
+    def test_an_error_run_is_complete_without_outputs(self):
+        from proforma_thailand.run_case import _is_complete
+
+        self.assertTrue(_is_complete({"status": "error", "outputs": {}}))
