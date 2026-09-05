@@ -113,6 +113,19 @@ def _fmt_num(value):
     return repr(float(value))
 
 
+def _format_series(values, places=4):
+    """Render a numeric series as one compact cell value.
+
+    Twelve monthly Ft values do not warrant twelve rows, but dropping them
+    entirely, which is what happens when a list reaches a scalar writer, leaves
+    the reader unable to check the tariff against an invoice.
+    """
+    return ", ".join(
+        ("{:." + str(places) + "f}").format(value).rstrip("0").rstrip(".")
+        for value in values
+    )
+
+
 def _define_name(workbook, name, sheet_title, cell):
     workbook.defined_names[name] = DefinedName(
         name, attr_text=f"'{sheet_title}'!${cell[0]}${cell[1]}"
@@ -642,6 +655,16 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
             unit="per year",
             source="Included in annual operating cost",
             fmt="0.000%",
+        )
+
+    # Gated on the key, so Vietnam workbooks, which never set it, are unchanged.
+    ft_series = (assumptions or {}).get("ft_per_kwh_by_month_thb")
+    if ft_series:
+        entry(
+            "Ft adder by month (Jan to Dec)",
+            _format_series(ft_series),
+            unit=(assumptions or {}).get("local_currency_code", "") + "/kWh",
+            source="PEA Ft schedule, revised every four months",
         )
 
     # Provisional inputs get a row each, so the reader can see WHICH numbers are

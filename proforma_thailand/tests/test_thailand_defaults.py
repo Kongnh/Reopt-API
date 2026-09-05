@@ -6,6 +6,7 @@ from proforma_thailand.defaults import (
     SITE_DEFAULTS,
     TAX_DEFAULTS,
     TAX_DEFAULTS_RAW,
+    ft_for_month,
     placeholder_keys,
     value_of,
 )
@@ -39,7 +40,6 @@ class ThailandDefaultsTests(TestCase):
             "grid_connection_cost",
             "permitting_and_eia_cost",
             "pea_tariff_escalation_rate",
-            "ft_forecast_per_kwh",
             "usable_roof_area_m2",
             "pv_max_kw",
             "power_factor_mitigation_cost",
@@ -90,3 +90,19 @@ class DepreciationCitationTests(TestCase):
         for key in ("pv_depreciation_years", "bess_depreciation_years"):
             self.assertGreaterEqual(TAX_DEFAULTS[key], 3)
             self.assertLessEqual(TAX_DEFAULTS[key], 25)
+
+
+class FtWindowTests(TestCase):
+
+    def test_january_2025_uses_the_first_window(self):
+        self.assertAlmostEqual(ft_for_month(2025, 1), 0.3672)
+
+    def test_may_2025_uses_the_second_window(self):
+        self.assertAlmostEqual(ft_for_month(2025, 5), 0.1972)
+
+    def test_september_2025_uses_the_third_window(self):
+        self.assertAlmostEqual(ft_for_month(2025, 9), 0.1572)
+
+    def test_a_month_before_any_window_raises(self):
+        with self.assertRaises(ValueError):
+            ft_for_month(2000, 1)

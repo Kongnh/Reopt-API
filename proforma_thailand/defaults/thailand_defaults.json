@@ -8,7 +8,6 @@
     "project_years": {"value": 25, "source": "Analysis convention, matches the Vietnam cases"},
     "exchange_rate_thb_per_usd": {"value": 32.5, "source": "Planning rate; revise at contract"},
     "pea_tariff_escalation_rate": {"value": 0.03, "source": "PLACEHOLDER - pending Keen confirmation"},
-    "ft_forecast_per_kwh": {"value": 0.1572, "source": "PLACEHOLDER - pending Keen confirmation"},
     "om_escalation_rate": {"value": 0.03, "source": "Matches the Vietnam default"},
     "discount_rate": {"value": 0.08, "source": "PLACEHOLDER - pending Keen confirmation"},
     "pv_installed_cost_per_kw": {"value": 700.0, "source": "PLACEHOLDER - pending Keen confirmation"},

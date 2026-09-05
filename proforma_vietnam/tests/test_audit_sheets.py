@@ -4,6 +4,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 
 from proforma_vietnam import audit_sheets
+from proforma_vietnam.audit_sheets import _format_series
 from proforma_vietnam.cash_flow import (
     calculate_fx_sensitivity,
     calculate_vietnam_esco_cash_flow,
@@ -1216,3 +1217,15 @@ class CoverSheetTests(TestCase):
             value = cover.cell(row=row, column=3).value
             if isinstance(value, str):
                 self.assertFalse(value.startswith("=IF(COUNTIF"))
+
+
+class FormatSeriesTests(TestCase):
+
+    def test_values_are_comma_joined(self):
+        self.assertEqual(_format_series([0.3672, 0.1972]), "0.3672, 0.1972")
+
+    def test_trailing_zeros_are_trimmed(self):
+        self.assertEqual(_format_series([0.5, 0.25]), "0.5, 0.25")
+
+    def test_empty_series_renders_as_an_empty_string(self):
+        self.assertEqual(_format_series([]), "")
