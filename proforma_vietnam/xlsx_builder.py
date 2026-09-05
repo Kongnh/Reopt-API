@@ -241,7 +241,7 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         workbook.create_sheet("Buyer Analysis"), cash_flow_result, dppa_config, profile,
     )
     _write_developer_returns(
-        workbook.create_sheet("Developer Returns"), cash_flow_result
+        workbook.create_sheet("Developer Returns"), cash_flow_result, profile=profile
     )
 
     # Per-year record tables (Summary, Cash Flow, Tax Schedule, Debt Service,
@@ -254,12 +254,14 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     _write_dispatch_sheet(
         workbook.create_sheet("Dispatch Profile"),
         report_data.get("dispatch_profile", []),
+        profile=profile,
     )
     _write_table_sheet(
         workbook.create_sheet("Load Duration"),
         LOAD_DURATION_COLUMNS,
         report_data.get("load_duration", []),
         chart_title="Load Duration Curve",
+        profile=profile,
     )
 
     if dppa_config is not None:
@@ -273,11 +275,13 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
             workbook.create_sheet("Monthly Settlement"),
             DPPA_MONTHLY_COLUMNS,
             report_data.get("dppa_monthly_breakout", []),
+            profile=profile,
         )
         _write_table_sheet(
             workbook.create_sheet("Hourly Settlement"),
             DPPA_HOURLY_COLUMNS,
             report_data.get("dppa_hourly_breakout", []),
+            profile=profile,
         )
 
     for worksheet in workbook.worksheets:
@@ -366,10 +370,12 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
     case_name = assumptions.get("case_name") or "{} {}".format(
         profile.country, profile.case_label
     )
-    contract_label = (
-        "Grid-connected DPPA with CfD (ND57/2025)" if dppa_config else
-        "ESCO discount-to-{} tariff (behind-the-meter)".format(profile.utility_label)
-    )
+    if dppa_config:
+        contract_label = "Grid-connected DPPA with CfD (ND57/2025)"
+    elif profile.shows_esco_contract_terms:
+        contract_label = "ESCO discount-to-{} tariff (behind-the-meter)".format(profile.utility_label)
+    else:
+        contract_label = "Direct ownership on {} tariff (behind-the-meter)".format(profile.utility_label)
     _write_title(
         worksheet,
         f"Investment & PPA Negotiation Summary — {case_name}",
@@ -391,34 +397,38 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         ("Total Investment (USD)", _lookup(summary, "total_capex_usd"), FORMAT_AMOUNT, None),
     ])
 
-    row += 1
-    _write_section_header(worksheet, row, "Contract Terms", 4)
-    terms = []
-    if dppa_config is not None:
-        volume = dppa_config.get("cfd_contract_volume_kwh_per_hour")
-        annual_volume = (
-            sum(volume) if isinstance(volume, list)
-            else (volume or 0.0) * 8760
-        )
-        terms.extend([
-            ("CfD Strike Price (VND/kWh)", dppa_config.get("cfd_strike_per_kwh_vnd"), FORMAT_AMOUNT, None),
-            ("CfD Strike Escalation (per year)", dppa_config.get("cfd_strike_escalation_rate"), FORMAT_PERCENT, None),
-            ("Annual Contract Volume (kWh)", annual_volume, FORMAT_AMOUNT, None),
-            ("Transmission Loss Factor k", dppa_config.get("transmission_loss_factor_k"), FORMAT_RATIO, None),
-            ("Distribution Loss Factor K_pp", dppa_config.get("distribution_loss_factor_kpp"), "0.000000", None),
-            ("DPPA Service Fee (VND/kWh)", dppa_config.get("c_dppa_service_fee_vnd_per_kwh"), FORMAT_AMOUNT, None),
-            ("Settlement Adder C_CL (VND/kWh)", dppa_config.get("c_cl_settlement_adder_vnd_per_kwh"), FORMAT_AMOUNT, None),
-        ])
-    else:
-        terms.extend([
-            ("ESCO Energy Price (fraction of {} tariff)".format(profile.utility_label), assumptions.get("esco_energy_discount_fraction"), FORMAT_PERCENT, None),
-            ("Demand Savings Share to ESCO", assumptions.get("demand_savings_esco_share"), FORMAT_PERCENT, None),
-        ])
-    terms.append(("Analysis Period (Years)", len(annual_rows), None, None))
-    row = _write_kpi_rows(worksheet, row + 1, terms)
+    # A direct-ownership case (no DPPA, no ESCO) has no contract at all, so
+    # this whole section - header included - is skipped rather than left
+    # standing over a lone, contract-unrelated row.
+    if dppa_config is not None or profile.shows_esco_contract_terms:
+        row += 1
+        _write_section_header(worksheet, row, "Contract Terms", 4)
+        terms = []
+        if dppa_config is not None:
+            volume = dppa_config.get("cfd_contract_volume_kwh_per_hour")
+            annual_volume = (
+                sum(volume) if isinstance(volume, list)
+                else (volume or 0.0) * 8760
+            )
+            terms.extend([
+                ("CfD Strike Price (VND/kWh)", dppa_config.get("cfd_strike_per_kwh_vnd"), FORMAT_AMOUNT, None),
+                ("CfD Strike Escalation (per year)", dppa_config.get("cfd_strike_escalation_rate"), FORMAT_PERCENT, None),
+                ("Annual Contract Volume (kWh)", annual_volume, FORMAT_AMOUNT, None),
+                ("Transmission Loss Factor k", dppa_config.get("transmission_loss_factor_k"), FORMAT_RATIO, None),
+                ("Distribution Loss Factor K_pp", dppa_config.get("distribution_loss_factor_kpp"), "0.000000", None),
+                ("DPPA Service Fee (VND/kWh)", dppa_config.get("c_dppa_service_fee_vnd_per_kwh"), FORMAT_AMOUNT, None),
+                ("Settlement Adder C_CL (VND/kWh)", dppa_config.get("c_cl_settlement_adder_vnd_per_kwh"), FORMAT_AMOUNT, None),
+            ])
+        elif profile.shows_esco_contract_terms:
+            terms.extend([
+                ("ESCO Energy Price (fraction of {} tariff)".format(profile.utility_label), assumptions.get("esco_energy_discount_fraction"), FORMAT_PERCENT, None),
+                ("Demand Savings Share to ESCO", assumptions.get("demand_savings_esco_share"), FORMAT_PERCENT, None),
+            ])
+        terms.append(("Analysis Period (Years)", len(annual_rows), None, None))
+        row = _write_kpi_rows(worksheet, row + 1, terms)
 
     row += 1
-    _write_section_header(worksheet, row, "Developer (Seller) Returns", 4)
+    _write_section_header(worksheet, row, profile.returns_section_label, 4)
     row = _write_kpi_rows(worksheet, row + 1, [
         ("Equity IRR", summary.get("equity_irr_fraction"), FORMAT_PERCENT, None),
         ("Project IRR", summary.get("project_irr_fraction"), FORMAT_PERCENT, None),
@@ -450,13 +460,22 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
 
     row += 1
     _write_section_header(worksheet, row, "Model Basis & Conventions", 4)
-    notes = [
-        "Buyer settlement quantity Q_Khc = min(hourly load, loss-adjusted generation Q_adj); "
-        "excess generation is sold by the generator at FMP and never billed to the buyer."
-        if dppa_config else
-        "ESCO is paid a discount to the time-specific {} tariff for project-served energy.".format(
+    if dppa_config:
+        settlement_note = (
+            "Buyer settlement quantity Q_Khc = min(hourly load, loss-adjusted generation Q_adj); "
+            "excess generation is sold by the generator at FMP and never billed to the buyer."
+        )
+    elif profile.shows_esco_contract_terms:
+        settlement_note = "ESCO is paid a discount to the time-specific {} tariff for project-served energy.".format(
             profile.utility_label
-        ),
+        )
+    else:
+        settlement_note = (
+            "The factory owns the system outright and keeps the full avoided {} tariff; "
+            "there is no ESCO discount or revenue split.".format(profile.utility_label)
+        )
+    notes = [
+        settlement_note,
         "PV degradation, O&M escalation and battery replacement (REopt schedule) are applied across the analysis period.",
         (
             "PV straight-line depreciation over "
@@ -574,15 +593,20 @@ def _write_buyer_analysis(worksheet, cash_flow_result, dppa_config, profile=VIET
         worksheet.column_dimensions[letter].width = 22
 
 
-def _write_developer_returns(worksheet, cash_flow_result):
+def _write_developer_returns(worksheet, cash_flow_result, profile=VIETNAM_PROFILE):
     summary = cash_flow_result.get("summary", {})
     annual_rows = cash_flow_result.get("annual_cash_flows", []) or [{}]
     minimum_dscr = _minimum_debt_service_dscr(cash_flow_result)
 
+    subtitle = (
+        "Seller/ESCO investment case: sources & uses, return metrics and annual equity cash flow (USD)"
+        if profile.shows_esco_contract_terms else
+        "Owner investment case: sources & uses, return metrics and annual equity cash flow (USD)"
+    )
     _write_title(
         worksheet,
         "Developer Returns — Financing & Cash Flow",
-        "Seller/ESCO investment case: sources & uses, return metrics and annual equity cash flow (USD)",
+        subtitle,
         last_column=8,
     )
 
@@ -839,9 +863,17 @@ def _write_technical_results(worksheet, report_data):
         worksheet.add_chart(chart, "D2")
 
 
-def _write_dispatch_sheet(worksheet, rows):
+def _dispatch_headers(columns, profile):
+    """Swap the row-unit header for the profile's, leaving other columns alone."""
+    return [
+        (profile.dispatch_row_label if label == "Hour" else label, key)
+        for label, key in columns
+    ]
+
+
+def _write_dispatch_sheet(worksheet, rows, profile=VIETNAM_PROFILE):
     """Hourly dispatch with the original PV generation split and a peak-week chart."""
-    for column_index, (header, _key) in enumerate(DISPATCH_COLUMNS, start=1):
+    for column_index, (header, _key) in enumerate(_dispatch_headers(DISPATCH_COLUMNS, profile), start=1):
         cell = worksheet.cell(row=1, column=column_index, value=header)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL
@@ -888,8 +920,8 @@ def _write_dispatch_sheet(worksheet, rows):
     worksheet.add_chart(chart, "M2")
 
 
-def _write_table_sheet(worksheet, columns, rows, chart_title=None):
-    for column_index, (header, _key) in enumerate(columns, start=1):
+def _write_table_sheet(worksheet, columns, rows, chart_title=None, profile=VIETNAM_PROFILE):
+    for column_index, (header, _key) in enumerate(_dispatch_headers(columns, profile), start=1):
         cell = worksheet.cell(row=1, column=column_index, value=header)
         cell.font = HEADER_FONT
         cell.fill = HEADER_FILL

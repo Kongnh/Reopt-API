@@ -240,6 +240,19 @@ class NoVietnamProvenanceTests(TestCase):
         )
 
 
+class NoEscoLanguageTests(TestCase):
+
+    def test_direct_ownership_workbook_has_no_esco_contract_rows(self):
+        workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                for value in row:
+                    if isinstance(value, str):
+                        self.assertNotIn("ESCO Energy Price", value)
+                        self.assertNotIn("Demand Savings Share to ESCO", value)
+                        self.assertNotIn("Developer (Seller) Returns", value)
+
+
 class DepreciationAndInverterReplacementTests(TestCase):
 
     def test_bess_life_is_passed_through(self):

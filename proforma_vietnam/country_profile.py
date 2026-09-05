@@ -41,6 +41,12 @@ class CountryProfile:
     defaults_file: str = "vietnam_defaults.json"
     depreciation_band_phrase: str = "the 7-20y band of Circular 45/2013/TT-BTC"
     revenue_source_phrase: str = "tariff / DPPA settlement"
+    # Presentation choices that only make sense under an ESCO/developer
+    # contract. A direct-ownership case (factory investing in its own roof)
+    # has no seller and no contract, so these must be overridable per country.
+    shows_esco_contract_terms: bool = True
+    returns_section_label: str = "Developer (Seller) Returns"
+    dispatch_row_label: str = "Hour"
 
     def __post_init__(self):
         if self.time_steps_per_hour not in SUPPORTED_TIME_STEPS_PER_HOUR:
@@ -83,6 +89,9 @@ THAILAND_PROFILE = CountryProfile(
         "the 20 percent per year machinery cap of Royal Decree No. 145"
     ),
     revenue_source_phrase="tariff",
+    shows_esco_contract_terms=False,
+    returns_section_label="Owner Returns",
+    dispatch_row_label="Interval",
 )
 
 DEFAULT_PROFILE = VIETNAM_PROFILE

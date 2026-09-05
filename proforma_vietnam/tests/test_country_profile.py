@@ -47,3 +47,18 @@ class CountryProfileTests(TestCase):
                 utility_label="XX",
                 time_steps_per_hour=3,
             )
+
+
+class DirectOwnershipPresentationTests(TestCase):
+
+    def test_vietnam_keeps_the_esco_presentation(self):
+        self.assertTrue(VIETNAM_PROFILE.shows_esco_contract_terms)
+        self.assertEqual(
+            VIETNAM_PROFILE.returns_section_label, "Developer (Seller) Returns"
+        )
+        self.assertEqual(VIETNAM_PROFILE.dispatch_row_label, "Hour")
+
+    def test_thailand_presents_as_direct_ownership(self):
+        self.assertFalse(THAILAND_PROFILE.shows_esco_contract_terms)
+        self.assertEqual(THAILAND_PROFILE.returns_section_label, "Owner Returns")
+        self.assertEqual(THAILAND_PROFILE.dispatch_row_label, "Interval")
