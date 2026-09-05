@@ -119,3 +119,28 @@ class ThailandReportTests(TestCase):
             ),
             [],
         )
+
+
+class BilledDemandTests(TestCase):
+
+    def _results(self, periods, series):
+        return {
+            "inputs": {"ElectricTariff": {
+                "coincident_peak_load_active_time_steps": periods}},
+            "outputs": {"ElectricUtility": {"electric_to_load_series_kw": series}},
+        }
+
+    def test_peak_is_taken_over_each_periods_one_based_steps(self):
+        from proforma_thailand.report import billed_demand_kw_by_month
+
+        # step 2 -> series[1] = 50.0; step 4 -> series[3] = 90.0
+        result = billed_demand_kw_by_month(
+            self._results([[1, 2], [3, 4]], [10.0, 50.0, 20.0, 90.0])
+        )
+
+        self.assertEqual(result, [50.0, 90.0])
+
+    def test_missing_series_yields_no_months_rather_than_zeros(self):
+        from proforma_thailand.report import billed_demand_kw_by_month
+
+        self.assertEqual(billed_demand_kw_by_month(self._results([[1]], [])), [])

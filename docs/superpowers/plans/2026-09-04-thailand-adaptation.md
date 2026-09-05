@@ -2986,7 +2986,7 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 - Test: `proforma_thailand/tests/test_run_case.py`
 
 **Interfaces:**
-- Consumes: `build_thailand_case` (Task 11), `power_factor_charge` (Task 8).
+- Consumes: `build_thailand_case` (Task 11), `build_thailand_report` (Task 14).
 - Produces: `main(argv) -> int` CLI; `summarize_results(results, loads_kw, tariff_extras) -> dict` with keys `pv_kw`, `bess_kw`, `bess_kwh`, `annual_load_kwh`, `annual_pv_kwh`, `grid_offset_fraction`, `billed_demand_kw_by_month`, `power_factor_compensation_kvar`.
 
 - [ ] **Step 1: Write the failing test**

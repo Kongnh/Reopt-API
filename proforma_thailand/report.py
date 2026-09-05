@@ -90,6 +90,27 @@ def compute_power_factor_compensation(assumptions):
     return required, cost_usd
 
 
+def billed_demand_kw_by_month(reopt_results):
+    """On-peak billed demand per month, from the OPTIMIZED grid draw.
+
+    PEA bills the on-peak maximum, so this is the max of the grid series over
+    each month's coincident-peak timestep set. Those sets are 1-based, matching
+    the Julia convention, hence the ``- 1``. Returns [] when either side is
+    absent rather than inventing zeros.
+    """
+    tariff = (reopt_results.get("inputs") or {}).get("ElectricTariff") or {}
+    utility = (reopt_results.get("outputs") or {}).get("ElectricUtility") or {}
+    periods = tariff.get("coincident_peak_load_active_time_steps") or []
+    series = utility.get("electric_to_load_series_kw") or []
+    if not periods or not series:
+        return []
+    return [
+        max((series[step - 1] for step in steps if 0 < step <= len(series)),
+            default=0.0)
+        for steps in periods
+    ]
+
+
 def build_thailand_report(reopt_results, assumptions):
     """Return ``(workbook, extras)`` for a Thailand DIRECT_OWNERSHIP run."""
     required_kvar, mitigation_cost = compute_power_factor_compensation(assumptions)
@@ -125,9 +146,19 @@ def build_thailand_report(reopt_results, assumptions):
         profile=THAILAND_PROFILE,
     )
 
+    # A bare 0.0 here would read as "no compensation needed" when it actually
+    # means "kvar_max was never supplied". Say which, so the report cannot
+    # quietly present an uncomputed number as a finding.
     extras = {
         "power_factor_compensation_kvar": required_kvar,
         "power_factor_mitigation_cost_usd": mitigation_cost,
-        "billed_demand_kw_by_month": assumptions.get("billed_demand_kw_by_month", []),
+        "power_factor_status": (
+            "computed" if assumptions.get("kvar_max")
+            else "not computed - site kVAR maximum not supplied"
+        ),
+        "billed_demand_kw_by_month": (
+            assumptions.get("billed_demand_kw_by_month")
+            or billed_demand_kw_by_month(reopt_results)
+        ),
     }
     return workbook, extras
