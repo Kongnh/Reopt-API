@@ -112,21 +112,30 @@ def compute_power_factor_compensation(assumptions):
 
 
 def billed_demand_kw_by_month(reopt_results):
-    """On-peak billed demand per month, from the OPTIMIZED grid draw.
+    """On-peak billed demand per month, from the OPTIMIZED total grid draw.
 
-    PEA bills the on-peak maximum, so this is the max of the grid series over
-    each month's coincident-peak timestep set. Those sets are 1-based, matching
-    the Julia convention, hence the ``- 1``. Returns [] when either side is
-    absent rather than inventing zeros.
+    PEA bills the on-peak maximum of what the meter sees, which is grid-to-load
+    PLUS grid-to-storage. REopt's own coincident-peak constraint applies to
+    total grid purchase, so reading only the to-load series under-reports what
+    the model already billed. Those step sets are 1-based, matching the Julia
+    convention, hence the ``- 1``. Returns [] when either side is absent rather
+    than inventing zeros.
     """
     tariff = (reopt_results.get("inputs") or {}).get("ElectricTariff") or {}
     utility = (reopt_results.get("outputs") or {}).get("ElectricUtility") or {}
     periods = tariff.get("coincident_peak_load_active_time_steps") or []
-    series = utility.get("electric_to_load_series_kw") or []
-    if not periods or not series:
+    to_load = utility.get("electric_to_load_series_kw") or []
+    to_storage = utility.get("electric_to_storage_series_kw") or []
+    if not periods or not to_load:
         return []
+
+    def _draw(step):
+        index = step - 1
+        charging = to_storage[index] if index < len(to_storage) else 0.0
+        return to_load[index] + charging
+
     return [
-        max((series[step - 1] for step in steps if 0 < step <= len(series)),
+        max((_draw(step) for step in steps if 0 < step <= len(to_load)),
             default=0.0)
         for steps in periods
     ]

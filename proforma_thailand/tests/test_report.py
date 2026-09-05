@@ -150,6 +150,40 @@ class BilledDemandTests(TestCase):
 
         self.assertEqual(billed_demand_kw_by_month(self._results([[1]], [])), [])
 
+    def _results_with_storage(self, periods, to_load, to_storage):
+        return {
+            "inputs": {"ElectricTariff": {
+                "coincident_peak_load_active_time_steps": periods}},
+            "outputs": {"ElectricUtility": {
+                "electric_to_load_series_kw": to_load,
+                "electric_to_storage_series_kw": to_storage,
+            }},
+        }
+
+    def test_grid_charging_counts_towards_billed_demand(self):
+        from proforma_thailand.report import billed_demand_kw_by_month
+
+        results = self._results_with_storage(
+            [[1, 2, 3]], [100.0, 200.0, 150.0], [50.0, 0.0, 0.0]
+        )
+        # Step 1 draws 100 for load plus 50 for the battery: 150 total.
+        # Step 2 draws 200 for load alone. The month peak is 200.
+        self.assertEqual(billed_demand_kw_by_month(results), [200.0])
+
+    def test_grid_charging_can_set_the_peak(self):
+        from proforma_thailand.report import billed_demand_kw_by_month
+
+        results = self._results_with_storage(
+            [[1, 2]], [100.0, 120.0], [400.0, 0.0]
+        )
+        self.assertEqual(billed_demand_kw_by_month(results), [500.0])
+
+    def test_absent_storage_series_is_treated_as_zeros(self):
+        from proforma_thailand.report import billed_demand_kw_by_month
+
+        results = self._results_with_storage([[1, 2]], [100.0, 120.0], [])
+        self.assertEqual(billed_demand_kw_by_month(results), [120.0])
+
 
 class NoVietnamProvenanceTests(TestCase):
     """A Thai client must not be told its tax is governed by Vietnamese law.
