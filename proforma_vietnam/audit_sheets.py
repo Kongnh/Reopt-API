@@ -259,7 +259,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
           source="REopt Financial.year_one_om_costs_before_tax",
           name="OM_YEAR1", fmt=FMT_AMOUNT)
     entry("O&M escalation", get("om_escalation_rate") or 0.0, unit="per year",
-          source="vietnam_defaults.json / case.json financial.om_escalation_rate",
+          source="{defaults_file} / case.json financial.om_escalation_rate".format(defaults_file=profile.defaults_file),
           name="ESC_OM", fmt=FMT_PERCENT)
     if assumptions.get("battery_replacement_year"):
         entry("Battery replacement year", assumptions["battery_replacement_year"],
@@ -373,10 +373,10 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
 
     section("Financing")
     entry("Debt fraction", get("debt_fraction"), unit="of total capex",
-          source="vietnam_defaults.json / case.json financial.debt_fraction",
+          source="{defaults_file} / case.json financial.debt_fraction".format(defaults_file=profile.defaults_file),
           name="DEBT_FRACTION", fmt=FMT_PERCENT)
     entry("Debt interest rate", get("debt_interest_rate_fraction"), unit="per year",
-          source="vietnam_defaults.json / case.json financial.debt_interest_rate_fraction",
+          source="{defaults_file} / case.json financial.debt_interest_rate_fraction".format(defaults_file=profile.defaults_file),
           name="DEBT_RATE", fmt=FMT_PERCENT)
     if d.get("debt_currency") == "USD":
         # USD-denominated debt (default is VND). Gated on the engine derivation
@@ -389,7 +389,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
                          profile.local_currency_code),
               name="DEBT_CURRENCY")
     entry("Debt term", get("debt_term_years"), unit="years",
-          source="vietnam_defaults.json / case.json financial.debt_term_years",
+          source="{defaults_file} / case.json financial.debt_term_years".format(defaults_file=profile.defaults_file),
           name="DEBT_TERM_YEARS", fmt="0")
     debt_sizing = d.get("debt_sizing")
     if debt_sizing:
@@ -1608,7 +1608,7 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs,
     worksheet.row_dimensions[1].height = 24
     if is_usd_debt:
         note = (
-            "Cash flows are {0}-denominated ({1} tariff / DPPA settlement) but reported in USD at "
+            "Cash flows are {0}-denominated ({1} " + profile.revenue_source_phrase + ") but reported in USD at "
             "the fixed contract rate. Debt is USD-denominated, so its service is FX-fixed while the "
             "rest of the equity flow (CFADS) deflates by (1+d)^t: adjusted_t = CFADS_t/(1+d)^t − "
             "debt_service_t, and DSCR erodes as (CFADS_t/(1+d)^t)/debt_service_t. CIT is not "
@@ -1617,7 +1617,7 @@ def write_fx_sensitivity_sheet(worksheet, cash_flow_result, proforma_refs,
         ).format(profile.local_currency_code, profile.utility_label)
     else:
         note = (
-            "Cash flows are {0}-denominated ({1} tariff / DPPA settlement) but reported in USD "
+            "Cash flows are {0}-denominated ({1} " + profile.revenue_source_phrase + ") but reported in USD "
             "at the fixed contract rate. Each scenario deflates the year-t USD equity cash flow "
             "by (1+d)^t. Debt is assumed {0}-denominated, so DSCR is unchanged. The rate cells "
             "are editable; engine columns validate the default scenarios."
@@ -1825,13 +1825,18 @@ def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable
         return [
             "The factory self-invests: it owns the PV/BESS asset, borrows the debt, and pays O&M and "
             "replacements. Its benefit is the FULL avoided {0} bill — the buyer's natural benchmark against "
-            "an ESCO or DPPA offer (\"what if we just built it ourselves?\").".format(profile.utility_label),
+            "a third-party offer (\"what if we just built it ourselves?\").".format(profile.utility_label),
             "Bill savings = BAU {0} bill − optimized residual {0} bill, the full delta (energy + demand). "
             "There is NO ESCO discount and NO 80/20 demand-savings split — the factory captures everything; "
             "the buyer-analysis savings view therefore equals the developer view.".format(profile.utility_label),
-            "May sell rooftop surplus to {0} under Decree 243/2026 (PV→grid + would-be-curtailed), capped "
-            "at the Decision 988 regional ceiling and 50% of PV output — the same machinery as the ESCO "
-            "surplus leg; omitted → surplus not monetized (conservative).".format(profile.utility_label),
+            (
+                "May sell rooftop surplus to {0} under Decree 243/2026 (PV→grid + would-be-curtailed), "
+                "capped at the Decision 988 regional ceiling and 50% of PV output — the same machinery "
+                "as the ESCO surplus leg; omitted → surplus not monetized (conservative)."
+                if profile.country == "Vietnam" else
+                "{0} pays nothing for exported energy, so the system curtails rather than exports and "
+                "there is no surplus-export revenue in this case."
+            ).format(profile.utility_label),
             "CIT: flat standard 20% every year (standard_flat) — no first-profit holiday and no RE-producer "
             "preferential rate. A factory adding rooftop solar to an existing operation gets no new-project "
             "incentive on its general income and is not a licensed RE generator.",
@@ -2092,7 +2097,11 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             "REopt (NLR optimization engine) selects PV/BESS sizing and hourly dispatch against the "
             "{} time-of-use tariff over an 8760-hour year.".format(profile.utility_label),
             "proforma_vietnam post-processes the REopt run: an hourly ND57/2025 DPPA settlement layer "
-            "(when applicable) and a 25-year developer cash flow with Vietnam tax and debt.",
+            "(when applicable) and a 25-year developer cash flow with Vietnam tax and debt."
+            if profile.country == "Vietnam" else
+            "The proforma engine post-processes the REopt run into a 25-year owner cash flow "
+            "with {} tax and debt. There is no wholesale settlement layer: this is "
+            "a behind-the-meter self-consumption case with no export.".format(profile.country),
             "This workbook is generated from that engine. The Pro Forma (Audit) sheet re-derives the "
             "full cash flow with live Excel formulas from the named inputs on the Assumptions sheet; "
             "the Checks block ties every metric back to the engine (PASS/REVIEW).",
@@ -2101,13 +2110,21 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             f"All money flows are computed in USD at the fixed contract rate ({fx:,.0f} {profile.local_currency_code}/USD)."
             if fx else
             "All money flows are computed in USD at the fixed contract exchange rate.",
-            "Underlying revenue is {0}-denominated ({1} tariff, FMP market, DPPA fees). Holding FX flat "
-            "for the analysis period is a simplification: the FX Sensitivity sheet quantifies USD-reported "
-            "returns under 0-3%/yr {0} depreciation.".format(
-                profile.local_currency_code, profile.utility_label
-            ),
-            "Sheets that show {0} amounts (Hourly/Monthly Settlement, DPPA fee inputs) are {0}-native "
-            "regulatory quantities, not conversions.".format(profile.local_currency_code),
+            (
+                "Underlying revenue is {0}-denominated ({1} tariff, FMP market, DPPA fees). "
+                "Holding FX flat for the analysis period is a simplification: the FX Sensitivity "
+                "sheet quantifies USD-reported returns under 0-3%/yr {0} depreciation."
+                if profile.country == "Vietnam" else
+                "Underlying revenue is {0}-denominated ({1} tariff). "
+                "Holding FX flat for the analysis period is a simplification: the FX Sensitivity "
+                "sheet quantifies USD-reported returns under 0-3%/yr {0} depreciation."
+            ).format(profile.local_currency_code, profile.utility_label),
+            (
+                "Sheets that show {0} amounts (Hourly/Monthly Settlement, DPPA fee inputs) are "
+                "{0}-native regulatory quantities, not conversions."
+                if profile.country == "Vietnam" else
+                "Sheets that show {0} amounts are {0}-native regulatory quantities, not conversions."
+            ).format(profile.local_currency_code),
             "Debt is USD-denominated (international financing), so DSCR is FX-exposed — see the FX "
             "Sensitivity sheet."
             if usd_debt else
@@ -2129,8 +2146,8 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
                 "then-applicable base rate. Tax losses carry forward at most 5 consecutive years, consumed "
                 "FIFO — the carryforward schedule is fully visible on the Pro Forma sheet."
             ),
-            "Straight-line depreciation: PV over the configured life within the 7-20y band of Circular "
-            "45/2013/TT-BTC; BESS over its own life.",
+            "Straight-line depreciation: PV over the configured life within {}; "
+            "BESS over its own life.".format(profile.depreciation_band_phrase),
             *replacement_basis_bullets,
             *contract_basis_bullets,
             *vat_basis_bullets,
@@ -2160,11 +2177,17 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             "is the hourly solar-resource signal — REopt does not persist raw irradiance.",
         ]),
         ("7. Key references", [
-            "ND57/2025 (DPPA decree) Art. 14-18 — settlement chain and eligibility.",
-            "NSMO/CD7 simulation examples — k price-only conversion (Ví dụ 1), CfD cap on matched volume (Ví dụ 4).",
-            "Law 67/2025/QH15 + Decree 320/2025/NĐ-CP — CIT rates, RE-producer preferential incentive, "
-            "holiday & loss carryforward (legacy Circular 78/2014 Art. 9, 18 shape kept for the standard regime).",
-            "Circular 45/2013/TT-BTC — fixed-asset depreciation bands.",
+            *([
+                "ND57/2025 (DPPA decree) Art. 14-18 — settlement chain and eligibility.",
+                "NSMO/CD7 simulation examples — k price-only conversion (Ví dụ 1), CfD cap on matched volume (Ví dụ 4).",
+                "Law 67/2025/QH15 + Decree 320/2025/NĐ-CP — CIT rates, RE-producer preferential incentive, "
+                "holiday & loss carryforward (legacy Circular 78/2014 Art. 9, 18 shape kept for the standard regime).",
+                "Circular 45/2013/TT-BTC — fixed-asset depreciation bands.",
+            ] if profile.country == "Vietnam" else [
+                "{} — corporate income tax rate and loss carryforward.".format(
+                    profile.cit_rate_source),
+                "{} — fixed-asset depreciation.".format(profile.depreciation_source),
+            ]),
             "{} retail tariff (current & QĐ963 TOU structures) as configured in the case file.".format(
                 profile.utility_label
             ),

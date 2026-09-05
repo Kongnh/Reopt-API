@@ -38,6 +38,9 @@ class CountryProfile:
     depreciation_authority: str = "Circular 45/2013/TT-BTC"
     depreciation_range_text: str = "permits 7-20 years for generating equipment"
     case_label: str = "ESCO / DPPA Case"
+    defaults_file: str = "vietnam_defaults.json"
+    depreciation_band_phrase: str = "the 7-20y band of Circular 45/2013/TT-BTC"
+    revenue_source_phrase: str = "tariff / DPPA settlement"
 
     def __post_init__(self):
         if self.time_steps_per_hour not in SUPPORTED_TIME_STEPS_PER_HOUR:
@@ -75,6 +78,11 @@ THAILAND_PROFILE = CountryProfile(
         "caps machinery at 20 percent per year, a 5-year life"
     ),
     case_label="DIRECT_OWNERSHIP Case",
+    defaults_file="thailand_defaults.json",
+    depreciation_band_phrase=(
+        "the 20 percent per year machinery cap of Royal Decree No. 145"
+    ),
+    revenue_source_phrase="tariff",
 )
 
 DEFAULT_PROFILE = VIETNAM_PROFILE

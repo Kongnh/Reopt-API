@@ -6,6 +6,10 @@ from proforma_thailand.report import (
 )
 
 ASSUMPTIONS = {
+    # build_thailand_case sets these; the fixture must match production
+    # or the provenance test passes or fails for the wrong reason.
+    "case_name": "Thailand DIRECT_OWNERSHIP Case",
+    "cit_regime": "standard_flat",
     "country": "Thailand",
     "local_currency_code": "THB",
     "utility_label": "PEA",
@@ -154,8 +158,11 @@ class NoVietnamProvenanceTests(TestCase):
     45/2013/TT-BTC shipped past it.
     """
 
+    # Lowercase module paths like proforma_vietnam.cash_flow are accurate
+    # engineering provenance (the engine IS that module) and are not a claim
+    # about the client's country, so they are deliberately not banned.
     BANNED = (
-        "Vietnam", "vietnam", "VND", "EVN",
+        "Vietnam", "vietnam_defaults", "VND", "EVN",
         "Circular 45", "Circular 78", "Law 67", "QH15",
         "Decree 320", "ND57", "Decision 988", "QD963", "DPPA",
     )
