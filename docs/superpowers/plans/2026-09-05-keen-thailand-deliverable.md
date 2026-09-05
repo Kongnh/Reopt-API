@@ -1688,7 +1688,9 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 LOAD_CSV = DATA_DIR / "rofu_load_15min.csv"
+HOLIDAYS_JSON = DATA_DIR / "rofu_all_off_peak_dates.json"
 MANIFEST = DATA_DIR / "load_manifest.json"
+INTERVALS_PER_DAY = 96
 
 
 def build_manifest(calendar_year_months, rows_per_month, source_sha256):
@@ -1745,11 +1747,27 @@ def main(argv=None):
         if token.strip()
     ]
 
+    from proforma_thailand.load_profile import _days_in_month
+
     intervals = extract_intervals(args.source)
-    loads, rows_per_month = build_calendar_year(intervals, calendar_months)
+    # build_calendar_year returns THREE values, and it already derives the
+    # all-off-peak (holiday) dates, so this script writes that file too rather
+    # than leaving a second committed input with no producer.
+    loads, all_off_peak_dates, qa = build_calendar_year(intervals, calendar_months)
+
+    # _days_in_month returns a LIST OF DATES, not a count.
+    rows_per_month = [
+        len(_days_in_month(year, month)) * INTERVALS_PER_DAY
+        for year, month in calendar_months
+    ]
 
     LOAD_CSV.write_text(
         "load_kw\n" + "\n".join("{:g}".format(value) for value in loads) + "\n",
+        encoding="utf-8",
+    )
+    HOLIDAYS_JSON.write_text(
+        json.dumps(sorted(day.isoformat() for day in all_off_peak_dates), indent=2)
+        + "\n",
         encoding="utf-8",
     )
     MANIFEST.write_text(
@@ -1760,7 +1778,10 @@ def main(argv=None):
         encoding="utf-8",
     )
     print("Wrote {} rows to {}".format(len(loads), LOAD_CSV))
+    print("Wrote {} all-off-peak dates to {}".format(
+        len(all_off_peak_dates), HOLIDAYS_JSON))
     print("Wrote manifest to {}".format(MANIFEST))
+    print("QA: {}".format(qa))
     return 0
 
 
@@ -1774,20 +1795,23 @@ Run: `./.venv/Scripts/python.exe -m unittest proforma_thailand.tests.test_build_
 
 Expected: 6 tests PASS.
 
-- [ ] **Step 5: Check `build_calendar_year`'s return shape**
+- [ ] **Step 5: Confirm the two API facts the script depends on**
 
-Run:
+These were checked before the plan was finalised; confirm they still hold rather than assuming:
 
 ```bash
 ./.venv/Scripts/python.exe -c "
+from proforma_thailand.load_profile import build_calendar_year, _days_in_month
 import inspect
-from proforma_thailand import load_profile
-print(inspect.signature(load_profile.build_calendar_year))
-print(inspect.getsource(load_profile.build_calendar_year)[-600:])
+print('build_calendar_year returns:', inspect.getsource(build_calendar_year).strip().splitlines()[-1])
+print('_days_in_month(2026, 1) type:', type(_days_in_month(2026, 1)).__name__,
+      'len:', len(_days_in_month(2026, 1)))
 "
 ```
 
-If `build_calendar_year` returns only the loads list and not a `(loads, rows_per_month)` tuple, change the script to compute `rows_per_month` itself from `_days_in_month(year, month) * 96` for each entry in `calendar_months`, and leave `load_profile.py` untouched. Do not change an existing return shape that other callers depend on.
+Expected: `build_calendar_year` returns `loads_kw, all_off_peak_dates, qa` — a **three**-tuple, and it already derives the all-off-peak dates, which is why the script writes that file too. `_days_in_month` returns a **list of dates** of length 31, not a count, so the row arithmetic must take its `len()`. Multiplying the list itself by 96 is list repetition and would silently produce a 2,976-element list of dates instead of a row count.
+
+Do not change `load_profile.py`; other callers depend on its current shape.
 
 - [ ] **Step 6: Generate the manifest for the committed CSV**
 
@@ -1796,15 +1820,18 @@ The source workbook lives outside the repo. Generate the manifest from the commi
 ```bash
 ./.venv/Scripts/python.exe -c "
 import json
-from pathlib import Path
 from proforma_thailand.load_profile import _days_in_month
 from proforma_thailand.tools.build_load_inputs import build_manifest, MANIFEST
 months = [(2026,1),(2026,2),(2026,3),(2026,4),(2026,5),(2026,6),
           (2025,7),(2025,8),(2025,9),(2025,10),(2025,11),(2025,12)]
-rows = [_days_in_month(y, m) * 96 for y, m in months]
+# len(): _days_in_month returns a list of dates, not a count.
+rows = [len(_days_in_month(y, m)) * 96 for y, m in months]
 csv_rows = sum(1 for _ in open('proforma_thailand/data/rofu_load_15min.csv', encoding='utf-8')) - 1
 assert sum(rows) == csv_rows, (sum(rows), csv_rows)
-manifest = build_manifest(months, rows, 'not-recorded: manifest backfilled from the committed CSV, source workbook lives outside the repo')
+manifest = build_manifest(months, rows, None)
+manifest['source_note'] = ('backfilled from the committed CSV; the source workbook '
+                           'lives outside the repo, so no hash was taken. Running '
+                           'build_load_inputs.py against the real workbook records one.')
 MANIFEST.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
 print('total rows', manifest['total_rows'])
 "
@@ -1826,13 +1853,14 @@ and immediately after `calendar_months` is built:
     # The CSV carries no timestamps, so only the manifest can say which months
     # it holds and in what order. Without this, swapping two months bills the
     # load under the wrong tariff month with no error.
-    manifest_path = Path("proforma_thailand/data/load_manifest.json")
     manifest = (
-        json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest_path.exists() else None
+        json.loads(MANIFEST.read_text(encoding="utf-8"))
+        if MANIFEST.exists() else None
     )
     validate_calendar_months(calendar_months, manifest)
 ```
+
+Import `MANIFEST` from `proforma_thailand.tools.build_load_inputs` alongside `validate_calendar_months`. It is resolved relative to the module (`Path(__file__).resolve().parent.parent / "data"`), NOT to the process working directory. A CWD-relative path would make the manifest silently unfindable whenever the process runs from anywhere but the repo root, and `validate_calendar_months` treats a missing manifest as "not an error" — so the guard would vanish exactly when someone changed directory, while still looking present.
 
 - [ ] **Step 8: Prove the guard catches a reordering**
 
