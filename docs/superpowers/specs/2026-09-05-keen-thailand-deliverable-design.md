@@ -36,7 +36,8 @@ Annual load 7,235,301 kWh. Billed on-peak demand 1,083-1,343 kW.
 | D1 | Data-blocked inputs get a researched, cited benchmark, used and visibly marked provisional. Nothing stays silently unmodelled. |
 | D2 | Insurance and inverter replacement are handled Thailand-side. BESS depreciation years needs an additive core kwarg, because it cannot be reached from `report.py` without monkeypatching a module global. |
 | D3 | PV is presented as a sensitivity band across three roof widths plus a roof-unconstrained bound. |
-| D4 | BESS is presented as the optimizer result plus a forced case sized to clear the evening peak. |
+| D4 | BESS is presented as the optimizer result, at both the conservative roof cap and the roof-unconstrained cap. |
+| D9 | Scope 2 emissions reduction is computed in-house from a cited Thailand grid emission factor. REopt's own emissions outputs remain excluded and unquotable. |
 | D5 | Thai EPC and BESS pricing is re-benchmarked with cited Thailand sources before any case is run. |
 | D6 | Cases live in `outputs/thailand_case/rofu_thailand/case_N`, mirroring `outputs/vietnam_case/factory_a/case_N`. |
 | D7 | Deliverable is a written memo plus the per-case workbooks. Caveats are inline footnotes; a closing "Information requests" list names what Ou must confirm. |
@@ -127,8 +128,9 @@ inputs.
 grid-to-storage, and REopt's own coincident-peak constraint applies to total
 grid purchase. Our reporting therefore understates what the model itself
 billed, whenever the battery grid-charges on-peak. Sum both series. Negligible
-at a 29 kW battery; material in the forced-battery case. `can_grid_charge`
-stays True: the model is right, the report was wrong.
+at a 29 kW battery, but it scales with battery size, so it must be fixed before
+case_5 and case_6 are read. `can_grid_charge` stays True: the model is right,
+the report was wrong.
 
 **I3 - dispatch irradiance alignment.** The POA series is 8760 hourly values
 from PVWatts, paired against 35,040 dispatch rows, so it is 4x misaligned and
@@ -166,12 +168,61 @@ that manifest in `build_thailand_case`, raising on mismatch.
 rename the dispatch "Hour" column to "Interval", since it is headed 1-35040;
 assert `ft_for_month(2025, 1)`.
 
+### 1d. Scope 2 emissions reduction
+
+Keen is a footwear brand with supply-chain decarbonisation targets, so the
+avoided emissions are a first-class output of this analysis, not a footnote.
+
+REopt's own emissions outputs stay excluded and unquotable. They are all zero
+here because AVERT, Cambium and EASIUR are US datasets with no Thailand
+coverage, and the existing provenance guard in
+`proforma_thailand/tests/test_report.py` must continue to keep them out of the
+workbook. Scope 2 is therefore computed in-house from a cited Thailand grid
+emission factor, and labelled in the workbook and memo as an Allotrope
+calculation rather than a REopt output, so the two can never be confused.
+
+**Basis.** Annual Scope 2 reduction in tCO2e equals
+
+    (annual load kWh - annual grid energy supplied kWh) x grid emission factor
+
+The bracket is the energy actually served by PV and storage, net of losses and
+net of curtailment. It is deliberately NOT total PV generation: curtailed
+energy displaces no grid import and must not be claimed. It is also net of any
+battery grid-charging, since that is grid energy. This is the same quantity
+already reported as the grid offset, expressed in kWh, so the emissions figure
+and the grid-offset figure cannot drift apart.
+
+**Reporting.** Add annual tCO2e avoided, lifetime tCO2e avoided over the
+analysis period, and the emission factor with its citation and vintage, to both
+the workbook and `summary.json`. Apply PV degradation to the lifetime figure
+rather than multiplying year one by 25. Hold the emission factor constant across
+the analysis period and state that as an assumption: the Thai grid is expected
+to decarbonise under the PDP, which would reduce avoided emissions over time,
+so a constant factor is the optimistic end of the range.
+
+**GHG Protocol treatment.** Self-consumed onsite generation reduces both
+location-based and market-based Scope 2. The memo must state that the
+market-based claim depends on Keen retaining and retiring the environmental
+attributes: if the RECs or I-RECs are sold to a third party, the market-based
+reduction is not Keen's to claim. Thailand has an active I-REC registry, so this
+is a live commercial decision and not a hypothetical. State it; do not advise on
+it.
+
 ## Phase 2: Thailand cost re-benchmark
 
 Research and cite Thailand-specific figures, replacing placeholders:
 PV installed cost per kWp, BESS per kW and per kWh, PV O&M per kWp-year,
 insurance as a fraction of capex, inverter replacement fraction and year,
 and the PEA tariff escalation rate.
+
+Also research the **Thailand grid emission factor** for Phase 1d. The primary
+authority is TGO, the Thailand Greenhouse Gas Management Organization, which
+publishes the national grid emission factor used for Thai corporate reporting;
+cross-check against the IFI/IGES harmonised grid factor dataset and the IEA. The
+figure carried into the workbook must record its source, its vintage year, and
+whether it is a combined-margin, operating-margin or average factor, because
+those differ materially and a brand's auditor will ask which was used. If the
+sources disagree beyond a narrow band, carry the most conservative and say so.
 
 Current placeholders sit above the ENS vendor comparator (700 versus about 492
 USD/kWp; 250 versus about 213 USD/kWh) but below it on opex (12 versus about
@@ -227,45 +278,51 @@ answering where more PV stops paying, NOT "what the transformer permits".
 | case_2 | 1,895 | none | Mid roof width |
 | case_3 | 2,106 | none | Upper roof width |
 | case_4 | 3,230 | none | Where does more PV stop paying |
-| case_5 | 1,685 | optimizer-sized | The economic battery |
-| case_6 | 1,685 | forced, sized in study | A battery that clears the evening peak |
+| case_5 | 1,685 | optimizer-sized | The economic battery at the conservative roof |
+| case_6 | 3,230 | optimizer-sized | The economic battery when PV is not roof-limited |
 
 At 1,685 kW the system already curtails about 8 percent of generation under
 zero export, and that fraction climbs with size, so cases 2-4 test a real
 diminishing return rather than a linear extrapolation.
 
-### Evening-peak battery sizing study (case_6)
+### The storage pair (case_5 and case_6)
 
 PEA's on-peak window is 09:00 to 22:00. PV cannot serve the 18:00-22:00 tail,
-so that tail sets a floor on billed demand that PV alone cannot cut. In the
-RTS base case billed demand only falls below roughly 1,121 kW in 1 of 12
-months.
+so that tail sets a floor on billed demand that PV alone cannot cut. In the RTS
+base case, billed demand falls below roughly 1,121 kW in only 1 of 12 months.
+Storage is the only lever that reaches that tail, which is why it is worth
+testing at two PV caps rather than one.
 
-The target is defined self-referentially rather than picked: it is the LOWEST
-monthly billed demand that PV alone achieves in the re-run case_1. In other
-words, "level the year down to the best month PV already delivers". This avoids
-an arbitrary round number and stays correct after Phase 1 and Phase 2 shift the
-case_1 numbers. Report a sensitivity at plus and minus 100 kW around it, so the
-cost of a deeper cut is visible.
+case_5 asks whether a battery pays when PV is roof-limited to 1,685 kW.
+case_6 asks the same question when PV is not roof-limited, at the 3,230 kW cap.
+These can diverge in either direction and the sign is not obvious in advance.
+More PV deepens the midday surplus, which gives a battery cheaper energy to
+absorb and more curtailment to rescue, pushing the economic battery up. It also
+flattens more of the on-peak demand profile by itself, leaving less demand
+charge for a battery to cut, pushing it down. Running both is what settles it.
 
-Method: from the case_1 optimized grid series, for each month take the on-peak
-timesteps, compute the maximum power above the target (sets battery kW) and the
-largest single-day energy above the target (sets battery kWh). Take the
-worst-month requirement, then add headroom for round-trip efficiency and
-depth of discharge. Run that size as a forced minimum and price it: capex,
-demand-charge reduction, and incremental IRR against case_1.
+Both cases leave storage unconstrained and let the optimizer size it. Report
+for each: battery kW and kWh, demand-charge reduction, the change in
+curtailed energy against the matching PV-only case, and incremental IRR.
+
+Note the consequence for Rob's ask: with no forced-size case in the matrix, the
+deliverable reports what a battery is worth on PEA's tariff but does not price
+a specific vendor-scale battery. If a contractor quotes one, comparing it needs
+a further run.
 
 ## Phase 4: memo
 
 Client memo plus the six workbooks. Contents:
 
 - Headline: grid offset with and without storage, for Lauren's leadership update.
+- Scope 2 reduction in tCO2e per year and over the analysis period, with the
+  emission factor, its vintage and its source stated, and the note on retaining
+  environmental attributes for a market-based claim.
 - Sizing band across roof widths, with the derivation above shown.
-- Storage verdict: the optimizer result, and what the forced battery costs and buys.
+- Storage verdict: what the optimizer builds at each PV cap, and why.
 - Cost basis, with every benchmark cited and every provisional input marked.
 - Inline footnotes for what cannot be computed: power factor without site kVAR,
-  emissions outputs which are zero because AVERT, Cambium and EASIUR are US
-  datasets and must not be quoted, and the ERC generation licence and Aor.6
+  and the ERC generation licence and Aor.6
   building-modification permit fees which have no public schedule. EIA and IEE
   are genuinely not required below 5 MWp at about 1.7 MWp, so zero there is a
   finding and not a stub.
@@ -283,3 +340,10 @@ ESCO and PPA structures for Thailand. Resilience and outage valuation, despite
 about one outage per month and no backup generator, because no outage cost data
 is in hand. Any change to `reo/`, `outputs/vietnam_case/` or
 `baseline_workbooks/`.
+
+Pricing a specific vendor-scale battery. The storage answer is the optimizer's,
+at two PV caps. If a contractor quotes a battery, comparing it against these
+results needs a further forced-size run.
+
+Scope 1 and Scope 3, and any REopt-sourced emissions output. Only Scope 2 from
+avoided grid import is in scope, computed as set out in Phase 1d.
