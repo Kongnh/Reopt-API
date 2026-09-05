@@ -32,6 +32,7 @@ from proforma_vietnam.tax_model import (
     PV_DEPRECIATION_YEARS,
     calculate_cit,
     straight_line_depreciation_schedule,
+    PV_DEPRECIATION_CITATION,
     validate_pv_depreciation_years,
 )
 
@@ -110,6 +111,9 @@ def calculate_vietnam_esco_cash_flow(
     battery_replacement_treatment="capitalize",
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
+    pv_depreciation_years_min=None,
+    pv_depreciation_years_max=None,
+    pv_depreciation_citation=None,
     dppa_settlement=None,
     physical_dppa=None,
     direct_ownership=None,
@@ -191,7 +195,13 @@ def calculate_vietnam_esco_cash_flow(
     total_capex_vnd = pv_capex_vnd + bess_capex_vnd + other_capex_vnd
     fraction_based_principal_vnd = total_capex_vnd * debt_fraction
     construction_enabled = construction_months > 0 or principal_grace_years > 0
-    validate_pv_depreciation_years(pv_depreciation_years)
+    validate_pv_depreciation_years(
+        pv_depreciation_years,
+        minimum=pv_depreciation_years_min,
+        maximum=pv_depreciation_years_max,
+        citation=(pv_depreciation_citation
+                  or PV_DEPRECIATION_CITATION),
+    )
     _validate_contract_tenor(
         contract_years, contract_residual_value_usd, structure,
         project_years, debt_term_years,

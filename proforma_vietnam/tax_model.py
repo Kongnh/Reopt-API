@@ -49,12 +49,23 @@ PV_DEPRECIATION_YEARS_MAX = TAX_DEFAULTS["pv_depreciation_years_max"]
 BESS_DEPRECIATION_YEARS = TAX_DEFAULTS["bess_depreciation_years"]
 
 
-def validate_pv_depreciation_years(years):
-    if not PV_DEPRECIATION_YEARS_MIN <= years <= PV_DEPRECIATION_YEARS_MAX:
+# Vietnam's statutory range and the authority for it. Both are parameters
+# rather than hard-coded, because the permitted life is country law: Thailand
+# allows 20% per year on machinery under Royal Decree No. 145, a 5-year life,
+# which Circular 45's floor of 7 would wrongly reject. Defaults keep Vietnam
+# byte-identical.
+PV_DEPRECIATION_CITATION = "Circular 45/2013/TT-BTC"
+
+
+def validate_pv_depreciation_years(years, minimum=None, maximum=None,
+                                   citation=PV_DEPRECIATION_CITATION):
+    minimum = PV_DEPRECIATION_YEARS_MIN if minimum is None else minimum
+    maximum = PV_DEPRECIATION_YEARS_MAX if maximum is None else maximum
+    if not minimum <= years <= maximum:
         raise ValueError(
             "pv_depreciation_years must be within "
-            f"{PV_DEPRECIATION_YEARS_MIN}-{PV_DEPRECIATION_YEARS_MAX} years "
-            f"per Circular 45/2013/TT-BTC, got {years}."
+            f"{minimum}-{maximum} years "
+            f"per {citation}, got {years}."
         )
     return years
 

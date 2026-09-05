@@ -632,6 +632,16 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
         for key in sorted(leftover):
             entry(key, leftover[key], source="assumptions.json")
 
+    # Provisional inputs get a row each, so the reader can see WHICH numbers are
+    # awaiting confirmation rather than just that some are. Gated on the key, so
+    # Vietnam workbooks, which never set it, are unchanged.
+    placeholder_keys = (assumptions or {}).get("placeholder_keys")
+    if placeholder_keys:
+        marker = (assumptions or {}).get("placeholder_marker", "")
+        section("Provisional Inputs (pending confirmation)")
+        for key in sorted(placeholder_keys):
+            entry(key, "provisional", source=marker)
+
     worksheet.column_dimensions["A"].width = 2
     worksheet.column_dimensions["B"].width = 44
     worksheet.column_dimensions["C"].width = 16
