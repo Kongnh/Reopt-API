@@ -1229,3 +1229,101 @@ class FormatSeriesTests(TestCase):
 
     def test_empty_series_renders_as_an_empty_string(self):
         self.assertEqual(_format_series([]), "")
+
+
+# calendar_year_months split across two years, like a real Thailand RTS case
+# stitched from the metered data actually available.
+FT_SPLIT_CALENDAR_MONTHS = [
+    [2026, 1], [2026, 2], [2026, 3], [2026, 4], [2026, 5], [2026, 6],
+    [2025, 7], [2025, 8], [2025, 9], [2025, 10], [2025, 11], [2025, 12],
+]
+FT_SERIES = [0.1572] * 6 + [0.1972] * 2 + [0.1572] * 4
+
+
+def _thailand_assumptions(**overrides):
+    base = dict(
+        ESCO_ASSUMPTIONS,
+        local_currency_code="THB",
+        ft_per_kwh_by_month_thb=FT_SERIES,
+        calendar_year_months=FT_SPLIT_CALENDAR_MONTHS,
+    )
+    base.update(overrides)
+    return base
+
+
+def _find_row(sheet, label):
+    return next(
+        row for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row=row, column=2).value == label
+    )
+
+
+class FtAuditRowTests(TestCase):
+
+    def test_ft_row_renders_with_synthetic_year_label_and_values(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(
+            result, assumptions=_thailand_assumptions()
+        )
+        sheet = workbook["Assumptions"]
+        label = "Ft adder by month (synthetic year: Jan-Jun 2026, Jul-Dec 2025)"
+        row = _find_row(sheet, label)
+
+        self.assertEqual(sheet.cell(row=row, column=3).value, _format_series(FT_SERIES))
+        self.assertEqual(sheet.cell(row=row, column=4).value, "THB/kWh")
+        self.assertEqual(
+            sheet.cell(row=row, column=5).value,
+            "PEA Ft schedule, revised every four months",
+        )
+
+    def test_ft_row_label_says_calendar_year_when_months_are_contiguous(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(
+            result,
+            assumptions=_thailand_assumptions(
+                calendar_year_months=[[2025, m] for m in range(1, 13)]
+            ),
+        )
+        sheet = workbook["Assumptions"]
+        # A single real year gets a plain label, not an invented split.
+        row = _find_row(sheet, "Ft adder by month (calendar year 2025)")
+        self.assertEqual(sheet.cell(row=row, column=3).value, _format_series(FT_SERIES))
+
+    def test_disclosure_row_states_synthetic_year_construction(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(
+            result, assumptions=_thailand_assumptions()
+        )
+        sheet = workbook["Assumptions"]
+        row = _find_row(sheet, "Monthly figures use a synthetic year")
+
+        self.assertEqual(
+            sheet.cell(row=row, column=3).value,
+            "synthetic year: Jan-Jun 2026, Jul-Dec 2025",
+        )
+        self.assertIn("calendar_year_months", sheet.cell(row=row, column=5).value)
+
+    def test_ft_row_and_disclosure_row_absent_when_key_unset(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+        labels = [
+            sheet.cell(row=row, column=2).value for row in range(1, sheet.max_row + 1)
+        ]
+
+        self.assertFalse(any(str(label).startswith("Ft adder by month") for label in labels))
+        self.assertNotIn("Monthly figures use a synthetic year", labels)
+
+    def test_ft_row_and_disclosure_row_absent_when_series_is_empty(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(
+            result,
+            assumptions=_thailand_assumptions(ft_per_kwh_by_month_thb=[]),
+        )
+        sheet = workbook["Assumptions"]
+        labels = [
+            sheet.cell(row=row, column=2).value for row in range(1, sheet.max_row + 1)
+        ]
+
+        self.assertFalse(any(str(label).startswith("Ft adder by month") for label in labels))
+        self.assertNotIn("Monthly figures use a synthetic year", labels)

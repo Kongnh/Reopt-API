@@ -24,6 +24,7 @@ so an auditor can trace every published figure from named inputs to the
 metric without leaving Excel.
 """
 
+import calendar
 from datetime import date
 
 from openpyxl.formatting.rule import CellIsRule
@@ -124,6 +125,38 @@ def _format_series(values, places=4):
         ("{:." + str(places) + "f}").format(value).rstrip("0").rstrip(".")
         for value in values
     )
+
+
+def _describe_calendar_year(calendar_year_months):
+    """Describe the (possibly synthetic) year assembled from calendar_year_months.
+
+    ``calendar_year_months`` is a list of ``[year, month]`` pairs, one per
+    Jan-to-Dec position. Metered data is not always available for a single
+    real year, so a case can stitch positions from more than one calendar
+    year (e.g. Jan-Jun from 2026, Jul-Dec from 2025); every monthly figure in
+    the workbook then carries that same synthetic assembly. This groups
+    consecutive positions by year so the label is derived, never hardcoded,
+    and reads plainly when the months are in fact a single real year.
+    """
+    years = [int(year) for year, _month in calendar_year_months]
+    if not years:
+        return "calendar year unknown"
+    if len(set(years)) == 1:
+        return "calendar year {}".format(years[0])
+
+    spans = []
+    start = 0
+    for index in range(1, len(years) + 1):
+        if index == len(years) or years[index] != years[start]:
+            start_month = calendar.month_abbr[start + 1]
+            end_month = calendar.month_abbr[index]
+            span = (
+                start_month if index - 1 == start
+                else "{}-{}".format(start_month, end_month)
+            )
+            spans.append("{} {}".format(span, years[start]))
+            start = index
+    return "synthetic year: " + ", ".join(spans)
 
 
 def _define_name(workbook, name, sheet_title, cell):
@@ -660,11 +693,25 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     # Gated on the key, so Vietnam workbooks, which never set it, are unchanged.
     ft_series = (assumptions or {}).get("ft_per_kwh_by_month_thb")
     if ft_series:
+        year_description = _describe_calendar_year(
+            (assumptions or {}).get("calendar_year_months") or []
+        )
         entry(
-            "Ft adder by month (Jan to Dec)",
+            "Ft adder by month ({})".format(year_description),
             _format_series(ft_series),
             unit=(assumptions or {}).get("local_currency_code", "") + "/kWh",
             source="PEA Ft schedule, revised every four months",
+        )
+        # Metered data availability, not a real single year, decides the
+        # month-to-year mapping above - every monthly figure in this
+        # workbook (the billed-demand-by-month table included) is built
+        # from the same calendar_year_months positions, so one disclosure
+        # here covers all of them instead of repeating it per table.
+        entry(
+            "Monthly figures use a synthetic year",
+            year_description,
+            source="case.json load_profile.calendar_year_months; applies to every "
+                   "monthly figure in this workbook, not just the Ft adder above",
         )
 
     # Provisional inputs get a row each, so the reader can see WHICH numbers are
