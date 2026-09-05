@@ -54,6 +54,7 @@ PLACEHOLDER_MARKER = THAILAND_DEFAULTS["placeholder_marker"]
 FINANCIAL_DEFAULTS = THAILAND_DEFAULTS["financial"]
 TAX_DEFAULTS_RAW = THAILAND_DEFAULTS["tax"]
 SITE_DEFAULTS = THAILAND_DEFAULTS["site"]
+EMISSIONS_DEFAULTS = THAILAND_DEFAULTS["emissions"]
 
 # Tax values are consumed as plain numbers by the cash flow engine, so expose a
 # flattened view alongside the annotated one.
@@ -63,7 +64,7 @@ TAX_DEFAULTS = {key: entry["value"] for key, entry in TAX_DEFAULTS_RAW.items()}
 def placeholder_keys():
     """Names of every default still awaiting confirmation from Keen."""
     found = set()
-    for block in (FINANCIAL_DEFAULTS, SITE_DEFAULTS, TAX_DEFAULTS_RAW):
+    for block in (FINANCIAL_DEFAULTS, SITE_DEFAULTS, TAX_DEFAULTS_RAW, EMISSIONS_DEFAULTS):
         for key, entry in block.items():
             if entry.get("source") == PLACEHOLDER_MARKER:
                 found.add(key)

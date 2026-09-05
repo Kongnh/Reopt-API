@@ -10,9 +10,14 @@ post-PV billed demand and added to project capex, rather than carried as a
 """
 
 from proforma_thailand.defaults import (
+    EMISSIONS_DEFAULTS,
     FINANCIAL_DEFAULTS,
     PLACEHOLDER_MARKER,
     value_of,
+)
+from proforma_thailand.emissions import (
+    annual_avoided_tco2e,
+    lifetime_avoided_tco2e,
 )
 from proforma_vietnam.country_profile import THAILAND_PROFILE
 from proforma_vietnam.esco_pro_forma import (
@@ -226,11 +231,31 @@ def build_thailand_report(reopt_results, assumptions):
         time_steps_per_hour=assumptions.get("time_steps_per_hour", 1),
     )
 
+    # Scope 2 avoided emissions: an Allotrope calculation from a cited Thai
+    # grid factor, not a REopt output (see proforma_thailand/emissions.py).
+    # The basis is avoided grid import, the same quantity already reported as
+    # the grid offset, so the two figures cannot drift apart.
+    load_outputs = outputs.get("ElectricLoad") or {}
+    utility_outputs = outputs.get("ElectricUtility") or {}
+    emission_factor = value_of(
+        EMISSIONS_DEFAULTS, "grid_emission_factor_kg_co2e_per_kwh"
+    )
+    annual_tco2e = annual_avoided_tco2e(
+        load_outputs.get("annual_calculated_kwh"),
+        utility_outputs.get("annual_energy_supplied_kwh"),
+        emission_factor,
+    )
+
     workbook_assumptions = dict(assumptions)
     workbook_assumptions["placeholder_marker"] = PLACEHOLDER_MARKER
     workbook_assumptions["power_factor_compensation_kvar"] = required_kvar
     workbook_assumptions["power_factor_mitigation_cost_usd"] = mitigation_cost
     workbook_assumptions["insurance_rate_fraction"] = insurance_rate
+    workbook_assumptions["annual_avoided_tco2e"] = annual_tco2e
+    workbook_assumptions["grid_emission_factor_kg_co2e_per_kwh"] = emission_factor
+    workbook_assumptions["grid_emission_factor_source"] = EMISSIONS_DEFAULTS[
+        "grid_emission_factor_kg_co2e_per_kwh"
+    ]["source"]
 
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
@@ -253,5 +278,12 @@ def build_thailand_report(reopt_results, assumptions):
             assumptions.get("billed_demand_kw_by_month")
             or billed_demand_kw_by_month(reopt_results)
         ),
+        "annual_avoided_tco2e": annual_tco2e,
+        "lifetime_avoided_tco2e": lifetime_avoided_tco2e(
+            annual_tco2e,
+            assumptions.get("project_years") or 25,
+            assumptions.get("pv_degradation_rate") or 0.0,
+        ),
+        "grid_emission_factor_kg_co2e_per_kwh": emission_factor,
     }
     return workbook, extras

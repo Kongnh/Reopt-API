@@ -80,6 +80,8 @@ CURATED_ASSUMPTION_KEYS = {
     "vat_rate_fraction", "vat_refund_year",
     "owner_discount_rate_fraction", "analysis_years",
     "case_config", "dppa", "insurance_rate_fraction",
+    "annual_avoided_tco2e", "grid_emission_factor_kg_co2e_per_kwh",
+    "grid_emission_factor_source",
 }
 
 STORAGE_CASE_ROWS = [
@@ -757,6 +759,25 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
             year_description,
             source="case.json load_profile.calendar_year_months; applies to every "
                    "monthly figure in this workbook, not just the Ft adder above",
+        )
+
+    # Gated on the key, so Vietnam workbooks, which never set it, are unchanged.
+    avoided = (assumptions or {}).get("annual_avoided_tco2e")
+    if avoided is not None:
+        section("Avoided Emissions (Scope 2)")
+        entry(
+            "Grid emission factor",
+            (assumptions or {}).get("grid_emission_factor_kg_co2e_per_kwh"),
+            unit="kg CO2e/kWh",
+            source=(assumptions or {}).get(
+                "grid_emission_factor_source", "See Assumptions"
+            ),
+        )
+        entry(
+            "Avoided emissions, year 1",
+            avoided,
+            unit="tonnes CO2e",
+            source="Allotrope calculation from avoided grid import. Not a REopt output.",
         )
 
     # Provisional inputs get a row each, so the reader can see WHICH numbers are

@@ -43,6 +43,11 @@
     "pv_depreciation_years": {"value": 5, "source": "Thai Revenue Code, Royal Decree No. 145: plant, machinery and equipment depreciate at up to 20 percent per year, a 5-year straight line. See docs/superpowers/notes/2026-09-04-thai-depreciation.md for the PV machinery-versus-building-improvement caveat"},
     "bess_depreciation_years": {"value": 5, "source": "Thai Revenue Code, Royal Decree No. 145: plant, machinery and equipment depreciate at up to 20 percent per year, a 5-year straight line. See docs/superpowers/notes/2026-09-04-thai-depreciation.md for the PV machinery-versus-building-improvement caveat"}
   },
+  "emissions": {
+    "grid_emission_factor_kg_co2e_per_kwh": {"value": 0.4999, "source": "PLACEHOLDER - pending Task 15 research",
+      "note": "Thailand national grid emission factor. Must be replaced in Task 15 with a cited TGO figure recording vintage year and whether it is combined-margin, operating-margin or average"},
+    "grid_emission_factor_vintage": {"value": "pending", "source": "PLACEHOLDER - pending Task 15 research"}
+  },
   "site": {
     "latitude": {"value": 15.209427, "source": "RTS Data Collection, Rofu Phimai"},
     "longitude": {"value": 102.475687, "source": "RTS Data Collection, Rofu Phimai"},

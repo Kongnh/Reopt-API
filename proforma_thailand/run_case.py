@@ -72,6 +72,8 @@ def summarize_results(results, extras):
             extras.get("power_factor_mitigation_cost_usd") or 0.0
         ),
         "billed_demand_kw_by_month": extras.get("billed_demand_kw_by_month", []),
+        "annual_avoided_tco2e": float(extras.get("annual_avoided_tco2e") or 0.0),
+        "lifetime_avoided_tco2e": float(extras.get("lifetime_avoided_tco2e") or 0.0),
     }
 
 
