@@ -351,6 +351,49 @@ class VietnamEscoProFormaAdapterTests(TestCase):
             rows[0]["esco_energy_revenue_vnd"] * 0.99,
         )
 
+    def test_extra_replacement_costs_add_to_the_bess_replacement(self):
+        # Verifies that extra_replacement_costs_by_year sums element-wise with
+        # the base BESS replacement costs through the public entry point, not just
+        # in unit tests of the private helper. This guards against regressions like
+        # moving the merge block below cash_flow_inputs.update(cash_flow_overrides).
+        reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        reopt_results["inputs"]["ElectricStorage"].update({
+            "replace_cost_per_kw": 80.0,
+            "replace_cost_per_kwh": 100.0,
+            "battery_replacement_year": 10,
+        })
+        reopt_results["outputs"]["ElectricStorage"].update({
+            "size_kw": 10.0,
+            "size_kwh": 20.0,
+        })
+
+        # Case 1: With extra replacement costs (e.g., PV inverter in year 10).
+        result_with_extra = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=12,
+            extra_replacement_costs_by_year=[0]*9 + [1000],
+        )
+
+        # Case 2: Base BESS replacement only.
+        result_base_only = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=12,
+        )
+
+        rows_with_extra = result_with_extra["annual_cash_flows"]
+        rows_base_only = result_base_only["annual_cash_flows"]
+
+        # Assertion 1: Merged year-10 value is the SUM (3800.0), not either alone.
+        self.assertAlmostEqual(rows_with_extra[9]["replacement_cost_vnd"], 3800.0)
+
+        # Assertion 2: Base-only case is still 2800.0 (so extra genuinely added).
+        self.assertAlmostEqual(rows_base_only[9]["replacement_cost_vnd"], 2800.0)
+
+        # Assertion 3: Year with no replacement stays 0.0 (merge did not smear).
+        self.assertEqual(rows_with_extra[0]["replacement_cost_vnd"], 0)
+
 
 class VietnamSurplusExportAdapterTests(TestCase):
     """Decree 243/2026 surplus-export extraction, cap and price resolution."""
