@@ -200,9 +200,11 @@ class BilledDemandTests(TestCase):
 class NoVietnamProvenanceTests(TestCase):
     """A Thai client must not be told its tax is governed by Vietnamese law.
 
-    The existing label test only bans the uppercase tokens VND and EVN, which
-    is why a workbook titled "Vietnam ESCO / DPPA Case" citing Circular
-    45/2013/TT-BTC shipped past it.
+    The original label test banned only the title-case token "Vietnam", which
+    is why a Pro Forma (Audit) section header reading "DEPRECIATION & VIETNAM
+    CIT (USD)" (all caps) shipped past it. Matching is now case-insensitive
+    (see the ``.lower()`` comparison below) so an all-caps or all-lowercase
+    slip is caught the same as title case.
     """
 
     # Lowercase module paths like proforma_vietnam.cash_flow are accurate
@@ -212,6 +214,30 @@ class NoVietnamProvenanceTests(TestCase):
         "Vietnam", "vietnam_defaults", "VND", "EVN",
         "Circular 45", "Circular 78", "Law 67", "QH15",
         "Decree 320", "ND57", "Decision 988", "QD963", "DPPA",
+    )
+
+    # Case-insensitive matching also catches BANNED tokens embedded inside the
+    # engineering-provenance strings the class docstring already exempts.
+    # Each entry below was checked against the real Thailand workbook and
+    # confirmed accurate, not a country leak:
+    #  - "proforma_vietnam" is the shared engine's real, importable package
+    #    name for both countries -- it appears in the cover-sheet credit
+    #    line, the CLI "regenerate offline" command, and Assumptions-sheet
+    #    "source" annotations that name the Python module which derived the
+    #    value. Renaming the package per-country is out of scope here and
+    #    would not change what a Thai client's numbers are actually worth.
+    #  - "evn_energy_escalation_rate" / "evn_capacity_escalation_rate" are the
+    #    literal case.json keys Thailand's own case_builder.py writes for a
+    #    Thai case (proforma_thailand/case_builder.py:231-234) -- the shared
+    #    engine never renamed these keys per country, so citing them by their
+    #    real name is accurate provenance, not a Vietnam leak. (Contrast with
+    #    the exchange-rate key, which Thailand's case.json genuinely calls
+    #    exchange_rate_thb_per_usd -- that source annotation was hardcoded to
+    #    the Vietnam name and has been fixed to use profile.local_currency_code.)
+    ALLOWED_SUBSTRINGS = (
+        "proforma_vietnam",
+        "evn_energy_escalation_rate",
+        "evn_capacity_escalation_rate",
     )
 
     def _cells(self, workbook):
@@ -229,7 +255,10 @@ class NoVietnamProvenanceTests(TestCase):
             (sheet, token, text[:70])
             for sheet, text in self._cells(workbook)
             for token in self.BANNED
-            if token in text
+            if token.lower() in text.lower()
+            and not any(
+                allowed in text.lower() for allowed in self.ALLOWED_SUBSTRINGS
+            )
         ]
 
         self.assertEqual(

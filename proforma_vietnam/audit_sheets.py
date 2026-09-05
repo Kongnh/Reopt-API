@@ -320,7 +320,9 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     fx_rate = d.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
     entry("Contract exchange rate", fx_rate,
           unit="{} per USD".format(profile.local_currency_code),
-          source="case.json tariff.exchange_rate_vnd_per_usd",
+          source="case.json tariff.exchange_rate_{}_per_usd".format(
+              profile.local_currency_code.lower()
+          ),
           name="FX_VND_PER_USD", fmt=_exchange_rate_number_format(fx_rate))
     entry("FX treatment", "Held flat over the analysis period",
           source="Simplification — see FX Sensitivity sheet")
@@ -371,18 +373,23 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
         entry("Two-component tariff pilot", tariff_config["two_component_pilot_enabled"],
               unit="yes/no", source="case.json tariff.two_component_pilot_enabled")
 
-    section("Contract Terms")
-    entry("ESCO energy price (fraction of {} tariff)".format(profile.utility_label),
-          get("esco_energy_discount_fraction"), unit="fraction",
-          source="case.json esco_contract.esco_energy_discount_fraction",
-          name="ESCO_DISCOUNT", fmt=FMT_PERCENT)
-    entry("Demand savings share to ESCO",
-          get("esco_demand_savings_share", "demand_savings_esco_share"),
-          unit="fraction", source="case.json esco_contract.demand_savings_esco_share",
-          name="DEMAND_SHARE", fmt=FMT_PERCENT)
-    if assumptions.get("grid_charging_enabled") is not None:
-        entry("Grid charging enabled", assumptions["grid_charging_enabled"],
-              unit="yes/no", source="case.json esco_contract.grid_charging_enabled")
+    # A direct-ownership case has no ESCO and no contract, so this whole block
+    # (header plus its ESCO-contract-sourced rows) is skipped rather than left
+    # as an empty or orphaned "Contract Terms" section. Mirrors the Executive
+    # Summary guard in xlsx_builder.py.
+    if profile.shows_esco_contract_terms:
+        section("Contract Terms")
+        entry("ESCO energy price (fraction of {} tariff)".format(profile.utility_label),
+              get("esco_energy_discount_fraction"), unit="fraction",
+              source="case.json esco_contract.esco_energy_discount_fraction",
+              name="ESCO_DISCOUNT", fmt=FMT_PERCENT)
+        entry("Demand savings share to ESCO",
+              get("esco_demand_savings_share", "demand_savings_esco_share"),
+              unit="fraction", source="case.json esco_contract.demand_savings_esco_share",
+              name="DEMAND_SHARE", fmt=FMT_PERCENT)
+        if assumptions.get("grid_charging_enabled") is not None:
+            entry("Grid charging enabled", assumptions["grid_charging_enabled"],
+                  unit="yes/no", source="case.json esco_contract.grid_charging_enabled")
     if is_dppa and dppa:
         volume = dppa.get("cfd_contract_volume_kwh_per_hour")
         annual_volume = sum(volume) if isinstance(volume, list) else (volume or 0.0) * 8760
@@ -1156,7 +1163,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     w.skip()
 
     # --- depreciation & tax --------------------------------------------------
-    w.section("DEPRECIATION & VIETNAM CIT (USD)")
+    w.section("DEPRECIATION & {} CIT (USD)".format(profile.country.upper()))
     if construction:
         # Capitalized IDC joins the depreciable base pro-rata by capex share
         # (Circular 45 borrowing-cost capitalization) and rides each class's
