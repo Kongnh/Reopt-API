@@ -102,8 +102,8 @@ class BessDepreciationYearsTests(unittest.TestCase):
 
     def _kwargs(self, **overrides):
         base = dict(
-            project_served_pv_kwh=1_000_000.0,
-            evn_energy_rates_vnd_per_kwh=0.1,
+            project_served_pv_kwh=[1_000_000.0],
+            evn_energy_rates_vnd_per_kwh=[0.1],
             bau_evn_bill_vnd=200_000.0,
             optimized_evn_bill_vnd=150_000.0,
             bau_demand_charge_vnd=60_000.0,
@@ -139,8 +139,8 @@ class BessDepreciationYearsTests(unittest.TestCase):
             **self._kwargs(bess_depreciation_years=8)
         )
         self.assertGreater(
-            five["annual_rows"][0]["depreciation_vnd"],
-            eight["annual_rows"][0]["depreciation_vnd"],
+            five["annual_cash_flows"][0]["depreciation_vnd"],
+            eight["annual_cash_flows"][0]["depreciation_vnd"],
         )
 
 
@@ -149,8 +149,8 @@ class CitStandardRateTests(unittest.TestCase):
 
     def _kwargs(self, **overrides):
         base = dict(
-            project_served_pv_kwh=1_000_000.0,
-            evn_energy_rates_vnd_per_kwh=0.1,
+            project_served_pv_kwh=[1_000_000.0],
+            evn_energy_rates_vnd_per_kwh=[0.1],
             bau_evn_bill_vnd=200_000.0,
             optimized_evn_bill_vnd=150_000.0,
             bau_demand_charge_vnd=60_000.0,
@@ -177,15 +177,27 @@ class CitStandardRateTests(unittest.TestCase):
         self.assertAlmostEqual(result["derivation"]["cit"]["standard_rate"], 0.17)
 
     def test_a_higher_rate_takes_more_tax(self):
+        # The shared _kwargs() baseline (esco_energy_discount_fraction=0.0) is
+        # deliberately unprofitable for the other tests in this class, which
+        # only check that the rate is reported. That leaves taxable income
+        # negative in every year, so CIT is 0 regardless of rate and this
+        # assertion would compare 0.0 to 0.0. Give the ESCO real energy
+        # revenue here so some years are actually taxable.
         low = calculate_vietnam_esco_cash_flow(
-            **self._kwargs(cit_standard_rate=0.10, cit_regime="standard_flat")
+            **self._kwargs(
+                cit_standard_rate=0.10, cit_regime="standard_flat",
+                esco_energy_discount_fraction=0.5,
+            )
         )
         high = calculate_vietnam_esco_cash_flow(
-            **self._kwargs(cit_standard_rate=0.30, cit_regime="standard_flat")
+            **self._kwargs(
+                cit_standard_rate=0.30, cit_regime="standard_flat",
+                esco_energy_discount_fraction=0.5,
+            )
         )
         self.assertGreater(
-            sum(row["cit_vnd"] for row in high["annual_rows"]),
-            sum(row["cit_vnd"] for row in low["annual_rows"]),
+            sum(row["cit_vnd"] for row in high["annual_cash_flows"]),
+            sum(row["cit_vnd"] for row in low["annual_cash_flows"]),
         )
 ```
 
@@ -321,7 +333,7 @@ Then pass the rate at BOTH `calculate_cit` call sites, around lines 512 and 524.
 Missing the second call site at line 524 leaves the disposal tax effect computed at the wrong rate, which is a silent inconsistency rather than an error. Verify with:
 
 ```bash
-grep -n "calculate_cit(" -A 3 proforma_vietnam/cash_flow.py | grep -c "standard_rate=cit_standard_rate"
+grep -n "calculate_cit(" -A 6 proforma_vietnam/cash_flow.py | grep -c "standard_rate=cit_standard_rate"
 ```
 
 Expected: `2`.
