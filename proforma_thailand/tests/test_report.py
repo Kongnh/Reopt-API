@@ -160,15 +160,18 @@ class BilledDemandTests(TestCase):
             }},
         }
 
-    def test_grid_charging_counts_towards_billed_demand(self):
+    def test_grid_charging_raises_only_its_own_month(self):
         from proforma_thailand.report import billed_demand_kw_by_month
 
+        # Month 1 (steps 1-2): grid charging in step 1 raises peak to 500.
+        # Month 2 (steps 3-4): no charging, peak is 250, unaffected by month 1.
+        # Proves the summation is scoped per month, not leaked across boundaries.
         results = self._results_with_storage(
-            [[1, 2, 3]], [100.0, 200.0, 150.0], [50.0, 0.0, 0.0]
+            [[1, 2], [3, 4]],
+            [100.0, 120.0, 200.0, 250.0],
+            [400.0, 0.0, 0.0, 0.0]
         )
-        # Step 1 draws 100 for load plus 50 for the battery: 150 total.
-        # Step 2 draws 200 for load alone. The month peak is 200.
-        self.assertEqual(billed_demand_kw_by_month(results), [200.0])
+        self.assertEqual(billed_demand_kw_by_month(results), [500.0, 250.0])
 
     def test_grid_charging_can_set_the_peak(self):
         from proforma_thailand.report import billed_demand_kw_by_month
@@ -183,6 +186,15 @@ class BilledDemandTests(TestCase):
 
         results = self._results_with_storage([[1, 2]], [100.0, 120.0], [])
         self.assertEqual(billed_demand_kw_by_month(results), [120.0])
+
+    def test_short_storage_series_degrades_to_zero_for_trailing_steps(self):
+        from proforma_thailand.report import billed_demand_kw_by_month
+
+        # Storage series shorter than load series: trailing steps default to zero.
+        # Step 1: load 100 + storage 50 = 150. Step 2: load 120 + storage 0 = 120.
+        # Peak is 150. Verifies no IndexError and earlier steps still add correctly.
+        results = self._results_with_storage([[1, 2, 3]], [100.0, 120.0, 150.0], [50.0])
+        self.assertEqual(billed_demand_kw_by_month(results), [150.0])
 
 
 class NoVietnamProvenanceTests(TestCase):
