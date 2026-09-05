@@ -9,6 +9,7 @@ from proforma_vietnam.cash_flow import (
     calculate_fx_sensitivity,
     calculate_vietnam_esco_cash_flow,
 )
+from proforma_vietnam.country_profile import THAILAND_PROFILE
 from proforma_vietnam.dppa_settlement import settle_dppa_year_one
 from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
@@ -1342,3 +1343,65 @@ class FormatExchangeRateTests(TestCase):
 
     def test_two_decimal_rate_is_preserved(self):
         self.assertEqual(_format_exchange_rate(32.55), "32.55")
+
+
+class ExchangeRateDisclosureTests(TestCase):
+    """A regression at the call site alone (audit_sheets.py:295-299 renders the
+    Assumptions-sheet named FX cell; :2205 renders the Model Basis sentence)
+    would not be caught by testing _format_exchange_rate in isolation, so
+    these build a real workbook and assert the rendered result at both sites.
+    """
+
+    def _model_basis_text(self, workbook):
+        sheet = workbook["Model Basis"]
+        return "\n".join(
+            str(sheet.cell(row=row, column=col).value)
+            for row in range(1, sheet.max_row + 1)
+            for col in range(1, 4)
+            if sheet.cell(row=row, column=col).value
+        )
+
+    def test_thailand_model_basis_discloses_fractional_rate(self):
+        result = _esco_result(exchange_rate_vnd_per_usd=32.5)
+        workbook = build_vietnam_esco_workbook(
+            result,
+            assumptions=_thailand_assumptions(exchange_rate_vnd_per_usd=32.5),
+            profile=THAILAND_PROFILE,
+        )
+        text = self._model_basis_text(workbook)
+
+        self.assertIn("32.5 THB/USD", text)
+        self.assertNotIn("32 THB/USD", text)
+
+    def test_vietnam_model_basis_discloses_whole_rate_unchanged(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        text = self._model_basis_text(workbook)
+
+        self.assertIn("25,000 VND/USD", text)
+
+    def test_thailand_exchange_rate_cell_keeps_its_decimal(self):
+        result = _esco_result(exchange_rate_vnd_per_usd=32.5)
+        workbook = build_vietnam_esco_workbook(
+            result,
+            assumptions=_thailand_assumptions(exchange_rate_vnd_per_usd=32.5),
+            profile=THAILAND_PROFILE,
+        )
+        sheet = workbook["Assumptions"]
+        cell = sheet.cell(row=_find_row(sheet, "Contract exchange rate"), column=3)
+
+        self.assertEqual(cell.value, 32.5)
+        self.assertEqual(cell.number_format, "#,##0.0")
+
+    def test_vietnam_exchange_rate_cell_number_format_is_unchanged(self):
+        result = _esco_result()
+        workbook = build_vietnam_esco_workbook(result, assumptions=ESCO_ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+        cell = sheet.cell(row=_find_row(sheet, "Contract exchange rate"), column=3)
+
+        self.assertEqual(cell.value, 25000)
+        # Byte-identical to the pre-fix format. A single static optional-decimal
+        # format ("#,##0.####") was verified against real Excel and rejected:
+        # it leaves a stray trailing decimal point on whole numbers ("26,300."
+        # not "26,300").
+        self.assertEqual(cell.number_format, audit_sheets.FMT_AMOUNT)

@@ -140,6 +140,31 @@ def _format_exchange_rate(value):
     return text
 
 
+def _exchange_rate_number_format(value):
+    """Excel number format for the Assumptions-sheet exchange-rate cell.
+
+    The obvious fix here is a single static format with optional decimal
+    placeholders, e.g. "#,##0.####". Verified against real Excel (not
+    openpyxl, which only stores the string) and rejected: Excel leaves a
+    stray trailing decimal point on whole numbers, "26,300." rather than
+    "26,300", whenever any "#" placeholder follows the decimal point, even
+    though every one of those digits is suppressed. Vietnam's rate is always
+    a whole number, so that format would change its displayed output.
+
+    Instead this picks the exact decimal-place count the value needs, the
+    same trim ``_format_exchange_rate`` above does for the text disclosure.
+    Zero decimals falls back to FMT_AMOUNT itself, byte-identical to the
+    pre-fix format; a fractional rate gets exactly as many forced "0"
+    placeholders as it has significant decimals, so there is no leftover
+    "#" to trigger the dangling-decimal-point quirk.
+    """
+    if value is None:
+        return FMT_AMOUNT
+    text = "{:.4f}".format(value).rstrip("0").rstrip(".")
+    decimals = len(text.split(".")[1]) if "." in text else 0
+    return FMT_AMOUNT if decimals == 0 else FMT_AMOUNT + "." + "0" * decimals
+
+
 def _describe_calendar_year(calendar_year_months):
     """Describe the (possibly synthetic) year assembled from calendar_year_months.
 
@@ -292,11 +317,11 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
           source="{} tariff converted {}→USD before REopt; see Model Basis".format(
               profile.utility_label, profile.local_currency_code
           ))
-    entry("Contract exchange rate",
-          d.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd"),
+    fx_rate = d.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
+    entry("Contract exchange rate", fx_rate,
           unit="{} per USD".format(profile.local_currency_code),
           source="case.json tariff.exchange_rate_vnd_per_usd",
-          name="FX_VND_PER_USD", fmt=FMT_AMOUNT)
+          name="FX_VND_PER_USD", fmt=_exchange_rate_number_format(fx_rate))
     entry("FX treatment", "Held flat over the analysis period",
           source="Simplification — see FX Sensitivity sheet")
 
