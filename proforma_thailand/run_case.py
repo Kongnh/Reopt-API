@@ -38,6 +38,8 @@ def assert_placeholders_disclosed(workbook):
         raise RuntimeError(
             "Refusing to write the workbook: {}".format(" ".join(failures))
         )
+
+
 POLLING_STATUSES = ("Optimizing...", "optimizing...", "queued")
 BODY_BEARING_ERROR_CODES = (400, 404, 500)
 

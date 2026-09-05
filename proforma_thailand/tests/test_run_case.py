@@ -1,6 +1,12 @@
+import json
+import tempfile
+from pathlib import Path
 from unittest import TestCase
+from unittest.mock import patch
 
-from proforma_thailand.run_case import summarize_results
+from proforma_thailand.run_case import main, summarize_results
+
+RTS_CASE_DIR = Path("proforma_thailand/cases/rts")
 
 
 class SummarizeResultsTests(TestCase):
@@ -110,3 +116,42 @@ class PlaceholderGuardTests(TestCase):
 
         workbook = self._workbook(["Dispatch", "Interval"])
         assert_placeholders_disclosed(workbook)
+
+
+class MainGuardWiringTests(TestCase):
+    """Drives main() end-to-end to prove the guard call at run_case.py:114
+    is actually on the production path, not just reachable when called
+    directly (which is all PlaceholderGuardTests above proves)."""
+
+    def setUp(self):
+        # Only the RTS site's PVWatts response is not cached on disk, so
+        # build_thailand_case would otherwise reach the real network here.
+        patcher = patch(
+            "proforma_thailand.case_builder.pvwatts_client.fetch_pv_series",
+            return_value={
+                "production_factor": [0.25] * 8760,
+                "poa_wm2": [800.0] * 8760,
+            },
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_main_raises_and_writes_no_workbook_when_report_is_unmarked(self):
+        import openpyxl
+
+        results = json.loads((RTS_CASE_DIR / "results.json").read_text(encoding="utf-8"))
+        out_dir = Path(tempfile.mkdtemp())
+
+        workbook = openpyxl.Workbook()
+        workbook.active.cell(row=1, column=1, value="Equity IRR")
+
+        with patch("proforma_thailand.run_case._submit", return_value="test-run-uuid"), \
+             patch("proforma_thailand.run_case._poll", return_value=results), \
+             patch(
+                 "proforma_thailand.run_case.build_thailand_report",
+                 return_value=(workbook, {}),
+             ):
+            with self.assertRaises(RuntimeError):
+                main(["--case", str(RTS_CASE_DIR / "case.json"), "--out", str(out_dir)])
+
+        self.assertEqual(list(out_dir.glob("*.xlsx")), [])
