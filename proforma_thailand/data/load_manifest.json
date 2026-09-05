@@ -1,0 +1,69 @@
+{
+  "calendar_year_months": [
+    [
+      2026,
+      1
+    ],
+    [
+      2026,
+      2
+    ],
+    [
+      2026,
+      3
+    ],
+    [
+      2026,
+      4
+    ],
+    [
+      2026,
+      5
+    ],
+    [
+      2026,
+      6
+    ],
+    [
+      2025,
+      7
+    ],
+    [
+      2025,
+      8
+    ],
+    [
+      2025,
+      9
+    ],
+    [
+      2025,
+      10
+    ],
+    [
+      2025,
+      11
+    ],
+    [
+      2025,
+      12
+    ]
+  ],
+  "rows_per_month": [
+    2976,
+    2688,
+    2976,
+    2880,
+    2976,
+    2880,
+    2976,
+    2976,
+    2880,
+    2976,
+    2880,
+    2976
+  ],
+  "total_rows": 35040,
+  "source_sha256": null,
+  "source_note": "backfilled from the committed CSV; the source workbook lives outside the repo, so no hash was taken. Running build_load_inputs.py against the real workbook records one."
+}

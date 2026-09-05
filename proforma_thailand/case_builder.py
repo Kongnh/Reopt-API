@@ -24,6 +24,7 @@ from reoptjl.src.thailand.pea_tariff import build_pea_tariff
 # The producer owns the audit-key list; importing it means adding a key to
 # build_pea_tariff cannot silently leak into a REopt payload.
 from reoptjl.src.thailand.pea_tariff import AUDIT_METADATA_KEYS, RATE_VINTAGE_KEYS
+from proforma_thailand.tools.build_load_inputs import MANIFEST, validate_calendar_months
 
 NON_PAYLOAD_TARIFF_KEYS = AUDIT_METADATA_KEYS
 
@@ -39,6 +40,14 @@ def build_thailand_case(case_config):
         (int(year), int(month))
         for year, month in load_config["calendar_year_months"]
     ]
+    # The CSV carries no timestamps, so only the manifest can say which months
+    # it holds and in what order. Without this, swapping two months bills the
+    # load under the wrong tariff month with no error.
+    manifest = (
+        json.loads(MANIFEST.read_text(encoding="utf-8"))
+        if MANIFEST.exists() else None
+    )
+    validate_calendar_months(calendar_months, manifest)
     loads_kw = _read_load_csv(
         load_config["path"], time_steps_per_hour=profile.time_steps_per_hour
     )
