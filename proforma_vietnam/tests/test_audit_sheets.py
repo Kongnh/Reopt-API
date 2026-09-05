@@ -4,7 +4,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 
 from proforma_vietnam import audit_sheets
-from proforma_vietnam.audit_sheets import _format_series
+from proforma_vietnam.audit_sheets import _format_exchange_rate, _format_series
 from proforma_vietnam.cash_flow import (
     calculate_fx_sensitivity,
     calculate_vietnam_esco_cash_flow,
@@ -1327,3 +1327,18 @@ class FtAuditRowTests(TestCase):
 
         self.assertFalse(any(str(label).startswith("Ft adder by month") for label in labels))
         self.assertNotIn("Monthly figures use a synthetic year", labels)
+
+
+class FormatExchangeRateTests(TestCase):
+
+    def test_vietnam_rate_is_unchanged(self):
+        self.assertEqual(_format_exchange_rate(26300), "26,300")
+
+    def test_vietnam_float_rate_is_unchanged(self):
+        self.assertEqual(_format_exchange_rate(26300.0), "26,300")
+
+    def test_thailand_rate_keeps_its_decimal(self):
+        self.assertEqual(_format_exchange_rate(32.5), "32.5")
+
+    def test_two_decimal_rate_is_preserved(self):
+        self.assertEqual(_format_exchange_rate(32.55), "32.55")

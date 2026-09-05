@@ -127,6 +127,19 @@ def _format_series(values, places=4):
     )
 
 
+def _format_exchange_rate(value):
+    """Thousands separator, and only as many decimals as the rate actually has.
+
+    Vietnam's 26,300 VND/USD and Thailand's 32.5 THB/USD differ by three orders
+    of magnitude. A fixed zero-decimal format disclosed 32.5 to the client as
+    "32".
+    """
+    text = "{:,.4f}".format(value)
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text
+
+
 def _describe_calendar_year(calendar_year_months):
     """Describe the (possibly synthetic) year assembled from calendar_year_months.
 
@@ -2189,7 +2202,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             "the Checks block ties every metric back to the engine (PASS/REVIEW).",
         ]),
         ("2. Currency & FX", [
-            f"All money flows are computed in USD at the fixed contract rate ({fx:,.0f} {profile.local_currency_code}/USD)."
+            f"All money flows are computed in USD at the fixed contract rate ({_format_exchange_rate(fx)} {profile.local_currency_code}/USD)."
             if fx else
             "All money flows are computed in USD at the fixed contract exchange rate.",
             (
