@@ -144,3 +144,43 @@ class BilledDemandTests(TestCase):
         from proforma_thailand.report import billed_demand_kw_by_month
 
         self.assertEqual(billed_demand_kw_by_month(self._results([[1]], [])), [])
+
+
+class NoVietnamProvenanceTests(TestCase):
+    """A Thai client must not be told its tax is governed by Vietnamese law.
+
+    The existing label test only bans the uppercase tokens VND and EVN, which
+    is why a workbook titled "Vietnam ESCO / DPPA Case" citing Circular
+    45/2013/TT-BTC shipped past it.
+    """
+
+    BANNED = (
+        "Vietnam", "vietnam", "VND", "EVN",
+        "Circular 45", "Circular 78", "Law 67", "QH15",
+        "Decree 320", "ND57", "Decision 988", "QD963", "DPPA",
+    )
+
+    def _cells(self, workbook):
+        for worksheet in workbook.worksheets:
+            for row in worksheet.iter_rows(values_only=True):
+                for value in row:
+                    if isinstance(value, str):
+                        yield worksheet.title, value
+
+    def test_no_vietnam_specific_token_reaches_a_thailand_workbook(self):
+        assumptions = dict(ASSUMPTIONS, cit_regime="standard_flat")
+        workbook, _ = build_thailand_report(_results(), assumptions)
+
+        offenders = [
+            (sheet, token, text[:70])
+            for sheet, text in self._cells(workbook)
+            for token in self.BANNED
+            if token in text
+        ]
+
+        self.assertEqual(
+            offenders, [],
+            "Vietnam provenance leaked into the Thailand workbook: {}".format(
+                offenders[:8]
+            ),
+        )

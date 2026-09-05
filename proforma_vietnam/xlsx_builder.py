@@ -362,7 +362,9 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
     year_one = annual_rows[0]
     sizing = report_data.get("system_sizing", {}) or {}
 
-    case_name = assumptions.get("case_name") or "Vietnam ESCO / DPPA Case"
+    case_name = assumptions.get("case_name") or "{} {}".format(
+        profile.country, profile.case_label
+    )
     contract_label = (
         "Grid-connected DPPA with CfD (ND57/2025)" if dppa_config else
         "ESCO discount-to-{} tariff (behind-the-meter)".format(profile.utility_label)
@@ -458,10 +460,15 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         (
             "PV straight-line depreciation over "
             f"{assumptions.get('pv_depreciation_years', 20)} years "
-            "(Circular 45/2013/TT-BTC permits 7-20 years for generating equipment)."
+            f"({profile.depreciation_authority} {profile.depreciation_range_text})."
         ),
-        "Vietnam CIT: 4-year exemption + 9-year 50% reduction from first profitable year; "
-        "5-year tax-loss carryforward.",
+        (
+            "{} CIT: standard flat rate every year; no first-profit holiday "
+            "(self-invest factory, no new-project incentive).".format(profile.country)
+            if assumptions.get("cit_regime") == "standard_flat"
+            else "{} CIT: 4-year exemption + 9-year 50% reduction from first "
+                 "profitable year; 5-year tax-loss carryforward.".format(profile.country)
+        ),
         "All USD figures at the fixed contract exchange rate (see Assumptions); FX drift "
         "between {} revenue and USD reporting is quantified on the FX Sensitivity sheet.".format(
             profile.local_currency_code

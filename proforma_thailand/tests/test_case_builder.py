@@ -183,3 +183,44 @@ class PayloadDefaultInheritanceTests(TestCase):
         )["payload"]["PV"]
 
         self.assertEqual(pv["om_cost_per_kw"], 12.0)
+
+
+class UsIncentivesAreDisabledTests(TestCase):
+    """REopt.jl defaults a 30% ITC and 5-year MACRS ON. Thailand has neither,
+    and they cut the capital cost the optimizer sizes against."""
+
+    def setUp(self):
+        self._dir = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._dir.name)
+        self.addCleanup(self._dir.cleanup)
+        self.load_csv = self.tmp / "load.csv"
+        self.load_csv.write_text(
+            "load_kw\n" + "\n".join("500.0" for _ in range(35040)), encoding="utf-8"
+        )
+        self.off_peak = self.tmp / "off_peak.json"
+        self.off_peak.write_text(json.dumps(["2026-01-04"]), encoding="utf-8")
+        patcher = mock.patch(
+            "proforma_thailand.case_builder.pvwatts_client.fetch_pv_series",
+            return_value={"production_factor": [0.5] * 8760, "poa_wm2": []},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_pv_carries_no_itc_or_macrs(self):
+        pv = build_thailand_case(
+            _case_config(self.tmp, self.load_csv, self.off_peak)
+        )["payload"]["PV"]
+
+        self.assertEqual(pv["federal_itc_fraction"], 0.0)
+        self.assertEqual(pv["macrs_option_years"], 0)
+        self.assertEqual(pv["macrs_bonus_fraction"], 0.0)
+
+    def test_storage_carries_no_itc_or_macrs(self):
+        config = _case_config(self.tmp, self.load_csv, self.off_peak)
+        config["technologies"]["storage"] = {"max_kw": 500, "max_kwh": 1000}
+
+        storage = build_thailand_case(config)["payload"]["ElectricStorage"]
+
+        self.assertEqual(storage["total_itc_fraction"], 0.0)
+        self.assertEqual(storage["macrs_option_years"], 0)
+        self.assertEqual(storage["macrs_bonus_fraction"], 0.0)

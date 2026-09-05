@@ -30,6 +30,9 @@ PASSTHROUGH_OVERRIDE_KEYS = (
     "pv_depreciation_years",
     "cit_regime",
     "om_escalation_rate",
+    "evn_energy_escalation_rate",
+    "evn_capacity_escalation_rate",
+    "time_steps_per_hour",
     "pv_degradation_rate",
     "battery_replacement_year",
 )
@@ -132,6 +135,7 @@ def build_thailand_report(reopt_results, assumptions):
         reopt_results,
         cash_flow_result,
         poa_irradiance_series=assumptions.get("pv_poa_irradiance_series"),
+        time_steps_per_hour=assumptions.get("time_steps_per_hour", 1),
     )
 
     workbook_assumptions = dict(assumptions)

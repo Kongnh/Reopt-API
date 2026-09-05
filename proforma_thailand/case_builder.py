@@ -123,6 +123,13 @@ def build_thailand_case(case_config):
             "om_cost_per_kw": pv_config.get(
                 "om_cost_per_kw", value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
             ),
+            # REopt.jl defaults these ON: a 30 percent federal ITC and 5-year
+            # MACRS with 100 percent bonus. They are US incentives and do not
+            # exist in Thailand, but they are not inert - they cut the capital
+            # cost the optimizer sizes against, so they must be zeroed here.
+            "federal_itc_fraction": 0.0,
+            "macrs_option_years": 0,
+            "macrs_bonus_fraction": 0.0,
             "production_factor_series": production["production_factor"],
             # PEA pays nothing for exported energy, so the system must curtail
             # rather than export. See spec section 3.
@@ -158,10 +165,17 @@ def build_thailand_case(case_config):
                 "replace_cost_per_kwh",
                 value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kwh"),
             ),
+            # Same US incentives as PV above, same reason for zeroing them.
+            "total_itc_fraction": 0.0,
+            "macrs_option_years": 0,
+            "macrs_bonus_fraction": 0.0,
             "can_grid_charge": storage_config.get("can_grid_charge", True),
         }
 
     assumptions = {
+        "case_name": case_config.get(
+            "case_name", "{} {}".format(profile.country, profile.case_label)
+        ),
         "country": profile.country,
         "local_currency_code": profile.local_currency_code,
         "utility_label": profile.utility_label,
@@ -181,6 +195,24 @@ def build_thailand_case(case_config):
         "ft_per_kwh_by_month_thb": [
             value * exchange_rate for value in tariff_extras["ft_per_kwh_by_month"]
         ],
+        # report.py's PASSTHROUGH_OVERRIDE_KEYS expects these. Without them the
+        # cash-flow engine silently falls back to its VIETNAM signature defaults
+        # (8.5% VND debt, 4% EVN escalation) while the Assumptions sheet still
+        # lists the Thai figures as provisional inputs.
+        "debt_fraction": value_of(FINANCIAL_DEFAULTS, "debt_fraction"),
+        "debt_interest_rate_fraction": value_of(
+            FINANCIAL_DEFAULTS, "debt_interest_rate"
+        ),
+        "debt_term_years": value_of(FINANCIAL_DEFAULTS, "debt_term_years"),
+        "project_years": value_of(FINANCIAL_DEFAULTS, "project_years"),
+        "om_escalation_rate": value_of(FINANCIAL_DEFAULTS, "om_escalation_rate"),
+        "evn_energy_escalation_rate": value_of(
+            FINANCIAL_DEFAULTS, "pea_tariff_escalation_rate"
+        ),
+        "evn_capacity_escalation_rate": value_of(
+            FINANCIAL_DEFAULTS, "pea_tariff_escalation_rate"
+        ),
+        "annual_om_usd": None,
         "cit_regime": "standard_flat",
         "cit_standard_rate": TAX_DEFAULTS["cit_standard_rate"],
         "pv_depreciation_years": TAX_DEFAULTS["pv_depreciation_years"],

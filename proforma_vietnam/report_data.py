@@ -1,5 +1,9 @@
 def build_vietnam_report_data(reopt_results, cash_flow_result=None,
-                              poa_irradiance_series=None):
+                              poa_irradiance_series=None,
+                              time_steps_per_hour=1):
+    # The dispatch series are kW per interval, so summing them only yields kWh
+    # at hourly resolution. Thailand runs at 4 intervals per hour, where a raw
+    # sum is 4x the energy. Defaults to 1, leaving Vietnam byte-identical.
     cash_flow_result = cash_flow_result or {}
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
@@ -33,7 +37,9 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
             "battery_kw": _value(storage_outputs, "size_kw"),
             "battery_kwh": _value(storage_outputs, "size_kwh"),
         },
-        "solar_resource": _solar_resource(irradiance, production_factor),
+        "solar_resource": _solar_resource(
+            irradiance, production_factor, time_steps_per_hour
+        ),
         "dispatch_profile": _dispatch_rows(
             load_series=load_series,
             irradiance=irradiance,
@@ -47,16 +53,18 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
             storage_to_load=storage_to_load,
         ),
         "annual_production": {
-            "grid_to_load_kwh": sum(grid_to_load),
-            "pv_to_load_kwh": sum(pv_to_load),
-            "pv_to_storage_kwh": sum(pv_to_storage),
-            "storage_to_load_kwh": sum(storage_to_load),
-            "pv_curtailed_kwh": sum(pv_curtailed),
-            "pv_to_grid_kwh": sum(pv_to_grid),
+            "grid_to_load_kwh": sum(grid_to_load) / time_steps_per_hour,
+            "pv_to_load_kwh": sum(pv_to_load) / time_steps_per_hour,
+            "pv_to_storage_kwh": sum(pv_to_storage) / time_steps_per_hour,
+            "storage_to_load_kwh": sum(storage_to_load) / time_steps_per_hour,
+            "pv_curtailed_kwh": sum(pv_curtailed) / time_steps_per_hour,
+            "pv_to_grid_kwh": sum(pv_to_grid) / time_steps_per_hour,
             # Effective grid export under DPPA = optimizer-determined export + would-be
             # curtailed surplus (the generator dumps everything at FMP, no curtailment).
-            "pv_to_grid_effective_kwh": sum(pv_to_grid) + sum(pv_curtailed),
-            "grid_to_storage_kwh": sum(grid_to_storage),
+            "pv_to_grid_effective_kwh": (
+                sum(pv_to_grid) + sum(pv_curtailed)
+            ) / time_steps_per_hour,
+            "grid_to_storage_kwh": sum(grid_to_storage) / time_steps_per_hour,
         },
         "results_comparison": _results_comparison(tariff_outputs),
         "load_duration": _load_duration(load_series, grid_to_load),
@@ -66,7 +74,7 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
     }
 
 
-def _solar_resource(irradiance, production_factor):
+def _solar_resource(irradiance, production_factor, time_steps_per_hour=1):
     """Annual POA irradiation (kWh/m2) and Performance Ratio for Year 1.
 
     Reference yield = annual POA insolation / 1 kW/m2 = sum(POA_wm2) / 1000.
@@ -74,7 +82,10 @@ def _solar_resource(irradiance, production_factor):
     yield. ``performance_ratio`` is ``None`` when no irradiance is available.
     """
     reference_yield_kwh_per_m2 = sum(irradiance) / 1000.0 if irradiance else 0.0
-    specific_yield_kwh_per_kw = sum(production_factor)
+    # production_factor is per interval; irradiance is the hourly PVWatts POA
+    # series, so only the former needs scaling. Without this the Performance
+    # Ratio comes out above 1.0, which is physically impossible.
+    specific_yield_kwh_per_kw = sum(production_factor) / time_steps_per_hour
     performance_ratio = (
         specific_yield_kwh_per_kw / reference_yield_kwh_per_m2
         if reference_yield_kwh_per_m2 else None

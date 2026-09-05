@@ -474,7 +474,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
           source="case.json financial.owner_discount_rate_fraction",
           name="DISC_RATE", fmt=FMT_PERCENT)
 
-    section("Tax & Depreciation (Vietnam)")
+    section("Tax & Depreciation ({})".format(profile.country))
     cit = d.get("cit", {})
     regime_label = {
         "re_producer": "RE producer — Law 67/2025 preferential (10% / 15y)",
@@ -484,7 +484,7 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     entry("CIT regime", regime_label,
           source="proforma_vietnam.cash_flow (structure-dependent; explicit override wins)")
     entry("CIT standard rate", cit.get("standard_rate"), unit="of taxable income",
-          source="Law 67/2025/QH15; vietnam_defaults.json",
+          source=profile.cit_rate_source,
           name="CIT_RATE", fmt=FMT_PERCENT)
     if cit.get("preferential_rate") is not None:
         entry("CIT preferential rate (RE producer)", cit.get("preferential_rate"),
@@ -495,25 +495,25 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
               unit="years (from year 1)", source="Law 67/2025/QH15",
               name="CIT_PREF_YEARS", fmt="0")
     entry("CIT holiday", cit.get("holiday_years"), unit="years",
-          source="Law 67/2025 (from first profitable year); Circular 78/2014 Art. 18 shape",
+          source=profile.cit_holiday_source,
           name="CIT_HOLIDAY_YEARS", fmt="0")
     entry("CIT reduced-rate period", cit.get("reduced_rate_years"), unit="years",
-          source="Law 67/2025; Circular 78/2014 Art. 18 shape",
+          source=profile.cit_reduced_source,
           name="CIT_REDUCED_YEARS", fmt="0")
     entry("CIT reduction during period", cit.get("reduced_rate_fraction"),
-          unit="of applicable base rate", source="Law 67/2025 (50% of base rate)",
+          unit="of applicable base rate", source=profile.cit_reduced_rate_source,
           name="CIT_REDUCED_FRACTION", fmt=FMT_PERCENT)
     entry("Tax-loss carryforward limit", cit.get("loss_carryforward_years"),
-          unit="years", source="Law 67/2025; Circular 78/2014 Art. 9 shape",
+          unit="years", source=profile.cit_loss_source,
           name="CIT_LOSS_CF_YEARS", fmt="0")
     entry("Incentive clock cap", (cit.get("incentive_start_cap_index") or 3) + 1,
-          unit="year (latest start)", source="Law 67/2025; Circular 78/2014 Art. 18 shape",
+          unit="year (latest start)", source=profile.cit_reduced_source,
           name="CIT_CLOCK_CAP_YEAR", fmt="0")
     entry("PV depreciation (straight-line)", d.get("pv_depreciation_years"),
-          unit="years", source="Circular 45/2013/TT-BTC (7–20 yr band)",
+          unit="years", source=profile.depreciation_band_source,
           name="PV_DEP_YEARS", fmt="0")
     entry("BESS depreciation (straight-line)", d.get("bess_depreciation_years"),
-          unit="years", source="Circular 45/2013/TT-BTC",
+          unit="years", source=profile.depreciation_source,
           name="BESS_DEP_YEARS", fmt="0")
 
     contract_term = d.get("contract_term")

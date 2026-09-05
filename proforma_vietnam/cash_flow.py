@@ -111,6 +111,7 @@ def calculate_vietnam_esco_cash_flow(
     battery_replacement_treatment="capitalize",
     project_years=DEFAULT_PROJECT_YEARS,
     pv_depreciation_years=PV_DEPRECIATION_YEARS,
+    time_steps_per_hour=1,
     pv_depreciation_years_min=None,
     pv_depreciation_years_max=None,
     pv_depreciation_citation=None,
@@ -231,16 +232,19 @@ def calculate_vietnam_esco_cash_flow(
             for year_index, cost in enumerate(replacement_costs_by_year)
         ]
 
+    # project_served_pv_kwh is kW per interval, so the sum is energy only at
+    # hourly resolution. Divide by the interval count to get kWh. Defaults to 1,
+    # leaving Vietnam byte-identical.
     base_energy_revenue_vnd = sum(
         kwh * rate * esco_energy_discount_fraction
         for kwh, rate in zip(project_served_pv_kwh, evn_energy_rates_vnd_per_kwh)
-    )
+    ) / time_steps_per_hour
     # Full retail value of project-served energy: energy lost to PV
     # degradation in later years is repurchased from EVN at this rate.
     base_served_retail_value_vnd = sum(
         kwh * rate
         for kwh, rate in zip(project_served_pv_kwh, evn_energy_rates_vnd_per_kwh)
-    )
+    ) / time_steps_per_hour
     base_demand_savings_vnd = max(bau_demand_charge_vnd - optimized_demand_charge_vnd, 0)
     base_grid_arbitrage_revenue_vnd = (
         max(net_grid_arbitrage_value_vnd, 0) * esco_grid_arbitrage_share
