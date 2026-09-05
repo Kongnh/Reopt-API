@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from proforma_vietnam.report_data import build_vietnam_report_data
+from proforma_vietnam.report_data import build_vietnam_report_data, _upsample_series
 
 
 class VietnamReportDataTests(TestCase):
@@ -64,6 +64,24 @@ class VietnamReportDataTests(TestCase):
             report["solar_resource"]["annual_poa_irradiation_kwh_per_m2"], 0.0
         )
         self.assertEqual(report["dispatch_profile"][0]["pv_irradiance"], 0)
+
+
+class UpsampleSeriesTests(TestCase):
+
+    def test_factor_of_one_returns_the_same_values(self):
+        self.assertEqual(_upsample_series([1.0, 2.0], 1), [1.0, 2.0])
+
+    def test_each_value_repeats_factor_times(self):
+        self.assertEqual(
+            _upsample_series([1.0, 2.0], 4),
+            [1.0, 1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0],
+        )
+
+    def test_empty_series_stays_empty(self):
+        self.assertEqual(_upsample_series([], 4), [])
+
+    def test_hourly_poa_becomes_quarter_hourly(self):
+        self.assertEqual(len(_upsample_series([0.5] * 8760, 4)), 35040)
 
 
 def _fake_reopt_results():

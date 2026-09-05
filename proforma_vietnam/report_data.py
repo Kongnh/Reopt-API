@@ -30,6 +30,15 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
     # annual Performance Ratio but is no longer a dispatch column.
     irradiance = _series(poa_irradiance_series)
     production_factor = _production_factor_series(pv_outputs, _as_list(inputs.get("PV")))
+    # Solar Resource below sums irradiance directly to get annual kWh/m2, which
+    # only works while it stays hourly (see _solar_resource) - so the dispatch
+    # sheet gets its own copy, repeated to the model's resolution (15-minute
+    # for Thailand) so each row's irradiance matches its own clock time instead
+    # of only covering the first quarter of the year.
+    # Vietnam runs hourly, where the factor is 1 and this is a no-op.
+    dispatch_irradiance = irradiance
+    if dispatch_irradiance and time_steps_per_hour > 1:
+        dispatch_irradiance = _upsample_series(dispatch_irradiance, time_steps_per_hour)
 
     return {
         "system_sizing": {
@@ -42,7 +51,7 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
         ),
         "dispatch_profile": _dispatch_rows(
             load_series=load_series,
-            irradiance=irradiance,
+            irradiance=dispatch_irradiance,
             pv_total=pv_total,
             pv_to_load=pv_to_load,
             pv_to_storage=pv_to_storage,
@@ -179,6 +188,19 @@ def _sum_series(series_list):
 
 def _series(value):
     return value if isinstance(value, list) else []
+
+
+def _upsample_series(series, factor):
+    """Repeat each value ``factor`` times.
+
+    PVWatts returns 8760 hourly values regardless of the model's resolution,
+    the same way REopt up-samples a production factor onto a finer container.
+    Pairing an hourly series against a 15-minute dispatch without this leaves
+    the column 4x misaligned and zero for three rows in every four.
+    """
+    if factor <= 1:
+        return list(series)
+    return [value for value in series for _ in range(factor)]
 
 
 def _at(series, index):
