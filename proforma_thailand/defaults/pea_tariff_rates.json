@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "PEA retail tariff, keyed by vintage year. Rates verified line by line against the Rofu (Thailand) invoice for 06/2025 (rate code 4224, 22-33 kV): the full bill reconstructs from these values to within 0.01 THB. Ft is billed on total kWh and is revised every four months; the windows below are read directly off the 2025 invoices.",
+  "description": "PEA retail tariff, keyed by vintage year. Rates verified line by line against the Rofu (Thailand) invoice for 06/2025 (rate code 4224, 22-33 kV): the full bill reconstructs from these values to within 0.01 THB. Ft is billed on total kWh and is revised every four months; the 2025 windows are read directly off the 2025 invoices and the 2026 windows are read off PEA's published Ft surcharge notices.",
   "vintages": {
     "2025": {
       "source": "PEA Schedule 4.2 Large General Service TOU, 22-33 kV; verified against Rofu invoice 06/2568 (rate code 4224)",
@@ -21,6 +21,8 @@
   "ft_windows": [
     {"from_year": 2025, "from_month": 1, "ft_per_kwh": 0.3672, "source": "Rofu invoice 03/2568"},
     {"from_year": 2025, "from_month": 5, "ft_per_kwh": 0.1972, "source": "Rofu invoice 06/2568"},
-    {"from_year": 2025, "from_month": 9, "ft_per_kwh": 0.1572, "source": "Rofu invoice 11/2568"}
+    {"from_year": 2025, "from_month": 9, "ft_per_kwh": 0.1572, "source": "Rofu invoice 11/2568"},
+    {"from_year": 2026, "from_month": 1, "ft_per_kwh": 0.0972, "source": "PEA Ft surcharge JAN-APR 2026 (pea.co.th); Bangkok Post 'Power price cut to bring in the New Year'; Nation Thailand 'Power tariff cut to 3.88 baht'"},
+    {"from_year": 2026, "from_month": 5, "ft_per_kwh": 0.1623, "source": "PEA Ft surcharge MAY-AUG 2026 PDF (pea.co.th)"}
   ]
 }

@@ -241,7 +241,7 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
         workbook.create_sheet("Buyer Analysis"), cash_flow_result, dppa_config, profile,
     )
     _write_developer_returns(
-        workbook.create_sheet("Developer Returns"), cash_flow_result, profile=profile
+        workbook.create_sheet(profile.returns_sheet_name), cash_flow_result, profile=profile
     )
 
     # Per-year record tables (Summary, Cash Flow, Tax Schedule, Debt Service,
@@ -249,7 +249,7 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     # consolidated: the Pro Forma (Audit) sheet carries every line-item with
     # engine tie-out rows, and Assumptions carries the full DPPA configuration.
     _write_technical_results(
-        workbook.create_sheet("Technical Results"), report_data
+        workbook.create_sheet("Technical Results"), report_data, profile=profile
     )
     _write_dispatch_sheet(
         workbook.create_sheet("Dispatch Profile"),
@@ -284,11 +284,17 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
             profile=profile,
         )
 
+    # profile.returns_sheet_name is "Developer Returns" for Vietnam (already in
+    # the static set below) and "Owner Returns" for Thailand, which is not --
+    # add it here rather than editing the module-level set so Vietnam's set
+    # membership, and therefore its layout, is unchanged.
+    custom_layout_sheets = CUSTOM_LAYOUT_SHEETS | {profile.returns_sheet_name}
+
     for worksheet in workbook.worksheets:
-        if worksheet.title not in CUSTOM_LAYOUT_SHEETS:
+        if worksheet.title not in custom_layout_sheets:
             _autosize_columns(worksheet)
 
-    for title in CUSTOM_LAYOUT_SHEETS:
+    for title in custom_layout_sheets:
         if title in workbook.sheetnames:
             workbook[title].sheet_properties.tabColor = NAVY
 
@@ -376,9 +382,17 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
         contract_label = "ESCO discount-to-{} tariff (behind-the-meter)".format(profile.utility_label)
     else:
         contract_label = "Direct ownership on {} tariff (behind-the-meter)".format(profile.utility_label)
+    # A direct-ownership case (Important 6) has no seller and no PPA to
+    # negotiate -- the "Investment & PPA Negotiation Summary" title is
+    # accurate only when a seller/ESCO contract is actually in play.
+    title_text = (
+        f"Investment & PPA Negotiation Summary — {case_name}"
+        if profile.shows_esco_contract_terms or dppa_config else
+        f"Investment Summary — {case_name}"
+    )
     _write_title(
         worksheet,
-        f"Investment & PPA Negotiation Summary — {case_name}",
+        title_text,
         f"{contract_label}  ·  prepared {prepared_on}  ·  "
         "REopt dispatch + proforma_vietnam financial model",
         last_column=4,
@@ -605,7 +619,7 @@ def _write_developer_returns(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
     )
     _write_title(
         worksheet,
-        "Developer Returns — Financing & Cash Flow",
+        f"{profile.returns_sheet_name} — Financing & Cash Flow",
         subtitle,
         last_column=8,
     )
@@ -620,6 +634,15 @@ def _write_developer_returns(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
 
     row += 1
     _write_section_header(worksheet, row, "Return Metrics", 8)
+    # The percent number format only shows on open in Excel, not on a raw read
+    # of the cell value (e.g. a 25-year cumulative ROI of 8.02 reads as bare
+    # "8.02", not "802%", unless the format is applied) - the label spells out
+    # the unit so it is unambiguous either way. Vietnam's label is unchanged.
+    roi_label = (
+        "ROI (cumulative equity CF / equity)"
+        if profile.country == "Vietnam" else
+        "ROI, cumulative equity CF / equity (%)"
+    )
     row = _write_kpi_rows(worksheet, row + 1, [
         ("Equity IRR", summary.get("equity_irr_fraction"), FORMAT_PERCENT, None),
         ("Project IRR", summary.get("project_irr_fraction"), FORMAT_PERCENT, None),
@@ -627,7 +650,7 @@ def _write_developer_returns(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
         ("Minimum DSCR (debt years)", minimum_dscr, FORMAT_RATIO, None),
         ("Average DSCR", summary.get("average_dscr"), FORMAT_RATIO, None),
         ("Simple Payback (Years)", summary.get("simple_payback_years"), FORMAT_YEARS, None),
-        ("ROI (cumulative equity CF / equity)", summary.get("roi_fraction"), FORMAT_PERCENT, None),
+        (roi_label, summary.get("roi_fraction"), FORMAT_PERCENT, None),
     ])
 
     row += 1
@@ -806,17 +829,34 @@ def _number_format_for(key):
     return schema.number_format(key)
 
 
-def _write_technical_results(worksheet, report_data):
+def _write_technical_results(worksheet, report_data, profile=VIETNAM_PROFILE):
     """System sizing, year-1 energy balance and bill comparison in one sheet."""
+    # REopt's year_one_bill_before_tax and electric_to_load_series_kw (which
+    # ANNUAL_PRODUCTION_ROWS and RESULTS_COMPARISON_ROWS read) are already
+    # escalation/discount/degradation-levelized across the analysis horizon,
+    # not a true undegraded first year (Important 8 / Ruling 23: fix the
+    # label, not the engine, since the double-count is pre-existing
+    # shared-core behaviour). Vietnam's heading text is left unchanged.
+    energy_balance_title = (
+        "Annual Energy Balance (Year 1)"
+        if profile.country == "Vietnam" else
+        "Annual Energy Balance (Levelized Annual)"
+    )
+    bill_comparison_title = (
+        "Year-1 Utility Bill Comparison"
+        if profile.country == "Vietnam" else
+        "Levelized Annual Utility Bill Comparison"
+    )
     sections = [
         ("System Sizing", SYSTEM_SIZING_ROWS, report_data.get("system_sizing", {})),
-        ("Annual Energy Balance (Year 1)", ANNUAL_PRODUCTION_ROWS,
+        (energy_balance_title, ANNUAL_PRODUCTION_ROWS,
          report_data.get("annual_production", {})),
-        ("Year-1 Utility Bill Comparison", RESULTS_COMPARISON_ROWS,
+        (bill_comparison_title, RESULTS_COMPARISON_ROWS,
          report_data.get("results_comparison", {})),
     ]
     # Solar Resource only when PVWatts irradiance was available (PR is None
-    # otherwise — see report_data._solar_resource).
+    # otherwise — see report_data._solar_resource). Not levelized (raw PVWatts
+    # hourly resource data), so its "Year 1" label is accurate as-is.
     solar_resource = report_data.get("solar_resource") or {}
     if solar_resource.get("performance_ratio") is not None:
         sections.append(

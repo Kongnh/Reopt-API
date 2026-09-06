@@ -129,10 +129,10 @@ entirely (REopt US default: no storage).
 reasoning as PV above.
 
 **The `max_kw` / `max_kwh` bound in case_5 and case_6 is not a forced size.**
-Both storage cases declare `"max_kw": 2000, "max_kwh": 8000`, an upper bound
+Both storage cases declare `"max_kw": 4000, "max_kwh": 16000`, an upper bound
 the optimizer sizes freely beneath, not a target the model is trying to hit.
 It is set generously so the bound does not bind. If a completed run ever
-returns storage at exactly 2,000 kW or exactly 8,000 kWh, the bound decided
+returns storage at exactly 4,000 kW or exactly 16,000 kWh, the bound decided
 the answer instead of the economics; the case must be re-run with the bound
 raised, not reported as-is.
 
@@ -183,8 +183,8 @@ where more PV stops paying, not a transformer-sizing question.
 | case_2 | 1,895 | none | Mid roof width |
 | case_3 | 2,106 | none | Upper roof width |
 | case_4 | 3,230 | none | Where does more PV stop paying |
-| case_5 | 1,685 | optimizer-sized (bound 2,000 kW / 8,000 kWh) | Does a battery pay at the conservative roof |
-| case_6 | 3,230 | optimizer-sized (bound 2,000 kW / 8,000 kWh) | Does a battery pay when PV is not roof-limited |
+| case_5 | 1,685 | optimizer-sized (bound 4,000 kW / 16,000 kWh) | Does a battery pay at the conservative roof |
+| case_6 | 3,230 | optimizer-sized (bound 4,000 kW / 16,000 kWh) | Does a battery pay when PV is not roof-limited |
 
 Every case above omits `installed_cost_per_kw` so all six price PV off the
 same Thailand default, and every case's payload must show

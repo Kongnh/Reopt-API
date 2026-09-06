@@ -34,8 +34,22 @@ class PeaDefaultsTests(TestCase):
         self.assertEqual(ft_for_month(2025, 9), 0.1572)
         self.assertEqual(ft_for_month(2025, 12), 0.1572)
 
+    def test_ft_windows_across_2026(self):
+        # Pins the modelled-year months so a stale fallback (Critical/Important 4)
+        # can never silently reappear: Jan-Apr 2026 was cut to 9.72 satang/kWh and
+        # May-Aug 2026 rose to 16.23 satang/kWh - both published by PEA, not the
+        # 2025-09 invoice window this used to fall back to.
+        self.assertEqual(ft_for_month(2026, 1), 0.0972)
+        self.assertEqual(ft_for_month(2026, 4), 0.0972)
+        self.assertEqual(ft_for_month(2026, 5), 0.1623)
+        self.assertEqual(ft_for_month(2026, 6), 0.1623)
+        self.assertEqual(ft_for_month(2026, 8), 0.1623)
+
     def test_ft_falls_back_to_the_latest_known_window(self):
-        self.assertEqual(ft_for_month(2026, 6), 0.1572)
+        # No window is configured past 2026-05, so a month after that still
+        # falls back - this is the intended fallback behaviour, exercised on
+        # a month beyond every known window rather than inside the modelled year.
+        self.assertEqual(ft_for_month(2027, 1), 0.1623)
 
     def test_ft_rejects_a_month_before_the_first_window(self):
         with self.assertRaises(ValueError):

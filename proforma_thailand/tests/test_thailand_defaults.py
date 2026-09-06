@@ -101,6 +101,16 @@ class FtWindowTests(TestCase):
     def test_september_2025_uses_the_third_window(self):
         self.assertAlmostEqual(ft_for_month(2025, 9), 0.1572)
 
+    def test_january_2026_uses_the_fourth_window(self):
+        # Important 4: this class pinned only 2025-01/05/09 and never asserted
+        # a modelled-year (2026) month, so ft_for_month silently falling back
+        # to the stale 2025-09 window went undetected. Pin it directly so that
+        # fallback can never silently reappear.
+        self.assertAlmostEqual(ft_for_month(2026, 1), 0.0972)
+
+    def test_may_2026_uses_the_fifth_window(self):
+        self.assertAlmostEqual(ft_for_month(2026, 5), 0.1623)
+
     def test_a_month_before_any_window_raises(self):
         with self.assertRaises(ValueError):
             ft_for_month(2000, 1)

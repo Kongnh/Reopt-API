@@ -46,6 +46,7 @@ class CountryProfile:
     # has no seller and no contract, so these must be overridable per country.
     shows_esco_contract_terms: bool = True
     returns_section_label: str = "Developer (Seller) Returns"
+    returns_sheet_name: str = "Developer Returns"
     dispatch_row_label: str = "Hour"
 
     def __post_init__(self):
@@ -91,6 +92,7 @@ THAILAND_PROFILE = CountryProfile(
     revenue_source_phrase="tariff",
     shows_esco_contract_terms=False,
     returns_section_label="Owner Returns",
+    returns_sheet_name="Owner Returns",
     dispatch_row_label="Interval",
 )
 

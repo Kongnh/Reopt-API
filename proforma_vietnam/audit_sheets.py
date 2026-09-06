@@ -344,8 +344,23 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
           formula="=PV_CAPEX+BESS_CAPEX+OTHER_CAPEX")
 
     section("Operating Costs")
-    entry("Year-1 O&M", get("annual_om_year1_usd", "annual_om_usd"), unit="USD/yr",
-          source="REopt Financial.year_one_om_costs_before_tax",
+    # Thailand folds an insurance premium (a fraction of total capex) into
+    # this figure before it ever reaches the engine (proforma_thailand.report.
+    # annual_opex_usd), so the rendered number is O&M + insurance, not the
+    # REopt O&M figure alone (Important 9). Vietnam never sets insurance, so
+    # its label and source citation are unchanged.
+    om_row_label = (
+        "Year-1 O&M"
+        if profile.country == "Vietnam" else
+        "Year-1 operating cost (O&M + insurance)"
+    )
+    om_row_source = (
+        "REopt Financial.year_one_om_costs_before_tax"
+        if profile.country == "Vietnam" else
+        "REopt Financial.year_one_om_costs_before_tax + insurance (fraction of total capex)"
+    )
+    entry(om_row_label, get("annual_om_year1_usd", "annual_om_usd"), unit="USD/yr",
+          source=om_row_source,
           name="OM_YEAR1", fmt=FMT_AMOUNT)
     entry("O&M escalation", get("om_escalation_rate") or 0.0, unit="per year",
           source="{defaults_file} / case.json financial.om_escalation_rate".format(defaults_file=profile.defaults_file),
@@ -751,9 +766,9 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
         )
         # Metered data availability, not a real single year, decides the
         # month-to-year mapping above - every monthly figure in this
-        # workbook (the billed-demand-by-month table included) is built
-        # from the same calendar_year_months positions, so one disclosure
-        # here covers all of them instead of repeating it per table.
+        # workbook is built from the same calendar_year_months positions,
+        # so one disclosure here covers all of them instead of repeating
+        # it per table.
         entry(
             "Monthly figures use a synthetic year",
             year_description,
@@ -781,7 +796,13 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
             ),
         )
         entry(
-            "Avoided emissions, year 1",
+            # "year 1" figures built from load_outputs.annual_calculated_kwh /
+            # utility_outputs.annual_energy_supplied_kwh are REopt's levelized
+            # (escalation/discount/degradation-weighted) annual outputs, not a
+            # true undegraded first year (Important 8 / Ruling 23). This block
+            # only renders for Thailand today (Vietnam never sets
+            # annual_avoided_tco2e), so no profile gate is needed here.
+            "Avoided emissions, levelized annual",
             avoided,
             unit="tonnes CO2e",
             source="Allotrope calculation from avoided grid import. Not a REopt output.",
@@ -1141,8 +1162,18 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
         formula=lambda y, c: "=" + trunc(c, f"OM_YEAR1*{c}{r_fac_om}"))
     replacement = list(d.get("replacement_costs_by_year_usd") or [])
     replacement_by_year = [0.0] + replacement + [0.0] * years
+    # This row is the MERGED battery + inverter/extra replacement series
+    # (esco_pro_forma._merge_replacement_costs adds them together), so a
+    # PV-only case with an inverter replacement and zero battery must not be
+    # labelled "Battery" (Critical 2). Vietnam never merges an extra series
+    # in today, so its label is unchanged.
+    repl_label = (
+        "Battery replacement (engine schedule)"
+        if profile.country == "Vietnam" else
+        "Equipment replacement (engine schedule)"
+    )
     r_repl = w.line(
-        "repl", "Battery replacement (engine schedule)", "USD",
+        "repl", repl_label, "USD",
         values=replacement_by_year[:years + 1], fill=INPUT_FILL)
     r_ebitda = w.line(
         "ebitda", "EBITDA", "USD",
@@ -2112,12 +2143,27 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
     # register line is kept, byte-for-byte with the pre-change workbook.
     battery_replacement = derivation.get("battery_replacement")
     if battery_replacement:
+        # The depreciation authority and BESS life are country- and case-specific
+        # (Critical 1): a hardcoded "VAS / Circular 45/2013" + "8-year" citation was
+        # being shown on Thai workbooks, which use Thai Revenue Code / Royal Decree
+        # No. 145 and a 5-year life. Vietnam's default (8 years, Circular 45) is
+        # unchanged, so this branch reproduces Vietnam's text byte-for-byte.
+        bess_life = derivation.get("bess_depreciation_years")
         replacement_basis_bullets = [
-            "Battery replacement is CAPITALIZED, not expensed (VAS / Circular 45/2013): each replacement "
-            "battery is a fixed asset depreciated straight-line over the 8-year BESS class life from its "
-            "in-service (replacement) year, with each replacement year carrying its own schedule. The "
-            "replacement cash outflow is unchanged — only the CIT deduction timing shifts from a single "
-            "full deduction to the depreciation stream.",
+            (
+                "Battery replacement is CAPITALIZED, not expensed (VAS / Circular 45/2013): each "
+                f"replacement battery is a fixed asset depreciated straight-line over the {bess_life}-year "
+                "BESS class life from its in-service (replacement) year, with each replacement year "
+                "carrying its own schedule. The replacement cash outflow is unchanged — only the CIT "
+                "deduction timing shifts from a single full deduction to the depreciation stream."
+                if profile.country == "Vietnam" else
+                "Battery replacement is CAPITALIZED, not expensed "
+                f"({profile.depreciation_authority}): each replacement battery is a fixed asset "
+                f"depreciated straight-line over the {bess_life}-year BESS class life from its "
+                "in-service (replacement) year, with each replacement year carrying its own schedule. "
+                "The replacement cash outflow is unchanged — only the CIT deduction timing shifts from "
+                "a single full deduction to the depreciation stream."
+            ),
         ]
         replacement_register_bullets = [
             "Battery replacement depreciation is truncated at the analysis horizon: charges beyond the "
@@ -2249,8 +2295,15 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
 
     sections = [
         ("1. Model architecture", [
-            "REopt (NLR optimization engine) selects PV/BESS sizing and hourly dispatch against the "
-            "{} time-of-use tariff over an 8760-hour year.".format(profile.utility_label),
+            # "NLR" was a typo for NREL in the original Vietnam text; Vietnam's
+            # wording is kept byte-for-byte and only the Thai copy is corrected.
+            (
+                "REopt (NLR optimization engine) selects PV/BESS sizing and hourly dispatch against the "
+                "{} time-of-use tariff over an 8760-hour year."
+                if profile.country == "Vietnam" else
+                "REopt (NREL optimization engine) selects PV/BESS sizing and hourly dispatch against the "
+                "{} time-of-use tariff over an 8760-hour year."
+            ).format(profile.utility_label),
             "proforma_vietnam post-processes the REopt run: an hourly ND57/2025 DPPA settlement layer "
             "(when applicable) and a 25-year developer cash flow with Vietnam tax and debt."
             if profile.country == "Vietnam" else
@@ -2290,8 +2343,15 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
         ("3. Settlement math" + _settlement_title_suffix(is_dppa, is_physical, is_direct),
          _settlement_bullets(is_dppa, is_physical, is_direct, assume_profitable_host, profile)),
         ("4. Multi-year mechanics", [
-            "PV degradation compounds on generation-linked terms; energy lost to degradation is repurchased "
-            "from {} at retail (added to the buyer's residual bill / C_BL).".format(profile.utility_label),
+            # C_BL is a Vietnamese DPPA settlement price component; it does not
+            # exist for a direct-ownership Thai case, so it is gated out below.
+            (
+                "PV degradation compounds on generation-linked terms; energy lost to degradation is "
+                "repurchased from {} at retail (added to the buyer's residual bill / C_BL)."
+                if profile.country == "Vietnam" else
+                "PV degradation compounds on generation-linked terms; energy lost to degradation is "
+                "repurchased from {} at retail (added to the buyer's residual bill)."
+            ).format(profile.utility_label),
             "O&M escalates at its own rate; battery replacement is booked in the configured year at REopt "
             "replacement unit costs.",
             *debt_bullets,
@@ -2327,9 +2387,17 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             "3) Checks block: every metric shows Excel vs engine with PASS/REVIEW at stated tolerances "
             "(amounts $1, rates 5 bp, DSCR 0.005, payback 0.05 yr).",
             "4) FX Sensitivity: rate cells are editable; Excel recomputes IRR/NPV live.",
-            "5) Technical sheets (Technical Results, Dispatch Profile, Load Duration, Settlement) are "
-            "engine output for record. The Dispatch sheet's PV production factor (kWh/kW, PVWatts-derived) "
-            "is the hourly solar-resource signal — REopt does not persist raw irradiance.",
+            # The Settlement sheets only exist for a grid-CfD DPPA case (see
+            # _active_dppa_config); a Thai direct-ownership workbook never has one.
+            (
+                "5) Technical sheets (Technical Results, Dispatch Profile, Load Duration, Settlement) are "
+                "engine output for record. The Dispatch sheet's PV production factor (kWh/kW, PVWatts-derived) "
+                "is the hourly solar-resource signal — REopt does not persist raw irradiance."
+                if profile.country == "Vietnam" else
+                "5) Technical sheets (Technical Results, Dispatch Profile, Load Duration) are "
+                "engine output for record. The Dispatch sheet's PV production factor (kWh/kW, PVWatts-derived) "
+                "is the hourly solar-resource signal — REopt does not persist raw irradiance."
+            ),
         ]),
         ("7. Key references", [
             *([
@@ -2343,9 +2411,13 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
                     profile.cit_rate_source),
                 "{} — fixed-asset depreciation.".format(profile.depreciation_source),
             ]),
-            "{} retail tariff (current & QĐ963 TOU structures) as configured in the case file.".format(
-                profile.utility_label
-            ),
+            # QD963 is EVN's Vietnamese TOU tariff decision; it does not govern PEA
+            # and must not appear on a Thai workbook.
+            (
+                "{} retail tariff (current & QĐ963 TOU structures) as configured in the case file."
+                if profile.country == "Vietnam" else
+                "{} retail tariff as configured in the case file."
+            ).format(profile.utility_label),
         ]),
     ]
 
@@ -2457,7 +2529,7 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
             profile.local_currency_code
         )),
         ("Buyer Analysis", "Offtaker savings vs business-as-usual"),
-        ("Developer Returns", "Sources & uses, coverage, equity cash flow"),
+        (profile.returns_sheet_name, "Sources & uses, coverage, equity cash flow"),
         ("Technical Results", "System sizing, year-1 energy balance, bill comparison"),
         ("Dispatch Profile", "8760-h dispatch incl. original PV generation; chart shows the peak-load week"),
         ("Load Duration", "Load and net-load duration curves"),

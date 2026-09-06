@@ -142,8 +142,20 @@ def _production_factor_series(pv_outputs, pv_inputs):
 def _results_comparison(tariff_outputs):
     bau_bill = _value(tariff_outputs, "year_one_bill_before_tax_bau")
     optimized_bill = _value(tariff_outputs, "year_one_bill_before_tax")
-    bau_demand = _value(tariff_outputs, "year_one_demand_cost_before_tax_bau")
-    optimized_demand = _value(tariff_outputs, "year_one_demand_cost_before_tax")
+    # A coincident-peak demand structure (PEA's on-peak kW charge, billed as the
+    # single highest coincident interval rather than a per-TOU-period demand
+    # rate) is booked by REopt under year_one_coincident_peak_cost_before_tax,
+    # not year_one_demand_cost_before_tax (Important 7). Every Vietnam baseline
+    # case has this field at 0.0, so adding it in is a no-op there and only
+    # changes anything for a tariff actually billed on coincident peak.
+    bau_demand = (
+        _value(tariff_outputs, "year_one_demand_cost_before_tax_bau")
+        + _value(tariff_outputs, "year_one_coincident_peak_cost_before_tax_bau")
+    )
+    optimized_demand = (
+        _value(tariff_outputs, "year_one_demand_cost_before_tax")
+        + _value(tariff_outputs, "year_one_coincident_peak_cost_before_tax")
+    )
     # REopt money outputs are USD (the EVN tariff is converted VND->USD at the
     # contract rate before the optimizer runs), so these keys carry the _usd
     # suffix — they are not VND amounts.

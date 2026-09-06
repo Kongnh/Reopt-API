@@ -1,3 +1,4 @@
+import unicodedata
 from unittest import TestCase
 
 from proforma_thailand.report import (
@@ -90,6 +91,24 @@ class ThailandReportTests(TestCase):
 
         self.assertTrue(any("THB" in text for text in texts))
         self.assertFalse(any("VND" in text or "EVN" in text for text in texts))
+
+    def test_technical_results_labels_the_levelized_rows_correctly(self):
+        # Important 8 / Ruling 23: REopt's year_one_bill_before_tax and
+        # electric_to_load_series_kw are already levelized across the 25-year
+        # horizon, not a true undegraded first year, so these Technical
+        # Results section headers must say "Levelized Annual", not "Year 1".
+        workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
+        sheet = workbook["Technical Results"]
+
+        titles = [
+            value for row in sheet.iter_rows(values_only=True)
+            for value in row if isinstance(value, str)
+        ]
+
+        self.assertIn("Annual Energy Balance (Levelized Annual)", titles)
+        self.assertIn("Levelized Annual Utility Bill Comparison", titles)
+        self.assertNotIn("Annual Energy Balance (Year 1)", titles)
+        self.assertNotIn("Year-1 Utility Bill Comparison", titles)
 
     def test_power_factor_compensation_is_computed_from_billed_demand(self):
         assumptions = dict(ASSUMPTIONS, billed_demand_kw=800.0)
@@ -197,6 +216,41 @@ class BilledDemandTests(TestCase):
         self.assertEqual(billed_demand_kw_by_month(results), [150.0])
 
 
+def _results_with_replacements():
+    """A results fixture that exercises every conditionally-gated Model Basis
+    block (Critical 1, hole 2 in the provenance guard): the stock ``_results()``
+    fixture leaves PV ``installed_cost_per_kw`` unset, so ``_pv_capex`` is 0.0,
+    no inverter replacement is ever booked, ``derivation["battery_replacement"]``
+    is falsy, and the entire capitalized-replacement disclosure -- the one
+    citing the depreciation authority and BESS life -- never rendered under
+    test. This fixture gives PV a real capex and a battery so both replacement
+    paths (which merge additively, see esco_pro_forma._merge_replacement_costs)
+    actually populate ``derivation["battery_replacement"]``.
+    """
+    results = _results()
+    results["outputs"]["PV"]["installed_cost_per_kw"] = 1_000.0
+    results["outputs"]["ElectricStorage"] = {
+        "size_kw": 200.0,
+        "size_kwh": 400.0,
+        "can_grid_charge": False,
+        "battery_replacement_year": 10,
+        "replace_cost_per_kw": 100.0,
+        "replace_cost_per_kwh": 80.0,
+    }
+    return results
+
+
+# inverter_replacement_year matches case_builder.py's production default (11);
+# inverter_replacement_cost_usd is overwritten by build_thailand_report from
+# the fixture's own PV capex, but must be set here so cash_flow_overrides_
+# from_assumptions treats the inverter series as active before that happens.
+PROVENANCE_ASSUMPTIONS = dict(
+    ASSUMPTIONS,
+    inverter_replacement_year=11,
+    inverter_replacement_cost_usd=118_000.0,
+)
+
+
 class NoVietnamProvenanceTests(TestCase):
     """A Thai client must not be told its tax is governed by Vietnamese law.
 
@@ -210,10 +264,26 @@ class NoVietnamProvenanceTests(TestCase):
     # Lowercase module paths like proforma_vietnam.cash_flow are accurate
     # engineering provenance (the engine IS that module) and are not a claim
     # about the client's country, so they are deliberately not banned.
+    #
+    # QĐ963 (U+0110 Đ) and Điều are the Unicode tokens the render actually
+    # uses -- an ASCII "QD963" banned string never matches "QĐ963" and let a
+    # Vietnamese TOU citation past the old guard on a Thai workbook. NĐ-CP and
+    # VAS were both missing outright. Matching below is additionally done
+    # after Unicode NFC normalisation (see _normalized), which is the more
+    # durable fix the review asked us to weigh -- it catches an NFD-decomposed
+    # rendering of any of these tokens without having to enumerate variants.
     BANNED = (
         "Vietnam", "vietnam_defaults", "VND", "EVN",
         "Circular 45", "Circular 78", "Law 67", "QH15",
         "Decree 320", "ND57", "Decision 988", "QD963", "DPPA",
+        "QĐ963", "NĐ-CP", "VAS", "Điều",
+        # PPA is a substring of DPPA, so it also catches every existing DPPA
+        # match; the reason to ban it separately is a bare "PPA" (Important 6:
+        # "Investment & PPA Negotiation Summary" on a direct-ownership title,
+        # which has no DPPA anywhere near it). Every non-DPPA PPA mention in
+        # proforma_vietnam is gated on the physical-DPPA structure, which a
+        # Thailand DIRECT_OWNERSHIP case can never hit, so this is safe.
+        "PPA",
     )
 
     # Case-insensitive matching also catches BANNED tokens embedded inside the
@@ -247,18 +317,46 @@ class NoVietnamProvenanceTests(TestCase):
                     if isinstance(value, str):
                         yield worksheet.title, value
 
+    def _normalized(self, text):
+        # NFC normalisation: the more durable half of the Critical 1 fix. A
+        # BANNED token and the rendered cell could in principle each be a
+        # different Unicode normal form (e.g. an NFD-decomposed "Đ" as "D" +
+        # combining stroke) and still look identical on screen while failing
+        # a naive substring match. Normalising both sides to NFC first means
+        # that can never silently defeat the guard.
+        return unicodedata.normalize("NFC", text).lower()
+
+    def _unmasked(self, text):
+        # Per-match masking (Critical 1, hole 2): the old check exempted the
+        # WHOLE cell if an allowed substring appeared anywhere in it, so an
+        # allowed phrase could hide an unrelated banned token elsewhere in the
+        # same cell. Stripping only the allowed substrings out first means a
+        # banned token elsewhere in the cell is still caught.
+        stripped = text
+        for allowed in self.ALLOWED_SUBSTRINGS:
+            stripped = stripped.replace(allowed, "")
+        return stripped
+
     def test_no_vietnam_specific_token_reaches_a_thailand_workbook(self):
-        assumptions = dict(ASSUMPTIONS, cit_regime="standard_flat")
-        workbook, _ = build_thailand_report(_results(), assumptions)
+        assumptions = dict(PROVENANCE_ASSUMPTIONS, cit_regime="standard_flat")
+        workbook, _ = build_thailand_report(_results_with_replacements(), assumptions)
+
+        cells = list(self._cells(workbook))
+        all_text = " ".join(text for _, text in cells)
+
+        # Prove the fixture actually exercises the previously-invisible blocks
+        # rather than passing vacuously (the review's explicit ask): the
+        # capitalized-replacement disclosure only renders when
+        # derivation["battery_replacement"] is truthy, which requires a
+        # nonzero PV capex driving an inverter replacement, a real battery, or
+        # both -- exactly what _results_with_replacements() now provides.
+        self.assertIn("CAPITALIZED, not expensed", all_text)
 
         offenders = [
             (sheet, token, text[:70])
-            for sheet, text in self._cells(workbook)
+            for sheet, text in cells
             for token in self.BANNED
-            if token.lower() in text.lower()
-            and not any(
-                allowed in text.lower() for allowed in self.ALLOWED_SUBSTRINGS
-            )
+            if self._normalized(token) in self._normalized(self._unmasked(text))
         ]
 
         self.assertEqual(
@@ -267,6 +365,57 @@ class NoVietnamProvenanceTests(TestCase):
                 offenders[:8]
             ),
         )
+
+
+class DirectOwnershipLabelTests(TestCase):
+    """Positive assertions for the label fixes in Critical 2 and Important 6/9,
+    complementing NoVietnamProvenanceTests' negative (banned-token) checks.
+    """
+
+    def test_sheet_is_named_owner_returns_not_developer_returns(self):
+        workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
+        self.assertIn("Owner Returns", workbook.sheetnames)
+        self.assertNotIn("Developer Returns", workbook.sheetnames)
+
+    def test_executive_summary_title_has_no_ppa_negotiation_language(self):
+        workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
+        title = workbook["Executive Summary"]["B1"].value
+        self.assertIn("Investment Summary", title)
+        self.assertNotIn("PPA", title)
+
+    def test_replacement_row_is_not_labelled_a_battery(self):
+        # case_1-shaped: PV capex + inverter replacement, ZERO battery -- the
+        # exact scenario Critical 2 found labelled "Battery replacement".
+        results = _results()
+        results["outputs"]["PV"]["installed_cost_per_kw"] = 1_000.0
+        assumptions = dict(
+            ASSUMPTIONS,
+            inverter_replacement_year=11,
+            inverter_replacement_cost_usd=118_000.0,
+        )
+        workbook, _ = build_thailand_report(results, assumptions)
+        sheet = workbook["Pro Forma (Audit)"]
+
+        labels = [
+            value for row in sheet.iter_rows(values_only=True)
+            for value in row if isinstance(value, str)
+        ]
+        self.assertIn("Equipment replacement (engine schedule)", labels)
+        self.assertNotIn("Battery replacement (engine schedule)", labels)
+
+    def test_year1_om_row_discloses_the_insurance_component(self):
+        results = _results()
+        results["outputs"]["PV"]["installed_cost_per_kw"] = 1_000.0
+        results["outputs"]["Financial"] = {"year_one_om_costs_before_tax": 20_000.0}
+        workbook, _ = build_thailand_report(results, ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+
+        labels = [
+            value for row in sheet.iter_rows(values_only=True)
+            for value in row if isinstance(value, str)
+        ]
+        self.assertIn("Year-1 operating cost (O&M + insurance)", labels)
+        self.assertNotIn("Year-1 O&M", labels)
 
 
 class NoEscoLanguageTests(TestCase):
@@ -482,7 +631,7 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
         for label in (
             "Grid emission factor",
             "Grid emission factor vintage",
-            "Avoided emissions, year 1",
+            "Avoided emissions, levelized annual",
         ):
             rows = self._rows_with_label(sheet, label)
             self.assertEqual(
@@ -490,7 +639,7 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
                 "expected exactly one {!r} row, found {}".format(label, len(rows)),
             )
 
-        row = self._rows_with_label(sheet, "Avoided emissions, year 1")[0]
+        row = self._rows_with_label(sheet, "Avoided emissions, levelized annual")[0]
         self.assertAlmostEqual(
             sheet.cell(row=row, column=3).value, extras["annual_avoided_tco2e"],
         )

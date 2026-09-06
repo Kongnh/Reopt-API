@@ -4,7 +4,7 @@ from pathlib import Path
 from unittest import TestCase, mock
 
 from proforma_thailand.case_builder import build_thailand_case
-from proforma_thailand.defaults import FINANCIAL_DEFAULTS, placeholder_keys, value_of
+from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
 from proforma_vietnam import pvwatts_client
 
 CALENDAR_MONTHS = [[2026, m] for m in range(1, 7)] + [[2025, m] for m in range(7, 13)]
@@ -119,11 +119,14 @@ class ThailandCaseBuilderTests(TestCase):
     def test_assumptions_list_the_active_placeholders(self):
         assumptions = self._build()["assumptions"]
 
+        # Was previously asserted equal to sorted(placeholder_keys()) - but
+        # case_builder.py sets this key by calling that exact function, so
+        # the comparison was tautological (true regardless of what the
+        # function returns) and verified nothing. Checking presence and
+        # shape is what is actually left to check without re-pinning a
+        # literal key list, which breaks on every re-benchmark.
         self.assertIn("placeholder_keys", assumptions)
-        # Pinning a specific key name breaks on every re-benchmark; the
-        # property worth pinning is that this list IS the live defaults set,
-        # not some hardcoded snapshot of it.
-        self.assertEqual(assumptions["placeholder_keys"], sorted(placeholder_keys()))
+        self.assertIsInstance(assumptions["placeholder_keys"], list)
 
     def test_direct_ownership_block_is_passed_through(self):
         assumptions = self._build()["assumptions"]
@@ -323,7 +326,11 @@ class PayloadDefaultsTests(TestCase):
 
 
 class RofuCaseTreeTests(TestCase):
-    """Every committed Rofu case must build without contacting the solver."""
+    """Every committed Rofu case.json declares the expected PV/storage shape.
+
+    Reads the raw case.json files directly and does not call
+    build_thailand_case, so this does not prove the cases actually build.
+    """
 
     ROOT = Path("outputs/thailand_case/rofu_thailand")
     EXPECTED_PV_CAPS = {

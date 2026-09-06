@@ -78,13 +78,20 @@ def calculate_esco_pro_forma_from_reopt_results(
             exchange_rate_vnd_per_usd,
             tariff_money_values_currency,
         ),
+        # A coincident-peak demand structure (PEA's on-peak kW charge) is
+        # booked by REopt under year_one_coincident_peak_cost_before_tax, not
+        # year_one_demand_cost_before_tax (Important 7) -- every Vietnam
+        # baseline case has that field at 0.0, so adding it in only changes
+        # anything for a tariff actually billed on coincident peak.
         "bau_demand_charge_vnd": _money(
-            _value(tariff_outputs, "year_one_demand_cost_before_tax_bau"),
+            _value(tariff_outputs, "year_one_demand_cost_before_tax_bau")
+            + _value(tariff_outputs, "year_one_coincident_peak_cost_before_tax_bau"),
             exchange_rate_vnd_per_usd,
             tariff_money_values_currency,
         ),
         "optimized_demand_charge_vnd": _money(
-            _value(tariff_outputs, "year_one_demand_cost_before_tax"),
+            _value(tariff_outputs, "year_one_demand_cost_before_tax")
+            + _value(tariff_outputs, "year_one_coincident_peak_cost_before_tax"),
             exchange_rate_vnd_per_usd,
             tariff_money_values_currency,
         ),

@@ -328,6 +328,44 @@ grid-mix/average factor rather than an operating-margin, build-margin or
 combined-margin figure, and the effective date, so a brand's auditor asking
 "which TGO factor was this" has the answer without needing to re-derive it.
 
+## 12. Known model issue: PV degradation applied twice (not fixed here)
+
+Recorded per the final-review Ruling 23 (Important 8), not part of the
+Task 15 benchmark scope above, but this is the note that finding pointed to.
+
+REopt reports dispatch and bills LEVELIZED across the analysis horizon:
+`year_one_energy_produced_kwh` (raw PVWatts x size) and
+`annual_energy_produced_kwh` (REopt's own escalation/discount/degradation-
+weighted average) differ by a ratio of ~0.9606, reproducible from REopt's
+levelization formula at (escalation 3%, discount 11.5%, degradation 0.5%,
+25 yr). `electric_to_load_series_kw` and `year_one_bill_before_tax` carry the
+same factor - despite the "year_one" name, they are not a true undegraded
+first year.
+
+`proforma_vietnam`/`proforma_thailand` then apply their own explicit
+`(1 - degradation_rate) ** year` curve on top of that already-levelized base
+when building the 25-year cash flow, so degradation is counted roughly twice
+(once inside REopt's levelized output, once again in the proforma's own
+year-by-year multiplier). The direction is CONSERVATIVE: year-1 savings,
+NPV, IRR and lifetime avoided emissions are all understated by around 4
+percent, not overstated - it does not change which side of a decision the
+numbers land on, but it does mean the reported figures are a floor, not a
+best estimate.
+
+This is pre-existing shared-core (`proforma_vietnam/cash_flow.py`) behaviour
+that affects Vietnam identically, not something introduced by the Thailand
+adaptation. The final-review fix pass (2026-09-06) relabeled the affected
+Thailand-workbook rows that read directly off these levelized REopt fields
+("Annual Energy Balance", "Utility Bill Comparison" on Technical Results, and
+"Avoided emissions" on Assumptions) from "Year 1" to "Levelized Annual" so
+the label matches what the number actually is. Vietnam's own labels were left
+unchanged to preserve its byte-identical workbook guarantee - Vietnam carries
+the same double-count under the same "Year 1" label it always has. Reversing
+the double-count itself (rather than just relabeling it) means deciding
+whether the proforma should stop applying its own degradation curve on top of
+REopt's already-levelized base, which is a shared-core engine change needing
+its own Vietnam re-baseline and is out of scope for a label fix.
+
 ## Sources consulted (full list)
 
 - Krungsri Research, "Rooftop Solar: Suitable Business and Investment Models
