@@ -362,6 +362,24 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     entry(om_row_label, get("annual_om_year1_usd", "annual_om_usd"), unit="USD/yr",
           source=om_row_source,
           name="OM_YEAR1", fmt=FMT_AMOUNT)
+    # PV O&M unit-rate rounding (Important 5 / Ruling 22): REopt.jl rounds PV
+    # cost parameters to whole dollars before it solves, so the rate actually
+    # applied differs from what was sourced and sent. Gated on a key only
+    # proforma_thailand.report sets, so Vietnam workbooks, which never set
+    # it, stay unchanged.
+    if assumptions.get("pv_om_cost_applied_usd_per_kw") is not None:
+        entry("PV O&M cost, sourced", assumptions.get("pv_om_cost_sourced_usd_per_kw"),
+              unit="USD/kW/yr",
+              source="thailand_defaults.json annual_om_per_kw (MDPI, 1 percent of installed capex)",
+              fmt=FMT_AMOUNT_2)
+        entry("PV O&M cost, sent to REopt", assumptions.get("pv_om_cost_sent_usd_per_kw"),
+              unit="USD/kW/yr", source="case.json technologies.pv.om_cost_per_kw",
+              fmt=FMT_AMOUNT_2)
+        entry("PV O&M cost, applied by REopt", assumptions.get("pv_om_cost_applied_usd_per_kw"),
+              unit="USD/kW/yr",
+              source="REopt PV.om_cost_per_kw -- REopt.jl rounds PV cost parameters to whole "
+                     "dollars before it solves",
+              fmt=FMT_AMOUNT_2)
     entry("O&M escalation", get("om_escalation_rate") or 0.0, unit="per year",
           source="{defaults_file} / case.json financial.om_escalation_rate".format(defaults_file=profile.defaults_file),
           name="ESC_OM", fmt=FMT_PERCENT)
@@ -665,11 +683,29 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
           d.get("optimized_evn_bill_year1_usd"), unit="USD",
           source="REopt ElectricTariff.year_one_bill_before_tax",
           name="OPT_BILL_Y1", fmt=FMT_AMOUNT)
+    # A coincident-peak demand structure (PEA's on-peak kW charge) is booked
+    # by REopt under year_one_coincident_peak_cost_before_tax(_bau), not
+    # year_one_demand_cost_before_tax(_bau) alone (Important 7). The rendered
+    # value here is the sum of both, so the citation must name both fields --
+    # every Vietnam baseline case has the coincident-peak field at 0.0, so
+    # naming only the demand-cost field is still accurate for Vietnam and
+    # that citation is unchanged; Thailand's is billed on coincident peak, so
+    # its citation must say so.
     entry("Year-1 BAU demand charge", d.get("bau_demand_charge_year1_usd"), unit="USD",
-          source="REopt year_one_demand_cost_before_tax_bau",
+          source=(
+              "REopt year_one_demand_cost_before_tax_bau"
+              if profile.country == "Vietnam" else
+              "REopt year_one_demand_cost_before_tax_bau + "
+              "year_one_coincident_peak_cost_before_tax_bau"
+          ),
           name="BAU_DEMAND_Y1", fmt=FMT_AMOUNT)
     entry("Year-1 optimized demand charge", d.get("optimized_demand_charge_year1_usd"),
-          unit="USD", source="REopt year_one_demand_cost_before_tax",
+          unit="USD", source=(
+              "REopt year_one_demand_cost_before_tax"
+              if profile.country == "Vietnam" else
+              "REopt year_one_demand_cost_before_tax + "
+              "year_one_coincident_peak_cost_before_tax"
+          ),
           name="OPT_DEMAND_Y1", fmt=FMT_AMOUNT)
     entry("Year-1 demand savings base", d.get("base_demand_savings_usd"), unit="USD",
           source="max(BAU − optimized demand charge, 0)",

@@ -23,6 +23,7 @@ ASSUMPTIONS = {
     "kvar_max": 664.0,
     "cit_regime": "standard_flat",
     "pv_depreciation_years": 5,
+    "bess_depreciation_years": 5,
     "direct_ownership": {"enabled": True},
     "placeholder_keys": ["debt_interest_rate"],
     "annual_om_usd": None,
@@ -352,6 +353,16 @@ class NoVietnamProvenanceTests(TestCase):
         # both -- exactly what _results_with_replacements() now provides.
         self.assertIn("CAPITALIZED, not expensed", all_text)
 
+        # Critical 1 was a hardcoded "8-year BESS class life" citing Vietnamese
+        # law on Thai workbooks; the fix drives the stated life from
+        # derivation["bess_depreciation_years"], which PROVENANCE_ASSUMPTIONS
+        # must set to Thailand's actual 5 (case_builder.py:241) for this to be
+        # a real proof rather than a fixture that happens to dodge the number
+        # entirely. Assert the rendered life directly so a regression back to
+        # a hardcoded 8 fails the suite instead of passing silently.
+        self.assertIn("5-year BESS class life", all_text)
+        self.assertNotIn("8-year BESS class life", all_text)
+
         offenders = [
             (sheet, token, text[:70])
             for sheet, text in cells
@@ -416,6 +427,20 @@ class DirectOwnershipLabelTests(TestCase):
         ]
         self.assertIn("Year-1 operating cost (O&M + insurance)", labels)
         self.assertNotIn("Year-1 O&M", labels)
+
+    def test_npv_and_payback_are_labelled_as_equity_figures(self):
+        # Important 3: both figures are computed off the equity cash flows,
+        # not the Total Investment row three lines above them.
+        workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
+        for sheet_name in ("Executive Summary", "Owner Returns"):
+            labels = [
+                value for row in workbook[sheet_name].iter_rows(values_only=True)
+                for value in row if isinstance(value, str)
+            ]
+            self.assertIn("Equity NPV (USD)", labels)
+            self.assertIn("Simple Equity Payback (Years)", labels)
+            self.assertNotIn("NPV (USD)", labels)
+            self.assertNotIn("Simple Payback (Years)", labels)
 
 
 class NoEscoLanguageTests(TestCase):
@@ -642,4 +667,82 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
         row = self._rows_with_label(sheet, "Avoided emissions, levelized annual")[0]
         self.assertAlmostEqual(
             sheet.cell(row=row, column=3).value, extras["annual_avoided_tco2e"],
+        )
+
+
+class PvOmCostRoundingDisclosureTests(TestCase):
+    """Ruling 22 / final review R3: the memo discloses that PV O&M was sourced
+    at 7.50 USD/kWp-yr, sent as 7.5, and applied by REopt as 8.00 (REopt.jl
+    rounds PV cost parameters to whole dollars) -- but the workbook itself
+    carried no such row. These lock the disclosure onto the Assumptions
+    sheet. Gated on a key only proforma_thailand.report sets, so the default
+    ``_results()`` fixture (no PV.om_cost_per_kw) renders nothing here.
+    """
+
+    def _rows_with_label(self, sheet, label):
+        return [
+            row for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=2).value == label
+        ]
+
+    def test_all_three_values_render_on_the_assumptions_sheet(self):
+        results = _results()
+        results["outputs"]["PV"]["om_cost_per_kw"] = 8.0
+        workbook, _ = build_thailand_report(results, ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+
+        for label, expected in (
+            ("PV O&M cost, sourced", 7.5),
+            ("PV O&M cost, sent to REopt", 7.5),
+            ("PV O&M cost, applied by REopt", 8.0),
+        ):
+            rows = self._rows_with_label(sheet, label)
+            self.assertEqual(len(rows), 1, "expected exactly one {!r} row".format(label))
+            self.assertEqual(sheet.cell(row=rows[0], column=3).value, expected)
+
+    def test_no_row_when_reopt_never_returned_an_om_cost(self):
+        workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+
+        self.assertEqual(self._rows_with_label(sheet, "PV O&M cost, applied by REopt"), [])
+
+
+class DemandChargeCitationTests(TestCase):
+    """Final review R4: the PEA on-peak demand charge is booked by REopt
+    under year_one_coincident_peak_cost_before_tax, not
+    year_one_demand_cost_before_tax alone (Important 7). The two Year-1 BAU/
+    optimized demand charge rows on the Assumptions sheet render the SUM of
+    both fields but, before this fix, cited only the demand-cost field --
+    an auditor tracing the number to the cited field would not reconcile.
+    """
+
+    def _rows_with_label(self, sheet, label):
+        return [
+            row for row in range(1, sheet.max_row + 1)
+            if sheet.cell(row=row, column=2).value == label
+        ]
+
+    def test_demand_charge_citation_names_the_coincident_peak_field(self):
+        results = _results()
+        results["outputs"]["ElectricTariff"]["year_one_coincident_peak_cost_before_tax_bau"] = 90_000.0
+        results["outputs"]["ElectricTariff"]["year_one_coincident_peak_cost_before_tax"] = 70_000.0
+        workbook, _ = build_thailand_report(results, ASSUMPTIONS)
+        sheet = workbook["Assumptions"]
+
+        bau_row = self._rows_with_label(sheet, "Year-1 BAU demand charge")[0]
+        opt_row = self._rows_with_label(sheet, "Year-1 optimized demand charge")[0]
+
+        self.assertEqual(
+            sheet.cell(row=bau_row, column=3).value, 80_000.0 + 90_000.0
+        )
+        self.assertIn(
+            "year_one_coincident_peak_cost_before_tax_bau",
+            sheet.cell(row=bau_row, column=5).value,
+        )
+        self.assertEqual(
+            sheet.cell(row=opt_row, column=3).value, 60_000.0 + 70_000.0
+        )
+        self.assertIn(
+            "year_one_coincident_peak_cost_before_tax",
+            sheet.cell(row=opt_row, column=5).value,
         )

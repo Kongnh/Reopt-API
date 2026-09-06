@@ -446,10 +446,10 @@ def _write_executive_summary(worksheet, cash_flow_result, assumptions, report_da
     row = _write_kpi_rows(worksheet, row + 1, [
         ("Equity IRR", summary.get("equity_irr_fraction"), FORMAT_PERCENT, None),
         ("Project IRR", summary.get("project_irr_fraction"), FORMAT_PERCENT, None),
-        ("NPV (USD)", _lookup(summary, "npv_usd"), FORMAT_AMOUNT, "At owner discount rate"),
+        (profile.npv_label, _lookup(summary, "npv_usd"), FORMAT_AMOUNT, "At owner discount rate"),
         ("Minimum DSCR (debt years)", minimum_dscr, FORMAT_RATIO, "Lender covenant view"),
         ("Average DSCR", summary.get("average_dscr"), FORMAT_RATIO, None),
-        ("Simple Payback (Years)", summary.get("simple_payback_years"), FORMAT_YEARS, None),
+        (profile.payback_label, summary.get("simple_payback_years"), FORMAT_YEARS, None),
         ("Equity Investment (USD)", _lookup(summary, "equity_investment_usd"), FORMAT_AMOUNT, None),
         ("Debt Principal (USD)", _lookup(summary, "debt_principal_usd"), FORMAT_AMOUNT, None),
     ])
@@ -646,10 +646,10 @@ def _write_developer_returns(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
     row = _write_kpi_rows(worksheet, row + 1, [
         ("Equity IRR", summary.get("equity_irr_fraction"), FORMAT_PERCENT, None),
         ("Project IRR", summary.get("project_irr_fraction"), FORMAT_PERCENT, None),
-        ("NPV (USD)", _lookup(summary, "npv_usd"), FORMAT_AMOUNT, "At owner discount rate"),
+        (profile.npv_label, _lookup(summary, "npv_usd"), FORMAT_AMOUNT, "At owner discount rate"),
         ("Minimum DSCR (debt years)", minimum_dscr, FORMAT_RATIO, None),
         ("Average DSCR", summary.get("average_dscr"), FORMAT_RATIO, None),
-        ("Simple Payback (Years)", summary.get("simple_payback_years"), FORMAT_YEARS, None),
+        (profile.payback_label, summary.get("simple_payback_years"), FORMAT_YEARS, None),
         (roi_label, summary.get("roi_fraction"), FORMAT_PERCENT, None),
     ])
 

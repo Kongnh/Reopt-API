@@ -62,3 +62,19 @@ class DirectOwnershipPresentationTests(TestCase):
         self.assertFalse(THAILAND_PROFILE.shows_esco_contract_terms)
         self.assertEqual(THAILAND_PROFILE.returns_section_label, "Owner Returns")
         self.assertEqual(THAILAND_PROFILE.dispatch_row_label, "Interval")
+
+
+class EquityLabelTests(TestCase):
+    """Important 3: NPV and Simple Payback on the Executive Summary / Returns
+    sheets are equity-only figures next to a total-investment figure, and were
+    labelled bare. Vietnam's wording must stay byte-identical."""
+
+    def test_vietnam_keeps_the_bare_labels(self):
+        self.assertEqual(VIETNAM_PROFILE.npv_label, "NPV (USD)")
+        self.assertEqual(VIETNAM_PROFILE.payback_label, "Simple Payback (Years)")
+
+    def test_thailand_names_them_as_equity_figures(self):
+        self.assertEqual(THAILAND_PROFILE.npv_label, "Equity NPV (USD)")
+        self.assertEqual(
+            THAILAND_PROFILE.payback_label, "Simple Equity Payback (Years)"
+        )

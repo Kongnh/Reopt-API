@@ -48,6 +48,14 @@ class CountryProfile:
     returns_section_label: str = "Developer (Seller) Returns"
     returns_sheet_name: str = "Developer Returns"
     dispatch_row_label: str = "Hour"
+    # Important 3: NPV and Simple Payback on the Executive Summary / Returns
+    # sheets are equity-only figures (computed off the equity cash flows, not
+    # total capex) but were labelled bare, next to Total Investment. The audit
+    # sheet already says "Equity NPV" / "Simple equity payback"; these two
+    # labels bring the client-facing sheets into line. Vietnam's wording is
+    # unchanged so the byte-identical guarantee holds.
+    npv_label: str = "NPV (USD)"
+    payback_label: str = "Simple Payback (Years)"
 
     def __post_init__(self):
         if self.time_steps_per_hour not in SUPPORTED_TIME_STEPS_PER_HOUR:
@@ -94,6 +102,8 @@ THAILAND_PROFILE = CountryProfile(
     returns_section_label="Owner Returns",
     returns_sheet_name="Owner Returns",
     dispatch_row_label="Interval",
+    npv_label="Equity NPV (USD)",
+    payback_label="Simple Equity Payback (Years)",
 )
 
 DEFAULT_PROFILE = VIETNAM_PROFILE

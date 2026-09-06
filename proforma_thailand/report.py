@@ -260,6 +260,22 @@ def build_thailand_report(reopt_results, assumptions):
         EMISSIONS_DEFAULTS, "grid_emission_factor_vintage"
     )
 
+    # PV O&M unit-rate rounding disclosure (Important 5 / Ruling 22): the
+    # sourced and sent rate (7.5 USD/kWp-yr) is not what REopt actually
+    # applied, because REopt.jl rounds PV cost parameters to whole dollars
+    # before it solves. Read the applied rate back from the solved PV
+    # outputs rather than assuming it equals the sent value. Only Thailand
+    # builds this dict, so Vietnam workbooks never set these keys.
+    workbook_assumptions["pv_om_cost_sourced_usd_per_kw"] = value_of(
+        FINANCIAL_DEFAULTS, "annual_om_per_kw"
+    )
+    workbook_assumptions["pv_om_cost_sent_usd_per_kw"] = value_of(
+        FINANCIAL_DEFAULTS, "annual_om_per_kw"
+    )
+    workbook_assumptions["pv_om_cost_applied_usd_per_kw"] = (
+        pv_outputs_list[0].get("om_cost_per_kw") if pv_outputs_list else None
+    )
+
     workbook = build_vietnam_esco_workbook(
         cash_flow_result,
         assumptions=workbook_assumptions,
