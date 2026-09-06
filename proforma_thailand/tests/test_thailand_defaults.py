@@ -27,7 +27,6 @@ class ThailandDefaultsTests(TestCase):
 
     def test_every_unconfirmed_value_is_marked_as_a_placeholder(self):
         expected = {
-            "pv_installed_cost_per_kw",
             "bess_installed_cost_per_kw",
             "bess_installed_cost_per_kwh",
             "bess_replace_cost_per_kw",
@@ -36,7 +35,6 @@ class ThailandDefaultsTests(TestCase):
             "debt_fraction",
             "debt_interest_rate",
             "debt_term_years",
-            "discount_rate",
             "insurance_rate_fraction",
             "grid_connection_cost",
             "permitting_and_eia_cost",
@@ -49,8 +47,6 @@ class ThailandDefaultsTests(TestCase):
             "bess_min_duration_hours",
             "bess_om_fraction_of_installed_cost",
             "pv_tilt_degrees",
-            "grid_emission_factor_kg_co2e_per_kwh",
-            "grid_emission_factor_vintage",
         }
 
         self.assertEqual(placeholder_keys(), expected)
@@ -109,3 +105,23 @@ class FtWindowTests(TestCase):
     def test_a_month_before_any_window_raises(self):
         with self.assertRaises(ValueError):
             ft_for_month(2000, 1)
+
+
+class BenchmarkedSourcesTests(TestCase):
+    """Inputs researched in Task 15 must not still claim to be placeholders."""
+
+    RESEARCHED = (
+        "pv_installed_cost_per_kw",
+        "discount_rate",
+    )
+
+    def test_researched_financial_inputs_cite_a_source(self):
+        for key in self.RESEARCHED:
+            with self.subTest(key=key):
+                source = FINANCIAL_DEFAULTS[key]["source"]
+                self.assertNotEqual(source, PLACEHOLDER_MARKER)
+                self.assertGreater(len(source), 20)
+
+    def test_grid_emission_factor_records_its_vintage(self):
+        vintage = EMISSIONS_DEFAULTS["grid_emission_factor_vintage"]["value"]
+        self.assertNotEqual(vintage, "pending")
