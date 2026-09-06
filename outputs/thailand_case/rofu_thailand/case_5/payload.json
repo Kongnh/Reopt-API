@@ -91555,8 +91555,8 @@
     "can_curtail": true
   },
   "ElectricStorage": {
-    "max_kw": 2000,
-    "max_kwh": 8000,
+    "max_kw": 4000,
+    "max_kwh": 16000,
     "installed_cost_per_kw": 300.0,
     "installed_cost_per_kwh": 250.0,
     "installed_cost_constant": 0.0,
