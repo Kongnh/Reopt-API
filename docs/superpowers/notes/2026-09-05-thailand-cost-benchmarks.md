@@ -3,7 +3,9 @@
 Date: 2026-09-06
 Scope: Task 15. Re-benchmark the eleven Thailand cost/emissions placeholders in
 `proforma_thailand/defaults/thailand_defaults.json` against Thailand-applicable,
-citable sources. This is research plus a data edit; no code changed.
+citable sources. Originally research plus a data edit only, no code changed;
+see the revision note below for the post-review follow-up that also touched
+`proforma_thailand/tests/test_case_builder.py`.
 
 Site for context: Rofu (Thailand) Ltd., Phimai District, Nakhon Ratchasima.
 Roughly 1.7 MWp rooftop PV, behind the meter, zero export, direct ownership,
@@ -13,14 +15,28 @@ Access date for every source below is 2026-09-06 unless stated otherwise.
 
 ## Summary table
 
+**Revision (2026-09-06, post-review):** Two review findings changed the table
+below after this note was first written. `discount_rate` is reverted to a
+placeholder: the 11.5 percent figure was correctly transcribed, but it is a
+third-party developer's cost of equity, and Rofu is a factory self-investing
+in its own roof, not a developer, so its real hurdle rate is a question for
+Keen, not a number this research can supply. The TDRI/Agora citation is kept,
+now in the entry's `note` field. Separately, `annual_om_per_kw` and
+`debt_interest_rate` are now applied: both had usable Thailand evidence
+documented below that was originally left unapplied only because doing so
+broke two hardcoded test assertions outside this task's then-declared scope;
+that scope restriction has since been lifted and the coupled tests fixed to
+assert wiring instead of literals. See "Scope conflict, resolved" under each
+of those two sections.
+
 | Key | Before | After | Status |
 |---|---|---|---|
 | `pv_installed_cost_per_kw` | 700.0 (placeholder) | 750.0 USD/kWp | Sourced |
-| `discount_rate` | 0.08 (placeholder) | 0.115 | Sourced |
+| `discount_rate` | 0.08 (placeholder) | 0.115 (placeholder, cited in note) | Sourced value, kept provisional - see section 8 below |
 | `grid_emission_factor_kg_co2e_per_kwh` | 0.4999 (placeholder) | 0.4750 | Sourced |
 | `grid_emission_factor_vintage` | "pending" (placeholder) | "2022-2024 generation data (TGO CFO Scope 2 grid-mix average, effective 1 Jan 2026)" | Sourced |
-| `annual_om_per_kw` | 12.0 (placeholder) | 12.0 (unchanged) | Evidence found, not applied - see "Scope conflict" below |
-| `debt_interest_rate` | 0.06 (placeholder) | 0.06 (unchanged) | Evidence found, not applied - see "Scope conflict" below |
+| `annual_om_per_kw` | 12.0 (placeholder) | 7.5 USD/kWp/yr | Sourced |
+| `debt_interest_rate` | 0.06 (placeholder) | 0.065 | Sourced |
 | `bess_installed_cost_per_kw` | 300.0 (placeholder) | 300.0 (unchanged) | Left as placeholder - no adequate evidence |
 | `bess_installed_cost_per_kwh` | 250.0 (placeholder) | 250.0 (unchanged) | Left as placeholder - no adequate evidence |
 | `insurance_rate_fraction` | 0.005 (placeholder) | 0.005 (unchanged) | Left as placeholder - no Thailand-applicable source |
@@ -28,14 +44,19 @@ Access date for every source below is 2026-09-06 unless stated otherwise.
 | `bess_om_fraction_of_installed_cost` | 0.01 (placeholder) | 0.01 (unchanged) | Left as placeholder - no Thailand-applicable source |
 | `pea_tariff_escalation_rate` | 0.03 (placeholder) | 0.03 (unchanged) | Left as placeholder - recent trend contradicts the assumption but no long-run forecast found |
 
-Four keys were actually re-sourced and had their `value`/`source` fields
-replaced: `pv_installed_cost_per_kw`, `discount_rate`,
-`grid_emission_factor_kg_co2e_per_kwh`, `grid_emission_factor_vintage`. The
-`RESEARCHED` tuple in `test_thailand_defaults.py` lists only the two of those
-that live in the `financial` block and are covered by that test
-(`pv_installed_cost_per_kw`, `discount_rate`); the grid emission factor has its
-own dedicated test. The remaining seven keys keep the exact placeholder marker
-string unchanged, per the constraint that a production guard checks for that
+Five keys now have their `value`/`source` fields carrying real research:
+`pv_installed_cost_per_kw`, `annual_om_per_kw`, `debt_interest_rate`,
+`grid_emission_factor_kg_co2e_per_kwh`, `grid_emission_factor_vintage`.
+`discount_rate` carries a researched value but is deliberately marked back to
+the placeholder string, because the number itself is right for a different
+investor profile than Rofu's. The `RESEARCHED` tuple in
+`test_thailand_defaults.py` lists the three of those that live in the
+`financial` block and are covered by that test (`pv_installed_cost_per_kw`,
+`annual_om_per_kw`, `debt_interest_rate`); the grid emission factor has its own
+dedicated test, and `discount_rate` is intentionally excluded from
+`RESEARCHED` since it still carries the placeholder marker. The remaining
+eight keys (seven original plus `discount_rate`) keep the exact placeholder
+marker string, per the constraint that a production guard checks for that
 string and a workbook with the marker removed everywhere would refuse to
 write.
 
@@ -95,23 +116,23 @@ tier is a vendor marketing blog rather than a market tracker. Applying any of
 these would understate the BESS cost line, which is the wrong direction to
 err in for a client investment decision. The placeholder marker stays.
 
-## 3. `annual_om_per_kw` - EVIDENCE FOUND, NOT APPLIED (scope conflict)
+## 3. `annual_om_per_kw` - SOURCED, 7.5 USD/kWp/yr
 
 **Source:** Farungsang, Varquez & Tokimatsu (MDPI Sustainability 17(15):7052,
 Aug 2025, same paper as above) assumes O&M costs at 1 percent of installed
 CAPEX per year for its Thai rooftop PV economic analysis. Applied to the
-750 USD/kWp capex chosen above, that is approximately USD 7.5/kWp/yr, versus
-the current placeholder of USD 12.0/kWp/yr.
+750 USD/kWp capex chosen above: 750.0 * 0.01 = 7.5 USD/kWp/yr, replacing the
+prior placeholder of USD 12.0/kWp/yr.
 
-**Why not applied:** `proforma_thailand/tests/test_case_builder.py::PayloadDefaultInheritanceTests::test_pv_om_cost_comes_from_the_thailand_defaults`
-hardcodes `self.assertEqual(pv["om_cost_per_kw"], 12.0)`, reading the value
-live from `annual_om_per_kw`. Changing the default breaks that test. This
-task's declared scope is `thailand_defaults.json`, `test_thailand_defaults.py`
-and this note; touching `test_case_builder.py` is out of scope. Rather than
-either silently break an existing test or quietly expand scope, the value is
-left at 12.0 and the marker stays in place. This is flagged as a follow-up:
-a future task should decide whether to adopt the 1-percent-of-capex figure
-and update the coupled test at the same time.
+**Scope conflict, resolved:** This value was originally left unapplied because
+`proforma_thailand/tests/test_case_builder.py::PayloadDefaultInheritanceTests::test_pv_om_cost_comes_from_the_thailand_defaults`
+hardcoded `self.assertEqual(pv["om_cost_per_kw"], 12.0)`, and this task's
+declared scope did not cover `test_case_builder.py`. A follow-up review
+authorised expanding scope into that file. The test now asserts
+`pv["om_cost_per_kw"] == value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")`
+instead of a literal, which pins the wiring (the payload reads its O&M cost
+from the Thailand defaults) rather than a number that a future re-benchmark
+would only have to break again.
 
 ## 4. `insurance_rate_fraction` - LEFT AS PLACEHOLDER
 
@@ -169,7 +190,7 @@ politically-managed data, the placeholder is left in place and this finding
 is recorded so a future task can pick it up if an authoritative long-run
 forecast becomes available.
 
-## 8. `discount_rate` - SOURCED, 0.115 (11.5 percent)
+## 8. `discount_rate` - VALUE RESEARCHED (0.115), KEPT AS PLACEHOLDER
 
 **Sources:**
 - Saelim, S. (Agora Energiewende, on behalf of CASE for Southeast Asia,
@@ -186,18 +207,34 @@ forecast becomes available.
 **Range spanned:** 6.31 percent (BOT policy-rate proxy) to 11.5 percent
 (TDRI/Agora cost of equity, BAU), a gap well beyond a narrow band.
 
-**Why 11.5 not 6.3:** A central-bank policy rate is close to a risk-free rate
-and does not carry the equity risk premium a private investor requires to
-bear rooftop-solar project risk in Thailand; the TDRI/Agora figure is
-purpose-built to measure exactly that premium for this asset class. The
-higher, more conservative figure is carried, consistent with the instruction
-to pick the conservative side of a disagreement and say so. This is also
-methodologically the better match for the brief's ask for "Thai corporate
-WACC or hurdle rate": it is Thailand-specific and rooftop-solar-specific,
-which a generic corporate WACC benchmark (only found as an unsourced global
-10-14 percent manufacturing range, no Thailand tie) is not.
+**Why 11.5 not 6.3, if a value were being picked on the merits alone:** A
+central-bank policy rate is close to a risk-free rate and does not carry the
+equity risk premium a private investor requires to bear rooftop-solar project
+risk in Thailand; the TDRI/Agora figure is purpose-built to measure exactly
+that premium for this asset class.
 
-## 9. `debt_interest_rate` - EVIDENCE FOUND, NOT APPLIED (scope conflict)
+**Why this is kept as a placeholder despite having a defensible number
+(post-review correction):** The 11.5 percent TDRI/Agora figure is the cost of
+equity for a **third-party rooftop solar developer**, and its risk waterfall
+explicitly prices in developer risk and permitting risk as components of that
+premium. Rofu is not a third-party developer; it is a factory self-investing
+in its own roof, and it bears none of that developer risk. Rofu's actual cost
+of capital is unknown, and is plausibly lower than 11.5 percent precisely
+because it lacks the risk layers the TDRI/Agora figure is pricing. Treating
+a developer's hurdle rate as if it were the owner-investor's own is a category
+error, not a conservative-versus-aggressive choice within the same investor
+profile. The fix: the value 0.115 stays in `thailand_defaults.json` (it is a
+real, defensible, conservative-leaning number and keeps the model runnable),
+but `discount_rate.source` is restored to the exact placeholder marker string
+so the workbook discloses the figure as unconfirmed, and the TDRI/Agora
+citation together with this developer-versus-owner distinction now lives in
+the entry's `note` field. This value is intentionally excluded from the
+`RESEARCHED` tuple in `test_thailand_defaults.py` for exactly this reason: it
+carries real research, but the research answers a different question (a
+developer's cost of equity) than the one Rofu's proforma needs (an
+owner-investor's hurdle rate), and only Keen can supply the latter.
+
+## 9. `debt_interest_rate` - SOURCED, 0.065 (6.5 percent)
 
 **Sources:**
 - Siam Commercial Bank (SCB) Minimum Loan Rate (MLR): cut from 6.500 percent
@@ -211,16 +248,26 @@ which a generic corporate WACC benchmark (only found as an unsourced global
 
 **Range spanned:** 5.3 percent (project-specific, Aug 2024) to 6.62 percent
 (KBank MLR, Dec 2025). The bank MLR figures, being the most current and the
-most directly "commercial lending rate," would be carried at roughly 6.5
-percent, the conservative (higher) end.
+most directly "commercial lending rate," are carried at 6.5 percent, the
+conservative (higher) end of the 6.40-6.62 percent MLR band (a rounded band
+position, not an average of the three banks' exact rates).
 
-**Why not applied:** `proforma_thailand/tests/test_case_builder.py::ThailandCaseBuilderTests::test_assumptions_list_the_active_placeholders`
-asserts `self.assertIn("debt_interest_rate", assumptions["placeholder_keys"])`,
-reading live from the same `placeholder_keys()` function this task's default
-change would affect. Sourcing this key removes it from that set and breaks
-the test. As with `annual_om_per_kw`, the fix belongs in `test_case_builder.py`,
-which is outside this task's declared scope, so the value and marker are left
-unchanged and this is flagged as a follow-up alongside the O&M finding.
+**Note on this key versus `discount_rate`:** unlike `discount_rate`, this
+figure is not a developer-specific risk premium; a Minimum Loan Rate is what
+any commercial borrower, including a factory financing its own rooftop
+installation, would actually be quoted. There is no equivalent
+developer-versus-owner mismatch here, so this value is applied outright
+rather than kept provisional.
+
+**Scope conflict, resolved:** This value was originally left unapplied
+because `proforma_thailand/tests/test_case_builder.py::ThailandCaseBuilderTests::test_assumptions_list_the_active_placeholders`
+hardcoded `self.assertIn("debt_interest_rate", assumptions["placeholder_keys"])`,
+and this task's declared scope did not cover `test_case_builder.py`. A
+follow-up review authorised expanding scope into that file. The test now
+asserts `assumptions["placeholder_keys"] == sorted(placeholder_keys())`
+instead of pinning one specific key name, which pins the wiring (the
+assumptions block IS the live placeholder set) rather than a membership check
+that any single re-benchmark could invalidate.
 
 ## 10. `grid_emission_factor_kg_co2e_per_kwh` - SOURCED, 0.4750 kgCO2e/kWh
 

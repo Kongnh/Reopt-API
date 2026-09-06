@@ -4,6 +4,7 @@ from pathlib import Path
 from unittest import TestCase, mock
 
 from proforma_thailand.case_builder import build_thailand_case
+from proforma_thailand.defaults import FINANCIAL_DEFAULTS, placeholder_keys, value_of
 from proforma_vietnam import pvwatts_client
 
 CALENDAR_MONTHS = [[2026, m] for m in range(1, 7)] + [[2025, m] for m in range(7, 13)]
@@ -119,7 +120,10 @@ class ThailandCaseBuilderTests(TestCase):
         assumptions = self._build()["assumptions"]
 
         self.assertIn("placeholder_keys", assumptions)
-        self.assertIn("debt_interest_rate", assumptions["placeholder_keys"])
+        # Pinning a specific key name breaks on every re-benchmark; the
+        # property worth pinning is that this list IS the live defaults set,
+        # not some hardcoded snapshot of it.
+        self.assertEqual(assumptions["placeholder_keys"], sorted(placeholder_keys()))
 
     def test_direct_ownership_block_is_passed_through(self):
         assumptions = self._build()["assumptions"]
@@ -190,7 +194,9 @@ class PayloadDefaultInheritanceTests(TestCase):
             _case_config(self.tmp, self.load_csv, self.off_peak)
         )["payload"]["PV"]
 
-        self.assertEqual(pv["om_cost_per_kw"], 12.0)
+        self.assertEqual(
+            pv["om_cost_per_kw"], value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
+        )
 
 
 class UsIncentivesAreDisabledTests(TestCase):

@@ -31,14 +31,13 @@ class ThailandDefaultsTests(TestCase):
             "bess_installed_cost_per_kwh",
             "bess_replace_cost_per_kw",
             "bess_replace_cost_per_kwh",
-            "annual_om_per_kw",
             "debt_fraction",
-            "debt_interest_rate",
             "debt_term_years",
             "insurance_rate_fraction",
             "grid_connection_cost",
             "permitting_and_eia_cost",
             "pea_tariff_escalation_rate",
+            "discount_rate",
             "usable_roof_area_m2",
             "pv_max_kw",
             "power_factor_mitigation_cost",
@@ -112,7 +111,8 @@ class BenchmarkedSourcesTests(TestCase):
 
     RESEARCHED = (
         "pv_installed_cost_per_kw",
-        "discount_rate",
+        "annual_om_per_kw",
+        "debt_interest_rate",
     )
 
     def test_researched_financial_inputs_cite_a_source(self):
