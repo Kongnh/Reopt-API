@@ -202,6 +202,48 @@ class PayloadDefaultInheritanceTests(TestCase):
         )
 
 
+class PvOmCostRoundingTests(TestCase):
+    """Important 5 / Ruling 22: the Thailand defaults send PV O&M at 7.5
+    USD/kWp-yr (1 percent of the sourced 750 USD/kWp capex - see
+    test_pv_om_cost_comes_from_the_thailand_defaults above, which asserts the
+    SENT payload value). But REopt.jl rounds PV cost parameters to whole
+    dollars before it solves, so every committed run actually applied 8.00
+    USD/kWp-yr - the SENT-value test above would stay green even if this
+    rounding drifted further. This reads what REopt RETURNED on a real,
+    committed run (case_1's results.json on this branch), not a synthetic
+    fixture, so it pins the solver's actual behaviour rather than an
+    assumption about it.
+    """
+
+    RESULTS_PATH = Path(
+        "outputs/thailand_case/rofu_thailand/case_1/results.json"
+    )
+
+    def setUp(self):
+        self.results = json.loads(self.RESULTS_PATH.read_text(encoding="utf-8"))
+
+    def _pv_outputs(self):
+        pv = self.results["outputs"]["PV"]
+        return pv[0] if isinstance(pv, list) else pv
+
+    def test_reopt_rounds_the_sent_om_cost_up_to_a_whole_dollar(self):
+        sent = value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
+        returned = self._pv_outputs()["om_cost_per_kw"]
+
+        self.assertEqual(sent, 7.5)
+        self.assertEqual(returned, 8.0)
+        self.assertNotEqual(returned, sent)
+
+    def test_year_one_om_cost_is_billed_at_the_rounded_rate_not_the_sent_rate(self):
+        pv_size_kw = self._pv_outputs()["size_kw"]
+        year_one_om = self.results["outputs"]["Financial"][
+            "year_one_om_costs_before_tax"
+        ]
+
+        self.assertAlmostEqual(year_one_om, pv_size_kw * 8.0)
+        self.assertNotAlmostEqual(year_one_om, pv_size_kw * 7.5)
+
+
 class UsIncentivesAreDisabledTests(TestCase):
     """REopt.jl defaults a 30% ITC and 5-year MACRS ON. Thailand has neither,
     and they cut the capital cost the optimizer sizes against."""

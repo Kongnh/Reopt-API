@@ -2073,6 +2073,13 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             "the drawn principal plus IDC; equity is unchanged. IDC is capitalized into the "
             "depreciable base pro-rata across the asset classes by capex share (VAS / Circular 45 "
             "borrowing-cost capitalization), not expensed."
+            if profile.country == "Vietnam" else
+            "IDC = debt fraction × capex × debt rate × (months/12) ÷ 2 — even drawdown of the "
+            "debt-funded capex over construction, simple interest on the average balance (half the "
+            "final draw), no compounding. IDC is debt-funded (rolled up): the COD debt balance is "
+            "the drawn principal plus IDC; equity is unchanged. IDC is capitalized into the "
+            "depreciable base pro-rata across the asset classes by capex share "
+            f"({profile.depreciation_authority} borrowing-cost capitalization), not expensed."
         )
         if grace:
             debt_bullets.append(
@@ -2105,6 +2112,11 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
             "deflation overlay only: CIT is NOT recomputed under FX drift (including the interest "
             "deduction of the USD loan), and VAS FX revaluation gains/losses on the outstanding USD "
             "principal are not modelled."
+            if profile.country == "Vietnam" else
+            "USD-denominated debt FX exposure is quantified on the FX Sensitivity sheet as a "
+            "deflation overlay only: CIT is NOT recomputed under FX drift (including the interest "
+            "deduction of the USD loan), and local-GAAP FX revaluation gains/losses on the "
+            "outstanding USD principal are not modelled."
         )
 
     # DSCR-driven debt-sizing disclosures, gated on the engine derivation so
