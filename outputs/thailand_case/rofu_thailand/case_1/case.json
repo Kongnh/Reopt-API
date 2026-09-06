@@ -1,0 +1,16 @@
+{
+  "case_name": "Rofu Thailand RTS - conservative roof (1,685 kWp)",
+  "site": {"latitude": 15.209427, "longitude": 102.475687},
+  "load_profile": {
+    "path": "proforma_thailand/data/rofu_load_15min.csv",
+    "all_off_peak_dates_path": "proforma_thailand/data/rofu_all_off_peak_dates.json",
+    "calendar_year_months": [[2026,1],[2026,2],[2026,3],[2026,4],[2026,5],[2026,6],
+                             [2025,7],[2025,8],[2025,9],[2025,10],[2025,11],[2025,12]]
+  },
+  "tariff": {"voltage_level": "22_33kv", "exchange_rate_thb_per_usd": 32.5},
+  "technologies": {
+    "pv": {"max_kw": 1685.0},
+    "storage": {"max_kw": 0, "max_kwh": 0}
+  },
+  "direct_ownership": {"enabled": true}
+}

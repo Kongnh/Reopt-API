@@ -320,3 +320,45 @@ class PayloadDefaultsTests(TestCase):
         with mock.patch.object(pvwatts_client, "fetch_pv_series", _fake_fetch):
             build_thailand_case(config)
         self.assertEqual(captured["overrides"]["tilt"], 7)
+
+
+class RofuCaseTreeTests(TestCase):
+    """Every committed Rofu case must build without contacting the solver."""
+
+    ROOT = Path("outputs/thailand_case/rofu_thailand")
+    EXPECTED_PV_CAPS = {
+        "case_1": 1685.0,
+        "case_2": 1895.0,
+        "case_3": 2106.0,
+        "case_4": 3230.0,
+        "case_5": 1685.0,
+        "case_6": 3230.0,
+    }
+
+    def test_all_six_cases_declare_the_expected_pv_cap(self):
+        for name, expected in self.EXPECTED_PV_CAPS.items():
+            with self.subTest(case=name):
+                config = json.loads(
+                    (self.ROOT / name / "case.json").read_text(encoding="utf-8")
+                )
+                self.assertEqual(
+                    config["technologies"]["pv"]["max_kw"], expected
+                )
+
+    def test_only_the_storage_cases_declare_storage(self):
+        for name in ("case_1", "case_2", "case_3", "case_4"):
+            with self.subTest(case=name):
+                config = json.loads(
+                    (self.ROOT / name / "case.json").read_text(encoding="utf-8")
+                )
+                storage = config["technologies"].get("storage", {})
+                self.assertFalse(storage.get("max_kw"))
+                self.assertFalse(storage.get("max_kwh"))
+        for name in ("case_5", "case_6"):
+            with self.subTest(case=name):
+                config = json.loads(
+                    (self.ROOT / name / "case.json").read_text(encoding="utf-8")
+                )
+                self.assertGreater(
+                    config["technologies"]["storage"]["max_kw"], 0
+                )
