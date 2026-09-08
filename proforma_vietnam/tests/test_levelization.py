@@ -179,5 +179,203 @@ class EndToEndDeLevelizationTests(unittest.TestCase):
         self.assertEqual(result["summary"]["total_capex_vnd"], 110000)
 
 
+class GridCfdDppaDispatchDeLevelizationTests(unittest.TestCase):
+    """The grid-CfD DPPA settlement basis bypasses cash_flow_inputs entirely.
+
+    esco_pro_forma.py assembles a ``dispatch`` dict straight from raw REopt
+    series (electric_to_load/to_grid/curtailed, storage_to_load/to_grid) and
+    hands it to settle_dppa_year_one. _apply_de_levelization above only
+    touches cash_flow_inputs, so it never sees this dict -- without a
+    separate correction, the whole DPPA revenue basis stays levelized while
+    cash_flow.py still applies (1 - deg)^y on top, double counting
+    degradation. This drives the real call site (not the helper in
+    isolation) and checks it against an independently computed reference.
+    """
+
+    def test_dppa_settlement_uses_de_levelized_dispatch_not_raw_series(self):
+        from proforma_vietnam.dppa_settlement import settle_dppa_year_one
+
+        year_one_kwh = 1000.0
+        annual_kwh = 900.0
+        lam = annual_kwh / year_one_kwh  # 0.9
+
+        pv_to_load = [10.0, 20.0]
+        pv_to_grid = [5.0, 6.0]
+        pv_curtailed = [1.0, 2.0]
+        storage_to_load = [3.0, 4.0]
+        storage_to_grid = [1.0, 1.0]
+        load_kw = [10.0, 10.0]
+        tou_rates = [1000.0, 2000.0]
+
+        dppa_inputs = {
+            "type": "grid_dppa_cfd",
+            "fmp_series_vnd_per_kwh": [1500.0, 1500.0],
+            "cfd_strike_per_kwh_vnd": 1700.0,
+            "cfd_contract_volume_kwh_per_hour": 1.0,
+            "transmission_loss_factor_k": 1.026,
+            "distribution_loss_factor_kpp": 1.027263,
+            "allocation_fraction_delta": 1.0,
+            "c_dppa_service_fee_vnd_per_kwh": 360.0,
+            "c_cl_settlement_adder_vnd_per_kwh": 163.0,
+            "cfd_strike_escalation_rate": 0.0,
+            "fee_escalation_rate": 0.0,
+        }
+
+        reopt_results = {
+            "inputs": {
+                "ElectricTariff": {"tou_energy_rates_per_kwh": tou_rates},
+                "ElectricStorage": {"can_grid_charge": False},
+                "Financial": {"owner_discount_rate_fraction": 0.11},
+            },
+            "outputs": {
+                "PV": {
+                    "size_kw": 100,
+                    "installed_cost_per_kw": 1000,
+                    "electric_to_load_series_kw": pv_to_load,
+                    "electric_to_grid_series_kw": pv_to_grid,
+                    "electric_curtailed_series_kw": pv_curtailed,
+                    # lambda = annual / year_one = 900 / 1000 = 0.9
+                    "year_one_energy_produced_kwh": year_one_kwh,
+                    "annual_energy_produced_kwh": annual_kwh,
+                },
+                "ElectricStorage": {
+                    "initial_capital_cost": 10000,
+                    "storage_to_load_series_kw": storage_to_load,
+                    "storage_to_grid_series_kw": storage_to_grid,
+                },
+                "ElectricLoad": {"load_series_kw": load_kw},
+                "ElectricTariff": {
+                    "year_one_bill_before_tax_bau": 50000,
+                    "year_one_bill_before_tax": 30000,
+                    "year_one_demand_cost_before_tax_bau": 8000,
+                    "year_one_demand_cost_before_tax": 3000,
+                },
+                "Financial": {"year_one_om_costs_before_tax": 1000},
+            },
+        }
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+            dppa_inputs=dppa_inputs,
+        )
+        annual = result["annual_cash_flows"][0]
+
+        # Reference: de-levelize the same five series by hand (divide by
+        # lambda, same direction the fix uses) and settle directly. load_kw
+        # is the customer's actual load, not PV production, and is NOT
+        # divided.
+        expected_dispatch = {
+            "load_kw": load_kw,
+            "pv_to_load_kw": [v / lam for v in pv_to_load],
+            "pv_to_grid_kw": [v / lam for v in pv_to_grid],
+            "pv_curtailed_kw": [v / lam for v in pv_curtailed],
+            "storage_to_load_kw": [v / lam for v in storage_to_load],
+            "storage_to_grid_kw": [v / lam for v in storage_to_grid],
+        }
+        expected_year_one = settle_dppa_year_one(
+            dppa_inputs=dppa_inputs,
+            dispatch=expected_dispatch,
+            evn_energy_rates_vnd_per_kwh=tou_rates,
+        )["year_one"]
+
+        # Year 1 (index 0): every escalation/degradation multiplier is 1, so
+        # the annual row's DPPA keys equal the year_one settlement exactly.
+        for key in (
+            "generator_revenue_vnd", "c_dn_vnd", "c_dppa_vnd", "c_cl_vnd",
+            "c_bl_vnd", "cfd_net_vnd",
+        ):
+            self.assertAlmostEqual(annual[key], expected_year_one[key], places=6, msg=key)
+        # cash_flow.py's dppa_offtaker_cost_vnd recomputes the sum rather than
+        # echoing year_one's offtaker_dppa_cost_vnd key, so check it directly.
+        self.assertAlmostEqual(
+            annual["dppa_offtaker_cost_vnd"],
+            expected_year_one["c_dn_vnd"] + expected_year_one["c_dppa_vnd"]
+            + expected_year_one["c_cl_vnd"] + expected_year_one["c_bl_vnd"]
+            + expected_year_one["cfd_net_vnd"],
+            places=6,
+        )
+
+        # Guard the guard: the de-levelized reference must actually differ
+        # from what raw (still-levelized) series would produce, or this test
+        # could pass whether or not the fix is present.
+        raw_dispatch = {
+            "load_kw": load_kw,
+            "pv_to_load_kw": pv_to_load,
+            "pv_to_grid_kw": pv_to_grid,
+            "pv_curtailed_kw": pv_curtailed,
+            "storage_to_load_kw": storage_to_load,
+            "storage_to_grid_kw": storage_to_grid,
+        }
+        raw_year_one = settle_dppa_year_one(
+            dppa_inputs=dppa_inputs,
+            dispatch=raw_dispatch,
+            evn_energy_rates_vnd_per_kwh=tou_rates,
+        )["year_one"]
+        self.assertNotAlmostEqual(
+            expected_year_one["generator_revenue_vnd"],
+            raw_year_one["generator_revenue_vnd"],
+            places=2,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class SurplusExportDeLevelizationTests(unittest.TestCase):
+    """The fourth site reading raw levelized series.
+
+    _apply_surplus_export builds both the surplus volume and the output cap
+    from four REopt series that never pass through cash_flow_inputs, so
+    _apply_de_levelization never sees them. No current case enables surplus
+    export, which is exactly why this one survived three earlier passes.
+    """
+
+    def _pv_outputs(self):
+        # lambda = 950 / 1000 = 0.95, so 1 / lambda is a clean 1.0526...
+        return [{
+            "year_one_energy_produced_kwh": 1000.0,
+            "annual_energy_produced_kwh": 950.0,
+            "electric_to_load_series_kw": [600.0],
+            "electric_to_grid_series_kw": [200.0],
+            "electric_to_storage_series_kw": [0.0],
+            "electric_curtailed_series_kw": [150.0],
+        }]
+
+    def test_sold_energy_is_de_levelized(self):
+        from proforma_vietnam.esco_pro_forma import _apply_surplus_export
+
+        cash_flow_inputs = {}
+        _apply_surplus_export(
+            cash_flow_inputs,
+            {"enabled": True, "price_vnd_per_kwh": 1000.0, "cap_fraction": 1.0},
+            self._pv_outputs(),
+            25000.0,
+        )
+
+        # Surplus = grid 200 + curtailed 150 = 350 levelized, / 0.95 = 368.42.
+        # cap_fraction 1.0 means the cap never binds, so sold == surplus.
+        self.assertAlmostEqual(
+            cash_flow_inputs["surplus_export_kwh_year1"], 350.0 / 0.95, places=6
+        )
+
+    def test_no_pv_production_leaves_the_series_untouched(self):
+        from proforma_vietnam.esco_pro_forma import _apply_surplus_export
+
+        pv_outputs = [{
+            "electric_to_grid_series_kw": [200.0],
+            "electric_curtailed_series_kw": [150.0],
+        }]
+        cash_flow_inputs = {}
+        _apply_surplus_export(
+            cash_flow_inputs,
+            {"enabled": True, "price_vnd_per_kwh": 1000.0, "cap_fraction": 1.0},
+            pv_outputs,
+            25000.0,
+        )
+
+        self.assertAlmostEqual(
+            cash_flow_inputs["surplus_export_kwh_year1"], 350.0, places=6
+        )

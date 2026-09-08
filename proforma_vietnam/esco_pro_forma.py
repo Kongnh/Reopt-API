@@ -201,6 +201,12 @@ def calculate_esco_pro_forma_from_reopt_results(
             "storage_to_load_kw": _series(storage_outputs.get("storage_to_load_series_kw")),
             "storage_to_grid_kw": _series(storage_outputs.get("storage_to_grid_series_kw")),
         }
+        # The settlement basis above is built straight from raw REopt dispatch
+        # series, bypassing cash_flow_inputs and therefore _apply_de_levelization
+        # above -- so it carries the same levelization as project_served_pv_kwh
+        # and needs the same correction. load_kw is the customer's actual load,
+        # not PV production, and is left alone.
+        _apply_de_levelization_to_dispatch(dispatch, _levelization_factor(pv_outputs))
         dppa_settlement = settle_dppa_year_one(
             dppa_inputs=dppa_inputs,
             dispatch=dispatch,
@@ -285,6 +291,32 @@ def _apply_de_levelization(cash_flow_inputs, levelization_factor):
         cash_flow_inputs[optimized_key] = bau - savings / levelization_factor
 
 
+def _apply_de_levelization_to_dispatch(dispatch, levelization_factor):
+    """Undo REopt's levelization on the grid-CfD DPPA settlement's raw dispatch.
+
+    Unlike project_served_pv_kwh, this dispatch dict never passes through
+    cash_flow_inputs, so _apply_de_levelization above never sees it. All five
+    series come from the same levelized REopt solve, so all five need the
+    same lambda division -- including the two storage series: the merged
+    project_served_pv_kwh already folds storage_to_load in when the battery
+    cannot grid-charge and de-levelizes the merge, so leaving storage out here
+    would be inconsistent with that.
+    """
+    if levelization_factor == 1.0:
+        return
+
+    for key in (
+        "pv_to_load_kw",
+        "pv_to_grid_kw",
+        "pv_curtailed_kw",
+        "storage_to_load_kw",
+        "storage_to_grid_kw",
+    ):
+        series = dispatch.get(key)
+        if series:
+            dispatch[key] = [value / levelization_factor for value in series]
+
+
 def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rate_vnd_per_usd):
     """Resolve ND57 Điều 25 private-wire DPPA primitives into the cash flow.
 
@@ -359,10 +391,26 @@ def _apply_surplus_export(cash_flow_inputs, surplus_export, pv_outputs, exchange
             "(export energy is already monetized at FMP)."
         )
 
-    pv_to_load = _sum_series([pv.get("electric_to_load_series_kw", []) for pv in pv_outputs])
-    pv_to_grid = _sum_series([pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs])
-    pv_to_storage = _sum_series([pv.get("electric_to_storage_series_kw", []) for pv in pv_outputs])
-    pv_curtailed = _sum_series([pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs])
+    # Like the grid-CfD dispatch dict, these four series are read straight from
+    # the levelized REopt outputs and never pass through cash_flow_inputs, so
+    # _apply_de_levelization does not reach them. Both surplus_kwh and
+    # annual_pv_output_kwh below derive from them, so without this the export
+    # revenue would carry the same double count the rest of this module now
+    # corrects. No current case enables surplus export, so this is a latent
+    # path, but a latent read of a levelized series is how the other three
+    # instances of this defect survived.
+    levelization_factor = _levelization_factor(pv_outputs)
+
+    def _raw(key):
+        series = _sum_series([pv.get(key, []) for pv in pv_outputs])
+        if levelization_factor == 1.0:
+            return series
+        return [value / levelization_factor for value in series]
+
+    pv_to_load = _raw("electric_to_load_series_kw")
+    pv_to_grid = _raw("electric_to_grid_series_kw")
+    pv_to_storage = _raw("electric_to_storage_series_kw")
+    pv_curtailed = _raw("electric_curtailed_series_kw")
 
     surplus_kwh = sum(pv_to_grid) + sum(pv_curtailed)
     annual_pv_output_kwh = (
