@@ -370,7 +370,8 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     if assumptions.get("pv_om_cost_applied_usd_per_kw") is not None:
         entry("PV O&M cost, sourced", assumptions.get("pv_om_cost_sourced_usd_per_kw"),
               unit="USD/kW/yr",
-              source="thailand_defaults.json annual_om_per_kw (MDPI, 1 percent of installed capex)",
+              source="thailand_defaults.json annual_om_per_kw (client direction, 1.5 percent "
+                     "of PV capex; MDPI cites a 1 percent published lower bound)",
               fmt=FMT_AMOUNT_2)
         entry("PV O&M cost, sent to REopt", assumptions.get("pv_om_cost_sent_usd_per_kw"),
               unit="USD/kW/yr", source="case.json technologies.pv.om_cost_per_kw",

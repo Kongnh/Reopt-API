@@ -672,7 +672,7 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
 
 class PvOmCostRoundingDisclosureTests(TestCase):
     """Ruling 22 / final review R3: the memo discloses that PV O&M was sourced
-    at 7.50 USD/kWp-yr, sent as 7.5, and applied by REopt as 8.00 (REopt.jl
+    at 7.125 USD/kWp-yr, sent as 7.125, and applied by REopt as 7.00 (REopt.jl
     rounds PV cost parameters to whole dollars) -- but the workbook itself
     carried no such row. These lock the disclosure onto the Assumptions
     sheet. Gated on a key only proforma_thailand.report sets, so the default
@@ -687,14 +687,14 @@ class PvOmCostRoundingDisclosureTests(TestCase):
 
     def test_all_three_values_render_on_the_assumptions_sheet(self):
         results = _results()
-        results["outputs"]["PV"]["om_cost_per_kw"] = 8.0
+        results["outputs"]["PV"]["om_cost_per_kw"] = 7.0
         workbook, _ = build_thailand_report(results, ASSUMPTIONS)
         sheet = workbook["Assumptions"]
 
         for label, expected in (
-            ("PV O&M cost, sourced", 7.5),
-            ("PV O&M cost, sent to REopt", 7.5),
-            ("PV O&M cost, applied by REopt", 8.0),
+            ("PV O&M cost, sourced", 7.125),
+            ("PV O&M cost, sent to REopt", 7.125),
+            ("PV O&M cost, applied by REopt", 7.0),
         ):
             rows = self._rows_with_label(sheet, label)
             self.assertEqual(len(rows), 1, "expected exactly one {!r} row".format(label))
@@ -746,3 +746,102 @@ class DemandChargeCitationTests(TestCase):
             "year_one_coincident_peak_cost_before_tax",
             sheet.cell(row=opt_row, column=5).value,
         )
+
+
+class ExcludedInputsAreDisclosedAsChoicesTests(TestCase):
+    """"Not required" is a technical conclusion this analysis does not
+    support. "Excluded at client direction" is what actually happened, and
+    a reader is entitled to tell the two apart."""
+
+    def test_power_factor_status_names_the_client_direction(self):
+        from proforma_thailand.report import compute_power_factor_compensation
+
+        result = compute_power_factor_compensation({})
+
+        self.assertIn("client", result["status"].lower())
+        self.assertNotIn("none required", result["status"].lower())
+        self.assertEqual(result["compensation_kvar"], 0.0)
+        self.assertEqual(result["mitigation_cost_usd"], 0.0)
+
+
+class InverterCostIsDerivedFromSolvedCapexTests(TestCase):
+    """The one path no existing test covers: cost taken from the solved PV
+    capex rather than injected. Reading a field that does not exist on PV
+    outputs made this inert once already."""
+
+    def _results_with_solved_pv(self, size_kw, cost_per_kw):
+        results = _results()
+        results["outputs"]["PV"]["size_kw"] = size_kw
+        results["outputs"]["PV"]["installed_cost_per_kw"] = cost_per_kw
+        return results
+
+    def _assumptions_without_explicit_inverter_cost(self):
+        # ASSUMPTIONS carries no inverter_replacement_cost_usd key to begin
+        # with; setting only the replacement year means build_thailand_report's
+        # own pv_capex derivation is the sole source of the cost figure.
+        assumptions = dict(ASSUMPTIONS, inverter_replacement_year=11)
+        assumptions.pop("inverter_replacement_cost_usd", None)
+        return assumptions
+
+    def _replacement_row_value_at_year(self, workbook, year):
+        # The Pro Forma (Audit) sheet's replacement row is written from
+        # ``values=`` (audit_sheets.py), i.e. the raw per-year figures out of
+        # cash_flow_result["derivation"]["replacement_costs_by_year_usd"]
+        # copied verbatim, not a discounted or NPV'd figure. With zero battery
+        # in this fixture that series equals extra_replacement_costs_by_year
+        # exactly, so this is the value handed to the derivation this test
+        # guards, not a recomputed expectation.
+        sheet = workbook["Pro Forma (Audit)"]
+        for row in range(1, sheet.max_row + 1):
+            label = sheet.cell(row=row, column=1).value
+            if isinstance(label, str) and "replacement (engine schedule)" in label.lower():
+                return sheet.cell(row=row, column=3 + year).value
+        return None
+
+    def test_inverter_replacement_is_nonzero_when_only_solved_capex_is_present(self):
+        from proforma_thailand.report import build_thailand_report
+
+        results = self._results_with_solved_pv(size_kw=1000.0, cost_per_kw=475.0)
+        assumptions = self._assumptions_without_explicit_inverter_cost()
+
+        workbook, _extras = build_thailand_report(results, assumptions)
+
+        # 10 percent of 1000 kW x 475 USD/kW = 47,500, booked as a raw
+        # replacement-year cash outflow in year 11.
+        value_at_year_11 = self._replacement_row_value_at_year(workbook, 11)
+        self.assertIsNotNone(value_at_year_11, "no replacement row rendered at all")
+        self.assertAlmostEqual(
+            value_at_year_11, 47500.0, delta=1.0,
+            msg="inverter cost was not derived from solved PV capex",
+        )
+
+    def test_the_row_is_not_labelled_as_a_battery_replacement(self):
+        """It rendered as "Battery replacement (engine schedule)" in case_1,
+        which has no battery. That reached the client.
+
+        Matches the exact row-label string, the same way
+        test_replacement_row_is_not_labelled_a_battery above does, rather
+        than a bare "Battery replacement" substring: the Model Basis sheet
+        carries pre-existing, unconditional methodology bullets ("Battery
+        replacement is CAPITALIZED, not expensed...") describing how ANY
+        replacement-cost series is taxed under Circular 45 / Royal Decree
+        No. 145, in shared proforma_vietnam/cash_flow.py and audit_sheets.py.
+        That wording is not case-specific and is out of this task's scope
+        (touching it risks the Vietnam byte-identity gate); a bare substring
+        match trips on it and would fail for the wrong reason.
+        """
+        from proforma_thailand.report import build_thailand_report
+
+        results = self._results_with_solved_pv(size_kw=1000.0, cost_per_kw=475.0)
+        workbook, _extras = build_thailand_report(
+            results, self._assumptions_without_explicit_inverter_cost()
+        )
+
+        labels = [
+            value
+            for sheet in workbook.worksheets
+            for row in sheet.iter_rows(values_only=True)
+            for value in row
+            if isinstance(value, str)
+        ]
+        self.assertNotIn("Battery replacement (engine schedule)", labels)

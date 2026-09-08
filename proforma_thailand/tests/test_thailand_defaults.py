@@ -26,18 +26,18 @@ class ThailandDefaultsTests(TestCase):
         self.assertEqual(value_of(SITE_DEFAULTS, "pv_max_kw"), 1685.0)
 
     def test_every_unconfirmed_value_is_marked_as_a_placeholder(self):
+        # Task 8: pv_installed_cost_per_kw, annual_om_per_kw, discount_rate and
+        # the four bess install/replace costs are now client-confirmed and lost
+        # the marker (see CoupledDefaultsAreDerivedTests below). power_factor_
+        # mitigation_cost and grid_connection_cost are excluded from capex at
+        # client direction rather than confirmed, so they keep it.
         expected = {
-            "bess_installed_cost_per_kw",
-            "bess_installed_cost_per_kwh",
-            "bess_replace_cost_per_kw",
-            "bess_replace_cost_per_kwh",
             "debt_fraction",
             "debt_term_years",
             "insurance_rate_fraction",
             "grid_connection_cost",
             "permitting_and_eia_cost",
             "pea_tariff_escalation_rate",
-            "discount_rate",
             "usable_roof_area_m2",
             "pv_max_kw",
             "power_factor_mitigation_cost",
@@ -135,3 +135,53 @@ class BenchmarkedSourcesTests(TestCase):
     def test_grid_emission_factor_records_its_vintage(self):
         vintage = EMISSIONS_DEFAULTS["grid_emission_factor_vintage"]["value"]
         self.assertNotEqual(vintage, "pending")
+
+
+class CoupledDefaultsAreDerivedTests(TestCase):
+    """Holding these as literals is what let a price change leave the file
+    self-contradictory: at 100/150 install with the old 150/125 replacement,
+    replacing a battery cost more per kW than buying one."""
+
+    def test_om_is_one_and_a_half_percent_of_pv_capex(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+
+        pv_capex = value_of(FINANCIAL_DEFAULTS, "pv_installed_cost_per_kw")
+        om = value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
+
+        self.assertAlmostEqual(om, pv_capex * 0.015, places=9)
+        self.assertAlmostEqual(om, 7.125, places=9)
+
+    def test_replacement_is_seventy_percent_of_install(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+
+        for install_key, replace_key in (
+            ("bess_installed_cost_per_kw", "bess_replace_cost_per_kw"),
+            ("bess_installed_cost_per_kwh", "bess_replace_cost_per_kwh"),
+        ):
+            install = value_of(FINANCIAL_DEFAULTS, install_key)
+            replace = value_of(FINANCIAL_DEFAULTS, replace_key)
+            self.assertAlmostEqual(replace, install * 0.70, places=9)
+
+    def test_replacing_never_costs_more_than_buying_new(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+
+        for install_key, replace_key in (
+            ("bess_installed_cost_per_kw", "bess_replace_cost_per_kw"),
+            ("bess_installed_cost_per_kwh", "bess_replace_cost_per_kwh"),
+        ):
+            self.assertLess(
+                value_of(FINANCIAL_DEFAULTS, replace_key),
+                value_of(FINANCIAL_DEFAULTS, install_key),
+            )
+
+    def test_the_seven_confirmed_inputs_lost_the_placeholder_marker(self):
+        from proforma_thailand.defaults import placeholder_keys
+
+        confirmed = {
+            "pv_installed_cost_per_kw", "annual_om_per_kw",
+            "bess_installed_cost_per_kw", "bess_installed_cost_per_kwh",
+            "bess_replace_cost_per_kw", "bess_replace_cost_per_kwh",
+            "discount_rate",
+        }
+
+        self.assertEqual(confirmed & placeholder_keys(), set())

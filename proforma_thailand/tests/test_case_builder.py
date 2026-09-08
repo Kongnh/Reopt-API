@@ -203,21 +203,36 @@ class PayloadDefaultInheritanceTests(TestCase):
 
 
 class PvOmCostRoundingTests(TestCase):
-    """Important 5 / Ruling 22: the Thailand defaults send PV O&M at 7.5
-    USD/kWp-yr (1 percent of the sourced 750 USD/kWp capex - see
-    test_pv_om_cost_comes_from_the_thailand_defaults above, which asserts the
-    SENT payload value). But REopt.jl rounds PV cost parameters to whole
-    dollars before it solves, so every committed run actually applied 8.00
-    USD/kWp-yr - the SENT-value test above would stay green even if this
-    rounding drifted further. This reads what REopt RETURNED on a real,
-    committed run (case_1's results.json on this branch), not a synthetic
-    fixture, so it pins the solver's actual behaviour rather than an
-    assumption about it.
+    """Important 5 / Ruling 22: REopt.jl rounds PV cost parameters to whole
+    dollars before it solves, so the SENT om_cost_per_kw is not what a
+    committed run actually applies - see
+    test_pv_om_cost_comes_from_the_thailand_defaults above, which only checks
+    the SENT payload value and would stay green even if the rounding
+    drifted. This reads what REopt RETURNED on a real, committed run
+    (case_1's results.json on this branch), not a synthetic fixture, so it
+    pins the solver's actual rounding behaviour rather than an assumption
+    about it.
+
+    Task 8 (client-confirmed benchmarks): this fixture was solved under the
+    superseded defaults (pv_installed_cost_per_kw 750, annual_om_per_kw 7.5,
+    rounded to 8.0 applied). FINANCIAL_DEFAULTS now carries the client's
+    confirmed 475 / 7.125, which case_1 has not yet been re-solved against -
+    that re-solve is Task 11's, and outputs/ is out of scope here. So `sent`
+    below is pinned to the historical value actually in effect when this
+    fixture was generated, not read live off FINANCIAL_DEFAULTS: reading it
+    live would compare today's default against yesterday's solve and assert
+    something false about this file. Once Task 11 regenerates this fixture
+    under the new defaults, this pin should move to 7.125 sent / 7.0 applied
+    and go back to reading FINANCIAL_DEFAULTS live.
     """
 
     RESULTS_PATH = Path(
         "outputs/thailand_case/rofu_thailand/case_1/results.json"
     )
+
+    # The sent rate in effect when RESULTS_PATH was solved, not today's
+    # FINANCIAL_DEFAULTS value. See class docstring.
+    SENT_OM_PER_KW_AT_SOLVE_TIME = 7.5
 
     def setUp(self):
         self.results = json.loads(self.RESULTS_PATH.read_text(encoding="utf-8"))
@@ -227,7 +242,7 @@ class PvOmCostRoundingTests(TestCase):
         return pv[0] if isinstance(pv, list) else pv
 
     def test_reopt_rounds_the_sent_om_cost_up_to_a_whole_dollar(self):
-        sent = value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
+        sent = self.SENT_OM_PER_KW_AT_SOLVE_TIME
         returned = self._pv_outputs()["om_cost_per_kw"]
 
         self.assertEqual(sent, 7.5)
@@ -241,7 +256,9 @@ class PvOmCostRoundingTests(TestCase):
         ]
 
         self.assertAlmostEqual(year_one_om, pv_size_kw * 8.0)
-        self.assertNotAlmostEqual(year_one_om, pv_size_kw * 7.5)
+        self.assertNotAlmostEqual(
+            year_one_om, pv_size_kw * self.SENT_OM_PER_KW_AT_SOLVE_TIME
+        )
 
 
 class UsIncentivesAreDisabledTests(TestCase):

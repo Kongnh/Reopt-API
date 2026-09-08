@@ -98,22 +98,43 @@ def cash_flow_overrides_from_assumptions(assumptions):
 
 
 def compute_power_factor_compensation(assumptions):
-    """Return ``(required_kvar, mitigation_cost_usd)``.
+    """Return a dict with ``status``, ``compensation_kvar`` and
+    ``mitigation_cost_usd``.
 
     PV reduces billed kW but not kVAR, so the PEA allowance shrinks as demand
-    falls. Anything above the allowance is compensated once with a capacitor
-    bank rather than paid monthly.
+    falls. Anything above the allowance would be compensated once with a
+    capacitor bank rather than paid monthly - but Keen has directed that this
+    cost stay excluded from project capex, and the site kVAR maximum was
+    never requested. That is a client choice, not a technical finding that no
+    mitigation is needed, so the status says exactly that rather than
+    reading as "none required". In production kvar_max is never supplied
+    (see case_builder.py), so this status is what every real Thailand case
+    discloses; the branches below exist only so the underlying kVAR math
+    stays covered by tests that inject kvar_max directly.
     """
+    status = "Excluded from capex at client direction; site kVAR data not requested"
     kvar_max = assumptions.get("kvar_max")
     billed_kw = assumptions.get("billed_demand_kw")
     if not kvar_max or not billed_kw:
-        return 0.0, 0.0
+        return {
+            "status": status,
+            "compensation_kvar": 0.0,
+            "mitigation_cost_usd": 0.0,
+        }
     allowance = assumptions["power_factor_allowance_fraction"] * billed_kw
     required = max(0.0, kvar_max - allowance)
     if required <= 0.0:
-        return 0.0, 0.0
+        return {
+            "status": status,
+            "compensation_kvar": 0.0,
+            "mitigation_cost_usd": 0.0,
+        }
     cost_usd = value_of(FINANCIAL_DEFAULTS, "power_factor_mitigation_cost")
-    return required, cost_usd
+    return {
+        "status": status,
+        "compensation_kvar": required,
+        "mitigation_cost_usd": cost_usd,
+    }
 
 
 def billed_demand_kw_by_month(reopt_results):
@@ -161,7 +182,9 @@ def annual_opex_usd(pv_capex_usd, bess_capex_usd, other_capex_usd,
 
 def build_thailand_report(reopt_results, assumptions):
     """Return ``(workbook, extras)`` for a Thailand DIRECT_OWNERSHIP run."""
-    required_kvar, mitigation_cost = compute_power_factor_compensation(assumptions)
+    power_factor = compute_power_factor_compensation(assumptions)
+    required_kvar = power_factor["compensation_kvar"]
+    mitigation_cost = power_factor["mitigation_cost_usd"]
 
     # Capex comes from the solved results, not the roof-area cap handed to
     # REopt, so the inverter replacement (below) and insurance (further down)

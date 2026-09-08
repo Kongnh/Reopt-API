@@ -60,6 +60,32 @@ EMISSIONS_DEFAULTS = THAILAND_DEFAULTS["emissions"]
 # flattened view alongside the annotated one.
 TAX_DEFAULTS = {key: entry["value"] for key, entry in TAX_DEFAULTS_RAW.items()}
 
+# The coupling each derived default must satisfy: (derived, base, fraction).
+# Kept as an assertion rather than a computation so the JSON stays the single
+# readable source of every number, while a price change that desyncs a coupled
+# value fails at import instead of silently shipping.
+_DERIVED_COUPLINGS = (
+    ("annual_om_per_kw", "pv_installed_cost_per_kw", 0.015),
+    ("bess_replace_cost_per_kw", "bess_installed_cost_per_kw", 0.70),
+    ("bess_replace_cost_per_kwh", "bess_installed_cost_per_kwh", 0.70),
+)
+
+
+def _assert_couplings_hold():
+    for derived_key, base_key, fraction in _DERIVED_COUPLINGS:
+        derived = FINANCIAL_DEFAULTS[derived_key]["value"]
+        expected = FINANCIAL_DEFAULTS[base_key]["value"] * fraction
+        if abs(derived - expected) > 1e-9:
+            raise ValueError(
+                "{} is {} but is defined as {} of {}, which is {}. "
+                "Re-derive it or change the coupling.".format(
+                    derived_key, derived, fraction, base_key, expected
+                )
+            )
+
+
+_assert_couplings_hold()
+
 
 def placeholder_keys():
     """Names of every default still awaiting confirmation from Keen."""
