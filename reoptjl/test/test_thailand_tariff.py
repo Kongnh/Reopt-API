@@ -1,11 +1,19 @@
 from datetime import date
 from unittest import TestCase
 
+from proforma_thailand.defaults import ft_for_month
 from reoptjl.src.thailand.pea_tariff import AUDIT_METADATA_KEYS, build_pea_tariff
 
 # Synthetic calendar year used by the Rofu case: Jan-Jun from 2026,
 # Jul-Dec from 2025. See the plan's Global Constraints.
 CALENDAR_MONTHS = [(2026, m) for m in range(1, 7)] + [(2025, m) for m in range(7, 13)]
+
+# Ft in force for the modelled January (2026-01), read from the same defaults
+# build_pea_tariff() consumes so a future Ft revision can't silently desync
+# this suite the way the Sep-2025-vs-Jan-2026 fallback did. The window value
+# itself is independently pinned in
+# proforma_thailand/tests/test_pea_defaults.py.
+JANUARY_2026_FT = ft_for_month(2026, 1)
 
 # The real REopt.jl ElectricTariffInputs fields build_pea_tariff() produces.
 REOPT_PAYLOAD_KEYS = {
@@ -23,12 +31,13 @@ class PeaTariffTests(TestCase):
         self.assertEqual(len(tariff["tou_energy_rates_per_kwh"]), 35040)
 
     def test_first_interval_of_january_is_off_peak_plus_ft(self):
-        # Interval 0 ends at 00:15 on 1 Jan, which is off-peak. January maps to
-        # 2026-01, whose Ft falls back to the Sep-Dec 2025 window (0.1572).
+        # Interval 0 ends at 00:15 on 1 Jan, which is off-peak. January maps
+        # to 2026-01, which now has its own Ft window (cut by the regulator
+        # in Dec 2025) rather than falling back to Sep-Dec 2025.
         tariff = build_pea_tariff(CALENDAR_MONTHS, all_off_peak_dates=set())
 
         self.assertAlmostEqual(
-            tariff["tou_energy_rates_per_kwh"][0], 2.6037 + 0.1572, places=6
+            tariff["tou_energy_rates_per_kwh"][0], 2.6037 + JANUARY_2026_FT, places=6
         )
 
     def test_interval_ending_0915_on_a_weekday_is_peak(self):
@@ -36,7 +45,7 @@ class PeaTariffTests(TestCase):
         tariff = build_pea_tariff(CALENDAR_MONTHS, all_off_peak_dates=set())
 
         self.assertAlmostEqual(
-            tariff["tou_energy_rates_per_kwh"][37], 4.1839 + 0.1572, places=6
+            tariff["tou_energy_rates_per_kwh"][37], 4.1839 + JANUARY_2026_FT, places=6
         )
 
     def test_interval_ending_exactly_0900_is_off_peak(self):
@@ -44,7 +53,7 @@ class PeaTariffTests(TestCase):
         tariff = build_pea_tariff(CALENDAR_MONTHS, all_off_peak_dates=set())
 
         self.assertAlmostEqual(
-            tariff["tou_energy_rates_per_kwh"][35], 2.6037 + 0.1572, places=6
+            tariff["tou_energy_rates_per_kwh"][35], 2.6037 + JANUARY_2026_FT, places=6
         )
 
     def test_interval_ending_exactly_2200_is_peak(self):
@@ -52,17 +61,19 @@ class PeaTariffTests(TestCase):
         tariff = build_pea_tariff(CALENDAR_MONTHS, all_off_peak_dates=set())
 
         self.assertAlmostEqual(
-            tariff["tou_energy_rates_per_kwh"][87], 4.1839 + 0.1572, places=6
+            tariff["tou_energy_rates_per_kwh"][87], 4.1839 + JANUARY_2026_FT, places=6
         )
 
     def test_all_off_peak_date_has_no_peak_intervals(self):
+        # 2026-01-01 is a Thursday (normally peak-eligible); all_off_peak_dates
+        # overrides that, so every slot in the day should bill off-peak + Ft.
         tariff = build_pea_tariff(
             CALENDAR_MONTHS, all_off_peak_dates={date(2026, 1, 1)}
         )
         first_day = tariff["tou_energy_rates_per_kwh"][:96]
 
         self.assertTrue(
-            all(abs(rate - (2.6037 + 0.1572)) < 1e-6 for rate in first_day)
+            all(abs(rate - (2.6037 + JANUARY_2026_FT)) < 1e-6 for rate in first_day)
         )
 
     def test_coincident_peak_has_twelve_periods_at_the_demand_rate(self):
@@ -101,7 +112,9 @@ class PeaTariffTests(TestCase):
         )
 
         self.assertAlmostEqual(
-            tariff["tou_energy_rates_per_kwh"][0], (2.6037 + 0.1572) / 32.5, places=8
+            tariff["tou_energy_rates_per_kwh"][0],
+            (2.6037 + JANUARY_2026_FT) / 32.5,
+            places=8,
         )
         self.assertAlmostEqual(
             tariff["coincident_peak_load_charge_per_kw"][0], 132.93 / 32.5, places=8
