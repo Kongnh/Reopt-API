@@ -111,7 +111,7 @@ already has this property.
 | Key | Value | Provenance |
 |---|---|---|
 | `pv_installed_cost_per_kw` | 475.0 | Client, midpoint of a 450 to 500 USD/kWp C&I rooftop range |
-| `annual_om_per_kw` | 4.75 | Re-derived, 1 percent of PV capex, preserving the documented coupling |
+| `annual_om_per_kw` | 7.125 | Client direction, 1.5 percent of PV capex. REopt applies 7.00 |
 | `bess_installed_cost_per_kw` | 100.0 | Client |
 | `bess_installed_cost_per_kwh` | 150.0 | Client |
 | `bess_replace_cost_per_kw` | 70.0 | Re-derived at 70 percent of install cost, client's choice over the previous 50 percent |
@@ -125,7 +125,16 @@ and the two BESS replacement costs are defined as fractions of costs the client
 just changed. Holding them as literals is what produced the contradiction this
 change resolves, where replacing a battery would have cost more per kW than
 buying one. They become computed from their base cost and fraction so the next
-price change cannot reintroduce the defect.
+price change cannot reintroduce the defect. The three fractions are 1.5 percent
+of PV capex for O&M and 70 percent of install cost for both replacement costs.
+
+**D9a. The O&M citation no longer supports the O&M value.** The previous 1
+percent coupling was sourced to Farungsang, Varquez and Tokimatsu, MDPI
+Sustainability 17(15):7052 (2025). The client has directed 1.5 percent, so that
+paper can no longer be cited as the basis. Its 1 percent is retained in the
+source note as a published lower bound, and the value itself is attributed to
+client direction. Leaving the old citation attached to a number it does not
+support would misrepresent the provenance to a third-party reviewer.
 
 **D10. Power factor and grid connection cost are excluded from capex at client
 direction.** Both must be disclosed with that reason. The report must not say
@@ -134,8 +143,9 @@ This also closes the standing "declared but never enters capex" gap for
 `grid_connection_cost`: the correct resolution is an honest disclosure, not
 adding it to capex.
 
-**D11. Disclose the O&M rounding.** The model applies 5.00 USD/kWp/yr, not the
-4.75 supplied. The workbook and memo must state the applied value.
+**D11. Disclose the O&M rounding.** The model applies 7.00 USD/kWp/yr, not the
+7.125 supplied. The workbook and memo must state the applied value, and the
+existing test that pins the value REopt returns must be updated to 7.00.
 
 **D12. Six cases, unchanged.** No roof-valuation case is added.
 
