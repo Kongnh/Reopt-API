@@ -1,3 +1,15 @@
+# 2026-09-08 - Rofu Thailand current-tariff briefing
+
+- Reviewed the Gmail threads `Re: [EXTERNAL] Rofu Thailand - Hourly Data Request Letter of Authorization` and `Keen Thailand tool-related data` for project context. The factory is supplied directly by PEA Phimai; KEEN is evaluating rooftop solar and solar plus BESS. The latest site feedback says some roofs may require reinforcement and recommends an on-site structural assessment.
+- Reviewed the internal KEEN project folder, including the PEA tariff summary, 2025 invoices, interval/load workbooks, site data, and the existing Allotrope KEEN clean-energy deck used as the visual reference.
+- Created `outputs/thailand_case/rofu_thailand/Rofu_Thailand_Tariff_Structure_Internal.pptx`, a ten-slide English internal briefing for an audience new to Thailand's electricity market.
+- Tariff basis presented: PEA Schedule 4.2 Large General Service, 22-33 kV, rate code 4224; peak energy THB 4.1839/kWh; off-peak and holiday energy THB 2.6037/kWh; on-peak maximum-demand charge THB 132.93/kW-month; service THB 312.24/month; Ft on all kWh; VAT 7%; conditional power-factor charge disclosed but not quantified.
+- June 2025 invoice example reconciles to the billed amount due of THB 2,576,311.21 using the invoice-rounded base, Ft, and VAT values. The slide displays whole-baht amounts and the invoice total of THB 2,576,311.
+- Existing corrected model outputs were quoted without rerunning the model: conservative roof PV+BESS case 1,685 kWp PV, no battery, 30.7% grid offset; unconstrained PV+BESS case 2,203.2 kWp PV, 38.68 kW / 58.03 kWh BESS, 37.8% grid offset; incremental BESS effect approximately 0.3 percentage points versus the comparable PV-only case.
+- Validation: finalizer package integrity passed; first-party Artifact Tool import passed; layout checker reported 0 findings and 0 warnings; PPTX contains 10 slide XML parts and 10 speaker-note parts; all 10 final slides rendered and were visually inspected. Final SHA-256: `A6F960A70126A1EEEDF1A891A43026C5132E9D4E5E843922F7B823E20F9D2B6A`.
+- No model rerun, tariff refresh, email reply, or external posting was performed.
+- Pre-existing untracked Vietnam review workbooks were preserved outside the topic commit.
+
 # 2026-07-04 (later) - Workbook reorganisation: full case inputs, consolidated sheets, dispatch upgrade
 
 - User goal (session /goal #2): (I) surface ALL case inputs (case.json +

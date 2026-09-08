@@ -1,6 +1,6 @@
 # Codex Session Handoff
 
-Last updated: 2026-07-04 (model-audit pass + audit-grade Excel; uncommitted)
+Last updated: 2026-09-08 (Rofu Thailand tariff briefing deck)
 
 > Concise handoff only. Full chronological detail lives in `SESSION_NOTES.md`
 > (newest entry at top). Keep this file short — prune history when it grows.
@@ -8,9 +8,19 @@ Last updated: 2026-07-04 (model-audit pass + audit-grade Excel; uncommitted)
 ## Current State
 
 - Repository: `C:\Users\kongn\Pictures\CodeProject\Reopt API\REopt_API`
-- Branch: `master`, last pushed commit `5280e92b`. Remote:
-  `https://github.com/Kongnh/Reopt-API.git`. **Working tree has the
-  uncommitted 2026-07-04 audit pass** (see below + SESSION_NOTES "2026-07-04").
+- Branch: `thailand-adaptation`. Remote:
+  `https://github.com/Kongnh/Reopt-API.git`. The tariff briefing is recorded in
+  the latest topic commit. Pre-existing Vietnam review workbooks remain outside
+  that commit.
+- **Rofu Thailand tariff briefing DONE (2026-09-08).** Created the internal
+  ten-slide English deck at
+  `outputs/thailand_case/rofu_thailand/Rofu_Thailand_Tariff_Structure_Internal.pptx`.
+  It explains PEA Schedule 4.2, TOU periods, bill components, a reconciled June
+  2025 bill, solar/BESS implications, and roof/power-factor diligence items.
+  Existing data and corrected model outputs were used; the model and tariff
+  inputs were not rerun or updated. Final checks: 10 slides, 10 speaker-note
+  parts, 10 rendered slides, package integrity pass, Artifact Tool import pass,
+  zero layout findings and zero layout warnings. See SESSION_NOTES "2026-09-08".
 - **Model-audit pass + third-party-ready Excel DONE (2026-07-04), 130 tests
   green, USD economics unchanged.** Summary:
   - `_add_usd_aliases` question resolved: engine computes in USD; new
