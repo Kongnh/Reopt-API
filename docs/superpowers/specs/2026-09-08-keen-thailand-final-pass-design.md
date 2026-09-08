@@ -95,8 +95,17 @@ as a number, not as prose.
 size the system without knowledge of degradation, biasing capacity selection.
 Sizing is currently correct and must not be disturbed.
 
-**D5. Regenerate all baselines, but commit the old ones first.** The pre-change
-baselines get their own commit so the transition is recoverable from git history.
+**D5. Regenerate all baselines, preserving the old ones outside git.**
+CORRECTED 2026-09-08 during execution: the original wording said to commit the
+old baselines first. That was not possible. `baseline_workbooks/` is gitignored
+scratch (`.gitignore:139`, "Regenerate, never commit") added in `3a8e418a`, the
+same commit that created the gate, and zero files under it have ever been
+tracked. The recoverability this decision asked for is provided instead by
+copying the fourteen pre-change baselines into the plan's SDD workspace before
+overwriting them, and by recording the measured deltas in `MODEL_AUDIT.md`,
+which is committed. Consequence worth stating plainly: the gate protects only
+within a session that generated baselines first, never across sessions or
+machines.
 
 **D6. Merge to `master` last,** after all four suites are green and the gate is
 clean.

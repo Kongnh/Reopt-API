@@ -18,6 +18,7 @@
 - **No em dash (U+2014) in generated report output.** Use a comma, a colon, or a full stop.
 - The placeholder marker is exactly `PLACEHOLDER - pending Keen confirmation`, matched by equality in `placeholder_keys()`. Never invent a variant.
 - `outputs/vietnam_case/` and `baseline_workbooks/` **may** be modified in this plan, by explicit user authorisation dated 2026-09-08. This reverses a previous standing prohibition. Outside these tasks the prohibition still applies.
+- **`baseline_workbooks/` is gitignored scratch and has never been tracked** (`.gitignore:139`, added in `3a8e418a` alongside the gate itself). Never `git add -f` it and never edit that rule. Baselines are regenerated locally, so no task commits them, and the gate protects only within a session that generated them first.
 - Confirmed benchmark values (spec D8): `pv_installed_cost_per_kw` 475.0, `annual_om_per_kw` 7.125 (1.5 percent of PV capex), `bess_installed_cost_per_kw` 100.0, `bess_installed_cost_per_kwh` 150.0, `bess_replace_cost_per_kw` 70.0 (70 percent), `bess_replace_cost_per_kwh` 105.0 (70 percent), `discount_rate` 0.11.
 - Measured levelization factors: Thailand 0.960612, Vietnam 0.952869.
 
@@ -402,17 +403,21 @@ Expected: `TOTAL DIFFS 0` across fourteen cases.
 rm -rf gate_check
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Do not commit. There is nothing to commit.**
 
-```bash
-git add baseline_workbooks/thailand_rofu_case_*
-git commit -m "Baseline the six Thailand workbooks at current behaviour
+`baseline_workbooks/` is excluded by `.gitignore:139`, with the comment
+"Scratch baseline for the Vietnam workbook regression gate. Regenerate, never
+commit." That rule was added in `3a8e418a`, the same commit that created the
+gate, so it is deliberate design and not drift. Zero files under
+`baseline_workbooks/` have ever been tracked, including the eight Vietnam ones.
 
-Captured before the de-levelization fix so the gate can measure it. This
-records current behaviour, not correct behaviour: this same output carried
-two Critical defects. It protects against regression, not against defects
-already present."
-```
+Do **not** `git add -f`, and do **not** edit `.gitignore`. The baselines are
+local scratch by design. Task 3 completes with no commit; its deliverable is the
+six directories on disk and the clean gate run in Step 3.
+
+The consequence to keep in mind for the rest of this plan: the baselines are the
+only copy of pre-change behaviour, and they live only on this machine. Task 6
+preserves a copy before overwriting them.
 
 ---
 
@@ -748,12 +753,23 @@ storage-attributable savings, which the lambda division over-corrects."
 **Files:**
 - Modify: `baseline_workbooks/` (all fourteen)
 
-- [ ] **Step 1: Confirm the pre-change baselines are safely in history**
+- [ ] **Step 1: Preserve the pre-change baselines, because git does not**
 
-Spec D5 requires the old baselines to be recoverable before they are overwritten. They are already tracked and committed (Vietnam from before this plan, Thailand from Task 3), so the recoverable copy is the current `HEAD` version of `baseline_workbooks/`. No new commit is needed, but the tree must be clean or the overwrite would bury an uncommitted change:
+Spec D5 requires the old baselines to be recoverable before they are overwritten. The original plan text claimed they were tracked and committed. **That was wrong**: `baseline_workbooks/` is gitignored scratch and has never been tracked, so `HEAD` holds no copy and overwriting them destroys the only record of pre-change behaviour.
+
+Copy all fourteen aside first, into the plan's SDD workspace:
 
 ```bash
-git status --short baseline_workbooks/
+cp -r baseline_workbooks .superpowers/sdd/2026-09-08-keen-thailand-final-pass/baselines-pre-delevelization
+ls -d .superpowers/sdd/2026-09-08-keen-thailand-final-pass/baselines-pre-delevelization/*/ | wc -l
+```
+
+Expected: 14. Do not proceed until that reads 14. The durable record of what changed is Task 5's measurement written into `MODEL_AUDIT.md`; this copy is what lets you re-measure without rebuilding.
+
+Then confirm the working tree is clean, so the overwrite buries nothing:
+
+```bash
+git status --short --ignored=no
 ```
 
 Expected: no output. If there is output, stop: an earlier task left the baselines dirty.
@@ -782,14 +798,11 @@ Run the gate command from Global Constraints. Expected: `TOTAL DIFFS 0`.
 
 - [ ] **Step 4: Commit**
 
-```bash
-git add baseline_workbooks/
-git commit -m "Re-baseline all fourteen workbooks after the de-levelization fix
+Nothing to stage: `baseline_workbooks/` is gitignored scratch. The overwrite is
+a local state change only, and this task produces no commit.
 
-The previous baselines remain in git history at the preceding commit. The
-movement was verified in the prior task: production-linked rows scaled by
-1 / lambda, capex and debt and O&M did not move."
-```
+The record of what moved is Task 5's entry in `MODEL_AUDIT.md`, which IS
+committed, plus the pre-change copy preserved in Step 1.
 
 ---
 
@@ -827,7 +840,7 @@ Open the result and confirm each changed label reads correctly against its value
 - [ ] **Step 6: Commit**
 
 ```bash
-git add proforma_vietnam/ baseline_workbooks/
+git add proforma_vietnam/
 git commit -m "Finish relabelling the levelized figures
 
 Three occurrences were corrected earlier, leaving the workbook
@@ -1186,7 +1199,7 @@ Specifically state whether storage is now built where it previously was not. Spe
 - [ ] **Step 7: Commit**
 
 ```bash
-git add outputs/thailand_case/ baseline_workbooks/thailand_rofu_case_*
+git add outputs/thailand_case/
 git commit -m "Re-solve the six Rofu cases on the confirmed benchmarks"
 ```
 
