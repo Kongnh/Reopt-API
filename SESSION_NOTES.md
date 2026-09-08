@@ -1,3 +1,218 @@
+# 2026-09-08 - HANDOFF: Vietnam shared core and Thailand adaptation
+
+Written for the next session picking this up cold. Branch `thailand-adaptation`
+at `17059f80`, 41 commits for the Keen Thailand deliverable on top of 41 for the
+earlier Thailand adaptation. Kept as a branch, not merged. Base is `master`,
+merge-base `74a8b04c`.
+
+## Orientation
+
+`proforma_vietnam` IS the shared financial core. `proforma_thailand` drives the
+same engine for a Thai factory (Rofu, Nakhon Ratchasima) that owns its rooftop
+solar directly, rather than Vietnam's ESCO structure. There is deliberately no
+`proforma_core` package and nothing was renamed: Vietnam-suffixed names carrying
+Thailand values (`annual_om_vnd` holding THB, `evn_energy_escalation_rate`
+holding a PEA rate) are by design, not debt. Do not "fix" them.
+
+The client deliverable is `outputs/thailand_case/rofu_thailand/`: a memo plus
+six case directories, each with `case.json`, `payload.json`, `assumptions.json`,
+`results.json`, `summary.json` and one workbook.
+
+## Verification: run all four before and after any change
+
+```
+./.venv/Scripts/python.exe -m unittest discover -s proforma_thailand/tests -t . -v
+./.venv/Scripts/python.exe -m unittest discover -s proforma_vietnam/tests -t . -v
+./.venv/Scripts/python.exe -m unittest reoptjl.test.test_thailand_tariff -v
+./.venv/Scripts/python.exe -c "
+from proforma_vietnam.tools.compare_workbooks import rebuild_all_cases, compare_workbooks
+built = rebuild_all_cases('.', 'gate_check')
+bad = 0
+for name, path in built.items():
+    diffs = compare_workbooks('baseline_workbooks/%s/%s' % (name, path.name), path)
+    print(name, 'OK' if not diffs else diffs[:3])
+    bad += len(diffs)
+print('TOTAL DIFFS', bad)
+raise SystemExit(1 if bad else 0)
+"
+```
+
+Last known green: Thailand 124/124, Vietnam 509/509, tariff 14/14, gate
+TOTAL DIFFS 0. Delete the scratch `gate_check/` afterwards; never commit it.
+
+The tariff suite lives under `reoptjl/` but needs no Django, so it runs on the
+venv. Useful when Docker is down.
+
+## Hard constraints
+
+- Never create, modify, regenerate or delete anything under `reo/` (deprecated
+  V1/V2, returns 410), `outputs/vietnam_case/`, or `baseline_workbooks/`.
+- **Vietnam's generated Excel output must not change.** Every change to
+  `proforma_vietnam` must be an additive keyword argument defaulting to today's
+  behaviour, or a `CountryProfile` field defaulting to Vietnam's current value.
+  The gate proves it.
+- No em dash in generated report output.
+- `./.venv/Scripts/python.exe` has NO Django. Django work runs inside the
+  `reopt_api-django-1` container.
+- Never modify the client source `.xlsm` files under the Keen Project folder.
+
+## Recurring failure modes on this branch, all of which actually happened
+
+Hunt for further instances of each. Two reached client documents twice.
+
+1. A field read that does not exist on the object, so a feature is a silent
+   no-op. (`initial_capital_cost` on PV outputs; `pv_degradation_rate` in
+   Thailand assumptions. Both made whole features inert while tests stayed green.)
+2. A test that passes identically with and without the feature it names.
+3. A test fixture drifting from production, so the suite exercises a path
+   production never takes and hides a Critical.
+4. A fix applied to one render site while an identical second goes unnoticed.
+   Three separate instances.
+5. A value rendered correctly under a label that misleads the reader.
+6. Vietnamese identity or ESCO language leaking onto a Thai client document.
+7. A guard present but not wired to production, or narrowed until it passes.
+8. A stale artifact read as current (name-sorted globbing picking an old
+   workbook; a cached fixture predating the fixes made for it).
+
+## Shared core (`proforma_vietnam`) - open items
+
+**Degradation is counted roughly twice. Deliberately left in place.**
+REopt reports dispatch and bills LEVELIZED: `year_one_energy_produced_kwh` is
+raw PVWatts times size, while `annual_energy_produced_kwh` carries a
+levelization factor of about 0.9606 derived from escalation, discount,
+degradation and term. `electric_to_load_series_kw` and `year_one_bill_before_tax`
+carry it too. The proforma then applies `(1 - degradation)^y` on top of that
+already-averaged base. Net effect: savings understated by about 4 percent, so
+NPV, IRR and lifetime avoided emissions are all understated. It errs in the
+client's favour. It was NOT fixed because the behaviour is shared with Vietnam
+and changing it breaks the byte-identical guarantee. Fixing it properly means
+deciding whether the proforma should stop applying degradation on top of REopt's
+levelized base, then re-baselining Vietnam. That is its own piece of work.
+
+**"Year 1" labels are only partly corrected.** Three occurrences were relabelled
+"levelized annual" (Technical Results section headers, the avoided-emissions
+row). Executive Summary, Buyer Analysis and Year 1 Snapshot rows carry the same
+levelization quirk under an unrelabelled "Year 1" name. Cosmetic, consistent
+direction, but a reader comparing sheets will notice.
+
+**The regression gate has three blind spots.** It is necessary, not sufficient.
+- `compare_workbooks` reads cells with `values_only=True`, so it compares cell
+  text and formulas but is blind to number formats, fonts, fills, widths, merged
+  ranges, defined names and charts. A styling change must be verified by reading
+  the built workbook directly. This already mattered once: the FX cell's
+  `number_format` displayed 32.5 as "33" and the gate could not see it.
+- `baseline_workbooks/` holds only Vietnam cases, so **Thailand behaviour has
+  zero gate protection**. Every Thailand guarantee rests on the unit suites
+  alone, which is how two Criticals reached six client workbooks past a green run.
+- The gate rebuilds from saved `results.json`, so `case_builder.py`,
+  `pvwatts_client.py` and `validators.py` are outside its coverage entirely.
+
+**`_unmasked()` strips `ALLOWED_SUBSTRINGS` case-sensitively** where the older
+check was case-insensitive. Harmless today because all entries render lowercase;
+it would produce a false positive, not a false negative, if that changed.
+
+**The Important 7 fix is not profile-gated.** The coincident-peak demand read is
+a field-read gap rather than a country-specific behaviour, verified empirically
+that all eight Vietnam baseline cases carry the field at 0.0. If a future Vietnam
+case ever populates `year_one_coincident_peak_cost_before_tax`, revisit.
+
+**Private helpers now cross module boundaries.** `proforma_thailand/report.py`
+imports `_pv_capex` and `_storage_capex` from `esco_pro_forma`. This is
+deliberate: the engine uses `_pv_capex` for `pv_capex_vnd`, the depreciation
+basis, and Thailand's insurance and inverter-replacement bases must not diverge
+from it. Do not promote or rename them without updating both callers.
+
+## Thailand (`proforma_thailand`) - open items
+
+- **19 of 24 cost inputs are provisional**, marked with the exact string
+  `PLACEHOLDER - pending Keen confirmation`. That string is matched by exact
+  equality in `placeholder_keys()` and by a production guard. Do not invent a
+  variant; that mistake was made once and had to be undone.
+- **Power factor is not computed.** It needs the site's monthly kVAR maximum,
+  which Keen has not supplied. Every case reports 0 kVAR and 0 mitigation cost,
+  with the status string saying "not computed", not "none required".
+- **`annual_om_per_kw` is coupled to `pv_installed_cost_per_kw`** (1 percent of
+  capex) but stored as a static literal, so a future capex change silently
+  desyncs it. The coupling is disclosed in the JSON note and the research note.
+- **`debt_interest_rate` uses MLR directly.** Real project debt prices at a
+  spread to MLR. Correct rate class and currency; conservative end taken.
+- **One inverter replacement in 25 years**, booked at year 11 with nothing near
+  year 22, so the array runs on 14-year-old inverters for the back half. Present
+  value of a second is roughly 12k USD.
+- **`grid_connection_cost` (308 USD) is disclosed but never enters capex.**
+  "Other capex" is 0 in all six cases. Immaterial in size, wrong in principle.
+- **REopt rounds PV cost parameters to whole dollars.** O&M is sourced at 7.50
+  USD/kWp-yr and sent as 7.5, but the model applies 8.00. This is now disclosed
+  in both memo and workbook and pinned by a test asserting the RETURNED value.
+  Any fractional PV cost parameter will behave the same way.
+- **`proforma_thailand/cases/rts/` and `rts_bess/` are superseded fixtures**
+  predating the corrected fuel adjustment. Their tests pass and they are not the
+  deliverable; do not read them as current results.
+- **No end-to-end test derives the inverter cost from solved PV capex.** Every
+  inverter test injects the cost explicitly. The derivation in `report.py` is the
+  exact thing that broke once (`initial_capital_cost` on PV outputs) and is
+  currently unguarded.
+
+## Deliverable - what a client would act on
+
+- **PV pins at the roof cap in cases 1 to 3.** Case 4 removed the roof limit and
+  the optimizer chose about 2,193 kW, ABOVE even the most generous roof estimate
+  of 2,106 kW. The roof binds across the whole plausible range, so confirming the
+  actual usable roof is the highest-value open item. Roof band derives from the
+  site survey: 5 roofs, 108 m long, widths recorded 24 m to 30 m, times 0.65
+  usable, times 0.20 kW/m2.
+- **Storage does not pay.** Given freedom to 4,000 kW / 16,000 kWh the optimizer
+  built zero at the roof-limited size and a token 38.68 kW when PV was oversized.
+  Any contractor proposal quoting a battery should be read against that.
+- **Never quote REopt's emissions outputs.** AVERT, Cambium and EASIUR are US
+  datasets with no Thailand coverage and every emissions output is zero. The
+  Scope 2 figure is an Allotrope calculation from avoided grid import at the TGO
+  factor 0.4750 kg CO2e/kWh (2022-2024 vintage, CFO Scope 2 grid-mix average,
+  effective 1 Jan 2026). A test injects a sentinel to prove the REopt fields stay
+  out of the workbook.
+- **The memo headline groups four no-storage cases with two storage cases.** A
+  reader skimming only the headline must hold that grouping in mind.
+- ERC generation licence and Aor.6 permit are required but excluded from capex,
+  having no public fee schedule. EIA and IEE are genuinely NOT required below
+  5 MWp, so their zero is a finding rather than a gap.
+
+## Tests and repo hygiene
+
+- `test_assumptions_list_the_active_placeholders` is effectively tautological; it
+  compares `sorted(placeholder_keys())` to the same call. Set correctness is
+  covered independently by the enumeration test, so no coverage gap results.
+- `RofuCaseTreeTests` reads raw `case.json` only and never calls
+  `build_thailand_case`, despite a docstring implying otherwise.
+- Minor style items: a tilt default expression computed twice in
+  `case_builder.py`; a test helper treating `storage={}` as `storage=None`;
+  `if extra_replacement_costs:` versus `is not None` in `esco_pro_forma.py`;
+  `GATE_PREPARED_ON` now defence-in-depth rather than load-bearing.
+- Two dead "ESCO discount-to-EVN" fallback strings remain in `audit_sheets.py`,
+  unreachable for direct ownership (they fire only when the structure is neither
+  DPPA, physical, nor direct ownership).
+- **About 102 MB is now committed under `outputs/thailand_case/`** (87 MB of
+  `results.json` plus workbooks), on top of 66 MB under `outputs/vietnam_case/`.
+  Precedented by convention but not sustainable. Worth an LFS or pruning
+  decision before more cases accumulate.
+
+## Where the reasoning lives
+
+- Spec: `docs/superpowers/specs/2026-09-05-keen-thailand-deliverable-design.md`
+- Plan: `docs/superpowers/plans/2026-09-05-keen-thailand-deliverable.md`
+- Earlier Thailand adaptation: the `2026-09-04-thailand-adaptation` spec and plan
+- Research: `docs/superpowers/notes/2026-09-05-thailand-cost-benchmarks.md`,
+  `2026-09-04-thai-depreciation.md`, `2026-09-04-coincident-peak-spike.md`
+- Client memo: `outputs/thailand_case/rofu_thailand/KEEN_THAILAND_MEMO.md`
+- Case input reference: `outputs/thailand_case/rofu_thailand/CASE_JSON_INPUT_GUIDE.md`
+
+The SDD execution ledger for this plan was deleted at handover per process; git
+history is the record. 28 controller rulings were reported to the user in session
+rather than committed, the load-bearing ones being: the discount rate stays
+provisional because 11.5 percent is a third-party developer's cost of equity and
+not a self-investing factory's hurdle rate; the degradation double-count is
+labels-only by decision; and the storage ceilings were raised before running so a
+binding bound could not decide the storage answer.
+
 # 2026-09-08 - Rofu Thailand current-tariff briefing
 
 - Reviewed the Gmail threads `Re: [EXTERNAL] Rofu Thailand - Hourly Data Request Letter of Authorization` and `Keen Thailand tool-related data` for project context. The factory is supplied directly by PEA Phimai; KEEN is evaluating rooftop solar and solar plus BESS. The latest site feedback says some roofs may require reinforcement and recommends an on-site structural assessment.
