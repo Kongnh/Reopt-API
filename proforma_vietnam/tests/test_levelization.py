@@ -9,7 +9,10 @@ without this correction degradation is counted roughly twice.
 """
 import unittest
 
-from proforma_vietnam.esco_pro_forma import _levelization_factor
+from proforma_vietnam.esco_pro_forma import (
+    _levelization_factor,
+    calculate_esco_pro_forma_from_reopt_results,
+)
 
 
 class LevelizationFactorTests(unittest.TestCase):
@@ -114,6 +117,66 @@ class DeLevelizationApplicationTests(unittest.TestCase):
         apply(after, 1.0)
 
         self.assertEqual(after, before)
+
+
+class EndToEndDeLevelizationTests(unittest.TestCase):
+    """Drive the real call site, not just the two helpers in isolation.
+
+    The unit tests above pin ``_apply_de_levelization`` directly, but nothing
+    pinned that ``calculate_esco_pro_forma_from_reopt_results`` (the function
+    every rebuild path actually calls) still invokes it. Without this, the
+    only thing protecting the fix was a gitignored local baseline that a
+    fresh clone does not have.
+    """
+
+    def test_demand_savings_equal_the_levelized_savings_divided_by_lambda(self):
+        reopt_results = {
+            "inputs": {
+                "ElectricTariff": {"tou_energy_rates_per_kwh": [1000, 2000]},
+                "ElectricStorage": {"can_grid_charge": False},
+                "Financial": {"owner_discount_rate_fraction": 0.11},
+            },
+            "outputs": {
+                "PV": {
+                    "size_kw": 100,
+                    "installed_cost_per_kw": 1000,
+                    "electric_to_load_series_kw": [1, 2],
+                    # lambda = annual / year_one = 900 / 1000 = 0.9
+                    "year_one_energy_produced_kwh": 1000.0,
+                    "annual_energy_produced_kwh": 900.0,
+                },
+                "ElectricStorage": {
+                    "initial_capital_cost": 10000,
+                    "storage_to_load_series_kw": [3, 4],
+                },
+                "ElectricTariff": {
+                    "year_one_bill_before_tax_bau": 50000,
+                    "year_one_bill_before_tax": 30000,
+                    "year_one_demand_cost_before_tax_bau": 8000,
+                    "year_one_demand_cost_before_tax": 3000,
+                },
+                "Financial": {"year_one_om_costs_before_tax": 1000},
+            },
+        }
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=1,
+        )
+
+        # REopt's reported (levelized) demand savings: 8000 - 3000 = 5000.
+        # De-levelized by lambda = 0.9: 5000 / 0.9 = 5555.555...
+        levelized_savings = 8000 - 3000
+        lam = 900.0 / 1000.0
+        expected_savings = levelized_savings / lam
+
+        annual = result["annual_cash_flows"][0]
+        self.assertAlmostEqual(annual["demand_charge_savings_vnd"], expected_savings)
+
+        # Capex is untouched by the de-levelization: PV capex depends only on
+        # size_kw * installed_cost_per_kw, not on any production series.
+        self.assertEqual(result["summary"]["total_capex_vnd"], 110000)
 
 
 if __name__ == "__main__":

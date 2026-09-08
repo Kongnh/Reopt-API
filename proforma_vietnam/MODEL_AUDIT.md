@@ -342,3 +342,145 @@ Cover status "ALL CHECKS PASS" on every workbook, zero REVIEW cells, exit
 code 0. The capitalized cases (1–3, 5–6) now carry the per-replacement
 depreciation row and the replacement-aware total-depreciation / EBT formulas;
 these tie out to the engine under recalc.
+
+## 9. 2026-09-08 de-levelization fix (Task 4/5, Keen Thailand final pass)
+
+REopt applies its own levelization factor to PV production inside the MILP,
+so `year_one_bill_before_tax`, `year_one_demand_cost_before_tax`, and every
+PV/storage dispatch series carry that weighting despite the `year_one`
+prefix on their names. The proforma then applied `(1 - degradation) ^ year`
+on its own axis, counting degradation twice and understating savings. Task 4
+(commit `b7d7cf05`) added `_levelization_factor` and `_apply_de_levelization`
+to `proforma_vietnam/esco_pro_forma.py` to undo REopt's levelization on the
+three quantities that carry it (`project_served_pv_kwh`, and the SAVINGS
+DELTA on `optimized_evn_bill_vnd` / `optimized_demand_charge_vnd`, not the
+bills themselves) before the proforma's own degradation is applied. This
+section records the measured movement.
+
+### Measured lambda (levelized / raw year-one PV production)
+
+| Country | Lambda | Understatement (1/lambda - 1) | Cases measured |
+|---|---|---|---|
+| Thailand | 0.9606123122450961 | 4.100269 percent | rofu_thailand case_1-6, uniform to 9 significant figures |
+| Vietnam | 0.9528685459644826 | 4.946270 percent | factory_a case_1-6, uniform to 9 significant figures |
+
+Lambda is computed per case from each case's own `results.json` as
+`annual_energy_produced_kwh / year_one_energy_produced_kwh` summed over PV
+outputs, per `_levelization_factor`. It is a function of the financial
+escalation/discount/degradation parameters REopt levelizes over, not of PV
+size, which is why it is uniform within a country. The two battery-only
+Vietnam cases (`bess_arbitrage_5mw`, `bess_arbitrage_5mw_mfg`) have no PV
+output, so `_levelization_factor` returns 1.0 by design and their rebuilt
+workbooks are **byte-identical** to baseline (0 diffs each).
+
+### Rebuild diff counts (all 14 cases, `baseline_workbooks/` vs a fresh rebuild)
+
+| Case | Diffs |
+|---|---|
+| factory_a_case_1 | 344 |
+| factory_a_case_2 | 342 |
+| factory_a_case_3 | 342 |
+| factory_a_case_4 | 348 |
+| factory_a_case_5 (DPPA) | 2 |
+| factory_a_case_6 (DPPA) | 2 |
+| thailand_rofu_case_1 | 357 |
+| thailand_rofu_case_2 | 357 |
+| thailand_rofu_case_3 | 357 |
+| thailand_rofu_case_4 | 357 |
+| thailand_rofu_case_5 | 357 |
+| thailand_rofu_case_6 | 357 |
+| vietnam_case_bess_arbitrage_5mw | 0 |
+| vietnam_case_bess_arbitrage_5mw_mfg | 0 |
+
+factory_a_case_5/6 (grid-CfD DPPA) diff on only 2 Assumptions-sheet cells
+(the optimized-EVN-bill and served-energy-retail-value derivations) because
+the DPPA settlement path does not route the ESCO energy line through
+`optimized_evn_bill_vnd` the way cases 1-4 do; the movement is still present,
+just isolated to fewer cells.
+
+Two independent spot checks, both to full floating-point precision:
+
+- **Thailand case_1**: savings 262196.1000000001 to 272946.8451088329, ratio
+  1.041002688860867 = 1/lambda exactly. Optimized bill moved to
+  570496.364891167 = `843443.21 - 272946.8451088329` (bau minus the new
+  savings), **not** `bau_bill / lambda` or `optimized_bill / lambda`.
+- **Vietnam case_1**: served-energy retail value 538254.76341496 to
+  564878.2989999368, ratio 1.0494627031557764 = 1/lambda exactly. Same ratio
+  on the ESCO energy revenue base line (484429.287073464 to
+  508390.4690999431), since that line is a scalar multiple of served-energy
+  value.
+
+### Invariant: capex, debt schedule, and O&M did not move
+
+**Verdict: HOLDS on all 14 cases.** Checked two independent ways:
+
+1. **Exhaustive cell diff.** `compare_workbooks` performs a full cell-by-cell
+   scan of every sheet, so any capex/debt/O&M cell that changed would appear
+   in the diff list. Every diffed row across all 12 non-trivial cases was
+   inventoried and resolved to its row label; none matched a raw capex,
+   debt-schedule (opening/closing balance, interest, principal repayment,
+   debt service), O&M, replacement-cost, or capex-driven-depreciation line.
+   The only rows that moved are: the three de-levelized Assumptions lines
+   (optimized bill, demand-savings base, served-energy retail value / ESCO
+   revenue base) and everything mechanically downstream of them (DSCR,
+   equity/project IRR, NPV, payback, ROI, per-year cash flow, buyer savings).
+   DSCR moving is expected and correct: its numerator (CFADS, driven by
+   revenue) changed while its denominator (the debt schedule) did not.
+2. **Direct named-cell comparison.** `PV_CAPEX`, `BESS_CAPEX`, `OTHER_CAPEX`,
+   `TOTAL_CAPEX`, `DEBT_FRACTION`, `DEBT_RATE`, `DEBT_TERM_YEARS`,
+   `DEBT_PRINCIPAL`, `DEBT_PAYMENT`, and `OM_YEAR1` were read directly from
+   both the baseline and the rebuilt workbook for all 12 non-trivial cases.
+   All 10 named cells were identical, value for value, on every case.
+
+Nothing was scaled that depends on debt or O&M rather than PV production.
+
+### Step 3: Vietnam storage-attributable residual
+
+The correction is derived purely from PV's own levelization ratio and
+applied uniformly to the pooled served-to-load energy series
+(`project_served_pv_kwh` = PV-to-load + storage-to-load, when
+`can_grid_charge` is false), which drives `esco_energy_revenue_vnd`. Storage
+dispatch does not carry PV's degradation curve, so the fraction of that
+pooled series contributed by storage bounds how much of the correction may
+be mis-attributed to storage rather than PV, on that one revenue line:
+
+| Case | PV-to-load (kWh) | Storage-to-load (kWh) | Storage share of served pool | Bound (share x 4.946270 pct) |
+|---|---|---|---|---|
+| case_1 | 3,764,123 | 1,889,551 | 0.3342 | 1.65 pct |
+| case_2 | 3,710,296 | 2,433,129 | 0.3961 | 1.96 pct |
+| case_3 | 3,487,762 | 2,720,270 | 0.4382 | 2.17 pct |
+| case_4 | 3,345,178 | 0 (no storage) | 0.0000 | 0.00 pct |
+| case_5 | 3,710,296 | 2,433,129 | 0.3961 | 1.96 pct |
+| case_6 | 3,855,551 | 338,566 | 0.0807 | 0.40 pct |
+
+This bound applies **only** to the served-energy / ESCO-energy-revenue line.
+The demand-charge savings and the aggregate `year_one_bill_before_tax` /
+`year_one_demand_cost_before_tax` REopt outputs are total, undecomposed
+quantities: REopt does not report a PV-only or storage-only counterfactual
+bill, so **the storage-attributable share of total bill savings is not
+separable from these outputs alone.** The table above is the honest limit of
+what the saved `results.json` files support; no single blended percentage is
+reported because per-case storage share ranges from 0 to 43.8 percent and a
+weighted average would misrepresent the individual cases.
+
+### Test coverage added
+
+`proforma_vietnam/tests/test_levelization.py` gained
+`EndToEndDeLevelizationTests`, which drives
+`calculate_esco_pro_forma_from_reopt_results` (the actual call site every
+rebuild path uses) with a fixture carrying both `year_one_energy_produced_kwh`
+and a differing `annual_energy_produced_kwh`, and asserts
+`demand_charge_savings_vnd` equals the REopt-reported (levelized) savings
+divided by lambda. Verified to actually fail (5000.0 instead of the expected
+5555.56) when the `_apply_de_levelization` call is temporarily removed from
+the wrapper, then restored. Previously only the two helper functions were
+unit-tested directly; nothing pinned that the wrapper itself still calls
+them.
+
+### Suites run (2026-09-08)
+
+Thailand 126/126, Vietnam 521/521 (at or above the 514 floor set in the task
+brief), tariff (`reoptjl/test/test_thailand_tariff.py`) 14/14. No pinned test
+in any of the three suites changed state, consistent with Task 4 Step 10's
+finding that neither suite covers `calculate_esco_pro_forma_from_reopt_results`
+with an absolute-value assertion on this path.
