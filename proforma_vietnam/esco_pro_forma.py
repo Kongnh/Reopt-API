@@ -102,6 +102,14 @@ def calculate_esco_pro_forma_from_reopt_results(
         "owner_discount_rate_fraction": financial_inputs.get("owner_discount_rate_fraction", 0.10),
     }
 
+    # REopt returns levelized dispatch, so year_one_bill_before_tax and every
+    # dispatch series already carry degradation. The cash flow then applies
+    # (1 - deg)^y on its own axis, which counted degradation roughly twice
+    # and understated savings by 4.10 percent (Thailand) / 4.95 percent
+    # (Vietnam). Undo the levelization here so the cash flow's own degradation
+    # is the only one applied.
+    _apply_de_levelization(cash_flow_inputs, _levelization_factor(pv_outputs))
+
     pv_capacity_kw = sum(_value(pv, "size_kw") for pv in pv_outputs)
     if storage_inputs.get("can_grid_charge") is True and pv_capacity_kw == 0:
         # Battery-only grid-charging case: with no PV, every discharged kWh was
@@ -230,6 +238,51 @@ def calculate_esco_pro_forma_from_reopt_results(
     cash_flow_inputs.setdefault("exchange_rate_vnd_per_usd", exchange_rate_vnd_per_usd)
 
     return calculate_vietnam_esco_cash_flow(**cash_flow_inputs)
+
+
+def _levelization_factor(pv_outputs):
+    """Ratio of REopt's levelized annual PV production to its raw first year.
+
+    REopt applies this weighting to the PV production parameter inside the
+    optimisation, so every dispatch series and the bill computed from them
+    carry it, despite the "year_one" prefix on their names. Dividing by this
+    factor recovers a true first year for the proforma to degrade on its own
+    time axis. Returns 1.0 whenever there is no usable production, which
+    leaves battery-only cases untouched.
+    """
+    raw = sum(_value(pv, "year_one_energy_produced_kwh") for pv in pv_outputs)
+    levelized = sum(_value(pv, "annual_energy_produced_kwh") for pv in pv_outputs)
+    if raw <= 0 or levelized <= 0:
+        return 1.0
+    return levelized / raw
+
+
+def _apply_de_levelization(cash_flow_inputs, levelization_factor):
+    """Undo REopt's levelization on the three quantities that carry it.
+
+    ``project_served_pv_kwh`` is PV production, so it scales directly. The
+    bills do not: BAU carries no PV and is a true first year, so it is the
+    SAVINGS DELTA that is levelized. Scaling the optimized bill by
+    1 / lambda would inflate the whole bill including the part PV never
+    touched. Capex, debt and O&M are absent here on purpose; none of them
+    depends on production.
+    """
+    if levelization_factor == 1.0:
+        return
+
+    served = cash_flow_inputs.get("project_served_pv_kwh")
+    if served:
+        cash_flow_inputs["project_served_pv_kwh"] = [
+            value / levelization_factor for value in served
+        ]
+
+    for optimized_key, bau_key in (
+        ("optimized_evn_bill_vnd", "bau_evn_bill_vnd"),
+        ("optimized_demand_charge_vnd", "bau_demand_charge_vnd"),
+    ):
+        bau = cash_flow_inputs[bau_key]
+        savings = bau - cash_flow_inputs[optimized_key]
+        cash_flow_inputs[optimized_key] = bau - savings / levelization_factor
 
 
 def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rate_vnd_per_usd):
