@@ -183,3 +183,26 @@ class PreparedDateNormalizationTests(TestCase):
         b = _write(self.tmp, "b.xlsx", [["2026-09-05"]])
 
         self.assertEqual(len(compare_workbooks(a, b)), 1)
+
+
+class RebuildAllCasesCoversBothCountriesTests(unittest.TestCase):
+    """The gate protected Vietnam only, which is how two Critical defects
+    reached six Thailand client workbooks past a green test run."""
+
+    def test_case_dirs_include_the_six_thailand_cases(self):
+        from proforma_vietnam.tools.compare_workbooks import CASE_DIRS
+
+        thailand = [d for d in CASE_DIRS if "thailand_case" in d]
+        self.assertEqual(len(thailand), 6)
+
+    def test_thailand_case_names_do_not_collide_with_vietnam(self):
+        from proforma_vietnam.tools.compare_workbooks import case_name_for
+
+        self.assertEqual(
+            case_name_for("outputs/thailand_case/rofu_thailand/case_1"),
+            "thailand_rofu_case_1",
+        )
+        self.assertEqual(
+            case_name_for("outputs/vietnam_case/factory_a/case_1"),
+            "factory_a_case_1",
+        )

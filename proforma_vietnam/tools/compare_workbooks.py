@@ -123,30 +123,50 @@ CASE_DIRS = [
     "outputs/vietnam_case/factory_a/case_6",
     "outputs/vietnam_case/bess_arbitrage_5mw",
     "outputs/vietnam_case/bess_arbitrage_5mw_mfg",
+    "outputs/thailand_case/rofu_thailand/case_1",
+    "outputs/thailand_case/rofu_thailand/case_2",
+    "outputs/thailand_case/rofu_thailand/case_3",
+    "outputs/thailand_case/rofu_thailand/case_4",
+    "outputs/thailand_case/rofu_thailand/case_5",
+    "outputs/thailand_case/rofu_thailand/case_6",
 ]
+
+
+def case_name_for(case_dir):
+    """Baseline directory name for a case path.
+
+    Thailand cases are prefixed because "case_1" alone collides with Vietnam's
+    factory_a case_1 once both countries share one baseline tree.
+    """
+    parts = Path(case_dir).parts
+    if "thailand_case" in parts:
+        return "thailand_{}_{}".format(parts[-2].replace("rofu_thailand", "rofu"), parts[-1])
+    return "_".join(parts[-2:])
 
 
 def rebuild_all_cases(repo_root, out_dir, prepared_on=GATE_PREPARED_ON):
     """Rebuild every saved case into ``out_dir``; return {case name: path}.
 
     Copies each case's results/assumptions/case JSON into a scratch directory so
-    rebuild_report writes there instead of over the tracked workbooks.
+    the country rebuilder writes there instead of over the tracked workbooks.
     """
     import shutil
 
-    from proforma_vietnam.rebuild_report import rebuild_report
+    from proforma_thailand.rebuild_report import rebuild_report as rebuild_thailand
+    from proforma_vietnam.rebuild_report import rebuild_report as rebuild_vietnam
 
     repo_root = Path(repo_root)
     out_dir = Path(out_dir)
     built = {}
     for case_dir in CASE_DIRS:
         source = repo_root / case_dir
-        name = "_".join(Path(case_dir).parts[-2:])
+        name = case_name_for(case_dir)
         target = out_dir / name
         target.mkdir(parents=True, exist_ok=True)
         for filename in ("results.json", "assumptions.json", "case.json"):
             candidate = source / filename
             if candidate.exists():
                 shutil.copy2(candidate, target / filename)
-        built[name] = rebuild_report(target, prepared_on=prepared_on)
+        rebuild = rebuild_thailand if "thailand_case" in case_dir else rebuild_vietnam
+        built[name] = rebuild(target, prepared_on=prepared_on)
     return built
