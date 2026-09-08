@@ -59,6 +59,22 @@ class SummarizeResultsTests(TestCase):
 
         self.assertEqual(summary["power_factor_compensation_kvar"], 0.0)
 
+    def test_annual_pv_kwh_uses_the_true_first_year_not_the_levelized_value(self):
+        # REopt levelizes annual_energy_produced_kwh across the project
+        # lifetime inside the optimisation; year_one_energy_produced_kwh is
+        # the true first-year value (see
+        # proforma_vietnam.esco_pro_forma._levelization_factor). This is the
+        # figure that feeds summary.json and, from there, the client memo -
+        # it must match the raw first year, not REopt's levelized average.
+        results = self._results()
+        results["outputs"]["PV"]["annual_energy_produced_kwh"] = 2424811.22
+        results["outputs"]["PV"]["year_one_energy_produced_kwh"] = 2524235.0
+
+        summary = summarize_results(results, extras={})
+
+        self.assertAlmostEqual(summary["annual_pv_kwh"], 2524235.0, places=2)
+        self.assertNotAlmostEqual(summary["annual_pv_kwh"], 2424811.22, places=2)
+
 
 class PollCompletenessTests(TestCase):
     """status can read optimal while outputs are still being written."""

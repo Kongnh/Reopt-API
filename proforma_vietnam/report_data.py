@@ -1,3 +1,6 @@
+from proforma_vietnam.esco_pro_forma import _levelization_factor
+
+
 def build_vietnam_report_data(reopt_results, cash_flow_result=None,
                               poa_irradiance_series=None,
                               time_steps_per_hour=1):
@@ -15,15 +18,40 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
     load_outputs = outputs.get("ElectricLoad") or {}
     tariff_outputs = outputs.get("ElectricTariff") or {}
 
+    # REopt levelizes PV production inside the optimisation, so the PV- and
+    # storage-derived dispatch series below carry that weighting despite
+    # their "year_one"-adjacent naming (see esco_pro_forma._levelization_factor).
+    # Dividing by the same factor the cash flow already uses puts these
+    # DISPLAYED series on the true first-year basis the cash flow is on.
+    # load_series, grid_to_load and grid_to_storage are grid/customer
+    # quantities, not PV production, and are left alone.
+    levelization_factor = _levelization_factor(pv_outputs)
+
     load_series = _series(load_outputs.get("load_series_kw")) or _series(load_inputs.get("loads_kw"))
-    pv_to_load = _sum_series([pv.get("electric_to_load_series_kw", []) for pv in pv_outputs])
-    pv_to_storage = _sum_series([pv.get("electric_to_storage_series_kw", []) for pv in pv_outputs])
-    pv_curtailed = _sum_series([pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs])
-    pv_to_grid = _sum_series([pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs])
+    pv_to_load = _de_levelize(
+        _sum_series([pv.get("electric_to_load_series_kw", []) for pv in pv_outputs]),
+        levelization_factor,
+    )
+    pv_to_storage = _de_levelize(
+        _sum_series([pv.get("electric_to_storage_series_kw", []) for pv in pv_outputs]),
+        levelization_factor,
+    )
+    pv_curtailed = _de_levelize(
+        _sum_series([pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs]),
+        levelization_factor,
+    )
+    pv_to_grid = _de_levelize(
+        _sum_series([pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs]),
+        levelization_factor,
+    )
     grid_to_load = _series(utility_outputs.get("electric_to_load_series_kw"))
     grid_to_storage = _series(utility_outputs.get("electric_to_storage_series_kw"))
-    storage_to_load = _series(storage_outputs.get("storage_to_load_series_kw"))
+    storage_to_load = _de_levelize(
+        _series(storage_outputs.get("storage_to_load_series_kw")),
+        levelization_factor,
+    )
     # Original PV generation before any dispatch split (load/storage/grid/curtailment).
+    # Built from the already de-levelized series above, so it needs no separate division.
     pv_total = _sum_series([pv_to_load, pv_to_storage, pv_to_grid, pv_curtailed])
     # Hourly solar resource: PVWatts plane-of-array irradiance (W/m2), shown on
     # the Dispatch sheet. The per-kW production factor (kWh/kW) is kept for the
@@ -200,6 +228,19 @@ def _sum_series(series_list):
 
 def _series(value):
     return value if isinstance(value, list) else []
+
+
+def _de_levelize(series, levelization_factor):
+    """Undo REopt's PV levelization on a displayed dispatch series.
+
+    Mirrors esco_pro_forma._apply_de_levelization_to_dispatch: dividing by
+    the same factor recovers the true first-year magnitude, so the
+    displayed series matches the already-corrected cash flow instead of
+    diverging from it.
+    """
+    if levelization_factor == 1.0 or not series:
+        return series
+    return [value / levelization_factor for value in series]
 
 
 def _upsample_series(series, factor):

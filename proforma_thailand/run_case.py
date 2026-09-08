@@ -63,7 +63,13 @@ def summarize_results(results, extras):
         "bess_kw": float(storage.get("size_kw") or 0.0),
         "bess_kwh": float(storage.get("size_kwh") or 0.0),
         "annual_load_kwh": annual_load,
-        "annual_pv_kwh": float(pv.get("annual_energy_produced_kwh") or 0.0),
+        # REopt levelizes annual_energy_produced_kwh across the project
+        # lifetime inside the optimisation; year_one_energy_produced_kwh is
+        # the true first-year value (see
+        # proforma_vietnam.esco_pro_forma._levelization_factor). This feeds
+        # summary.json and the client memo, so it must be on the same
+        # first-year basis as the corrected workbook.
+        "annual_pv_kwh": float(pv.get("year_one_energy_produced_kwh") or 0.0),
         "grid_offset_fraction": grid_offset,
         "power_factor_compensation_kvar": float(
             extras.get("power_factor_compensation_kvar") or 0.0
