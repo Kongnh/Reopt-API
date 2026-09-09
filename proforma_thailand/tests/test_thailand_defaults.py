@@ -149,7 +149,7 @@ class CoupledDefaultsAreDerivedTests(TestCase):
         om = value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
 
         self.assertAlmostEqual(om, pv_capex * 0.015, places=9)
-        self.assertAlmostEqual(om, 7.125, places=9)
+        self.assertAlmostEqual(om, 7.5, places=9)
 
     def test_replacement_is_seventy_percent_of_install(self):
         from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of

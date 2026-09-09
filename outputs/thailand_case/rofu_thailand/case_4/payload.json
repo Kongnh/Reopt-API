@@ -82772,17 +82772,17 @@
     ]
   },
   "Financial": {
-    "analysis_years": 25,
+    "analysis_years": 20,
     "elec_cost_escalation_rate_fraction": 0.03,
     "om_cost_escalation_rate_fraction": 0.03,
     "offtaker_tax_rate_fraction": 0.2,
-    "offtaker_discount_rate_fraction": 0.115,
-    "owner_discount_rate_fraction": 0.115,
+    "offtaker_discount_rate_fraction": 0.11,
+    "owner_discount_rate_fraction": 0.11,
     "owner_tax_rate_fraction": 0.2
   },
   "PV": {
     "max_kw": 3230.0,
-    "installed_cost_per_kw": 750.0,
+    "installed_cost_per_kw": 500.0,
     "om_cost_per_kw": 7.5,
     "federal_itc_fraction": 0.0,
     "macrs_option_years": 0,

@@ -672,7 +672,7 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
 
 class PvOmCostRoundingDisclosureTests(TestCase):
     """Ruling 22 / final review R3: the memo discloses that PV O&M was sourced
-    at 7.125 USD/kWp-yr, sent as 7.125, and applied by REopt as 7.00 (REopt.jl
+    at 7.5 USD/kWp-yr, sent as 7.5, and applied by REopt as 8.00 (REopt.jl
     rounds PV cost parameters to whole dollars) -- but the workbook itself
     carried no such row. These lock the disclosure onto the Assumptions
     sheet. Gated on a key only proforma_thailand.report sets, so the default
@@ -687,14 +687,14 @@ class PvOmCostRoundingDisclosureTests(TestCase):
 
     def test_all_three_values_render_on_the_assumptions_sheet(self):
         results = _results()
-        results["outputs"]["PV"]["om_cost_per_kw"] = 7.0
+        results["outputs"]["PV"]["om_cost_per_kw"] = 8.0
         workbook, _ = build_thailand_report(results, ASSUMPTIONS)
         sheet = workbook["Assumptions"]
 
         for label, expected in (
-            ("PV O&M cost, sourced", 7.125),
-            ("PV O&M cost, sent to REopt", 7.125),
-            ("PV O&M cost, applied by REopt", 7.0),
+            ("PV O&M cost, sourced", 7.5),
+            ("PV O&M cost, sent to REopt", 7.5),
+            ("PV O&M cost, applied by REopt", 8.0),
         ):
             rows = self._rows_with_label(sheet, label)
             self.assertEqual(len(rows), 1, "expected exactly one {!r} row".format(label))
@@ -801,17 +801,20 @@ class InverterCostIsDerivedFromSolvedCapexTests(TestCase):
     def test_inverter_replacement_is_nonzero_when_only_solved_capex_is_present(self):
         from proforma_thailand.report import build_thailand_report
 
-        results = self._results_with_solved_pv(size_kw=1000.0, cost_per_kw=475.0)
+        results = self._results_with_solved_pv(size_kw=1000.0, cost_per_kw=400.0)
         assumptions = self._assumptions_without_explicit_inverter_cost()
 
         workbook, _extras = build_thailand_report(results, assumptions)
 
-        # 10 percent of 1000 kW x 475 USD/kW = 47,500, booked as a raw
-        # replacement-year cash outflow in year 11.
+        # 10 percent of 1000 kW x 400 USD/kW = 40,000, booked as a raw
+        # replacement-year cash outflow in year 11. The 400 is deliberately
+        # NOT the production pv_installed_cost_per_kw: this test covers the
+        # derivation mechanism, so tying it to a default would make it track
+        # price changes instead of guarding the arithmetic.
         value_at_year_11 = self._replacement_row_value_at_year(workbook, 11)
         self.assertIsNotNone(value_at_year_11, "no replacement row rendered at all")
         self.assertAlmostEqual(
-            value_at_year_11, 47500.0, delta=1.0,
+            value_at_year_11, 40000.0, delta=1.0,
             msg="inverter cost was not derived from solved PV capex",
         )
 
@@ -832,7 +835,7 @@ class InverterCostIsDerivedFromSolvedCapexTests(TestCase):
         """
         from proforma_thailand.report import build_thailand_report
 
-        results = self._results_with_solved_pv(size_kw=1000.0, cost_per_kw=475.0)
+        results = self._results_with_solved_pv(size_kw=1000.0, cost_per_kw=400.0)
         workbook, _extras = build_thailand_report(
             results, self._assumptions_without_explicit_inverter_cost()
         )

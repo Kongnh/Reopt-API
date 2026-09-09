@@ -379,3 +379,62 @@ class SurplusExportDeLevelizationTests(unittest.TestCase):
         self.assertAlmostEqual(
             cash_flow_inputs["surplus_export_kwh_year1"], 350.0, places=6
         )
+
+
+class TechnicalResultsSavingsMatchTheCashFlowTests(unittest.TestCase):
+    """The fifth site of the levelization defect, and the one that reached a
+    client-facing sheet.
+
+    report_data._results_comparison reads REopt's tariff outputs directly,
+    bypassing the correction esco_pro_forma applies. Before the fix, one
+    workbook reported 263279 as "Utility Bill Savings" on Technical Results
+    and 272717 as "Year 1 Buyer Savings" on Executive Summary: the same
+    quantity, two numbers, differing by exactly the levelization factor.
+
+    The invariant this pins is not "the number is 272717" but "the two
+    sheets agree", which is what actually caught every instance of this
+    defect. Tests and the regression gate stayed green through all five.
+    """
+
+    def _tariff(self):
+        return {
+            "year_one_bill_before_tax_bau": 1000.0,
+            "year_one_bill_before_tax": 800.0,
+            "year_one_demand_cost_before_tax_bau": 500.0,
+            "year_one_demand_cost_before_tax": 400.0,
+            "year_one_coincident_peak_cost_before_tax_bau": 0.0,
+            "year_one_coincident_peak_cost_before_tax": 0.0,
+        }
+
+    def _pv(self):
+        # lambda = 0.95
+        return [{
+            "year_one_energy_produced_kwh": 1000.0,
+            "annual_energy_produced_kwh": 950.0,
+        }]
+
+    def test_savings_are_de_levelized_like_the_cash_flow(self):
+        from proforma_vietnam.report_data import _results_comparison
+
+        out = _results_comparison(self._tariff(), self._pv())
+
+        # Levelized savings 200 / 0.95 = 210.526..., so the optimized bill
+        # lands at 1000 - 210.526 and NOT at 800 / 0.95.
+        self.assertAlmostEqual(out["utility_bill_savings_usd"], 200.0 / 0.95, places=9)
+        self.assertAlmostEqual(out["demand_charge_savings_usd"], 100.0 / 0.95, places=9)
+
+    def test_bau_is_untouched(self):
+        from proforma_vietnam.report_data import _results_comparison
+
+        out = _results_comparison(self._tariff(), self._pv())
+
+        self.assertEqual(out["bau_utility_bill_usd"], 1000.0)
+        self.assertEqual(out["bau_demand_charge_usd"], 500.0)
+
+    def test_no_pv_is_a_no_op(self):
+        from proforma_vietnam.report_data import _results_comparison
+
+        out = _results_comparison(self._tariff(), [])
+
+        self.assertEqual(out["utility_bill_savings_usd"], 200.0)
+        self.assertEqual(out["demand_charge_savings_usd"], 100.0)

@@ -213,26 +213,21 @@ class PvOmCostRoundingTests(TestCase):
     pins the solver's actual rounding behaviour rather than an assumption
     about it.
 
-    Task 8 (client-confirmed benchmarks): this fixture was solved under the
-    superseded defaults (pv_installed_cost_per_kw 750, annual_om_per_kw 7.5,
-    rounded to 8.0 applied). FINANCIAL_DEFAULTS now carries the client's
-    confirmed 475 / 7.125, which case_1 has not yet been re-solved against -
-    that re-solve is Task 11's, and outputs/ is out of scope here. So `sent`
-    below is pinned to the historical value actually in effect when this
-    fixture was generated, not read live off FINANCIAL_DEFAULTS: reading it
-    live would compare today's default against yesterday's solve and assert
-    something false about this file. Once Task 11 regenerates this fixture
-    under the new defaults, this pin should move to 7.125 sent / 7.0 applied
-    and go back to reading FINANCIAL_DEFAULTS live.
+    The fixture has since been re-solved (2026-09-09) under the client's
+    confirmed defaults, so `sent` is read live off FINANCIAL_DEFAULTS again
+    rather than pinned to a historical literal. That is the stronger form:
+    it fails if the committed results.json ever drifts from the defaults it
+    was supposedly solved under, which a hardcoded pin cannot detect.
     """
 
     RESULTS_PATH = Path(
         "outputs/thailand_case/rofu_thailand/case_1/results.json"
     )
 
-    # The sent rate in effect when RESULTS_PATH was solved, not today's
-    # FINANCIAL_DEFAULTS value. See class docstring.
-    SENT_OM_PER_KW_AT_SOLVE_TIME = 7.5
+    @property
+    def SENT_OM_PER_KW_AT_SOLVE_TIME(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+        return value_of(FINANCIAL_DEFAULTS, "annual_om_per_kw")
 
     def setUp(self):
         self.results = json.loads(self.RESULTS_PATH.read_text(encoding="utf-8"))

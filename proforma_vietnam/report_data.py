@@ -103,7 +103,7 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
             ) / time_steps_per_hour,
             "grid_to_storage_kwh": sum(grid_to_storage) / time_steps_per_hour,
         },
-        "results_comparison": _results_comparison(tariff_outputs),
+        "results_comparison": _results_comparison(tariff_outputs, pv_outputs),
         "load_duration": _load_duration(load_series, grid_to_load),
         "developer_financial_performance": cash_flow_result.get("summary", {}),
         "dppa_hourly_breakout": cash_flow_result.get("dppa_hourly_breakout", []),
@@ -167,7 +167,7 @@ def _production_factor_series(pv_outputs, pv_inputs):
     return []
 
 
-def _results_comparison(tariff_outputs):
+def _results_comparison(tariff_outputs, pv_outputs=()):
     bau_bill = _value(tariff_outputs, "year_one_bill_before_tax_bau")
     optimized_bill = _value(tariff_outputs, "year_one_bill_before_tax")
     # A coincident-peak demand structure (PEA's on-peak kW charge, billed as the
@@ -187,6 +187,17 @@ def _results_comparison(tariff_outputs):
     # REopt money outputs are USD (the EVN tariff is converted VND->USD at the
     # contract rate before the optimizer runs), so these keys carry the _usd
     # suffix — they are not VND amounts.
+    # REopt's tariff outputs are levelized, exactly like its dispatch series,
+    # so the raw difference here is a lifetime-weighted average and not a first
+    # year. The cash flow already corrects this in esco_pro_forma; without the
+    # same correction the Technical Results sheet reported 263279 where the
+    # Executive Summary reported 272717 for one quantity in one workbook.
+    # BAU carries no PV, so it is a true first year and is not scaled; it is
+    # the SAVINGS DELTA that is levelized.
+    levelization_factor = _levelization_factor(pv_outputs)
+    optimized_bill = bau_bill - (bau_bill - optimized_bill) / levelization_factor
+    optimized_demand = bau_demand - (bau_demand - optimized_demand) / levelization_factor
+
     return {
         "bau_utility_bill_usd": bau_bill,
         "optimized_utility_bill_usd": optimized_bill,
