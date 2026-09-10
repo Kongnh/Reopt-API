@@ -1,3 +1,116 @@
+# 2026-09-10 - Keen Thailand deliverable complete, merged to master
+
+Branch `thailand-adaptation` merged to `master` by fast-forward, 97 commits,
+NOT pushed. `origin/master` is 97 behind. Deliverables are in
+`outputs/thailand_case/rofu_thailand/`.
+
+## The one thing to know before touching this code
+
+**REopt's dispatch and tariff outputs are LEVELIZED, despite `year_one_` in
+their names.** The optimiser applies an escalation/discount/degradation weight
+to PV production inside the solve, so every series and every bill it returns is
+a lifetime-weighted average, not a first year. The proforma then applied
+`(1 - deg)^y` on top, counting degradation twice.
+
+This session found and fixed the defect in **six** separate places. Each was
+found by comparing two figures that should have been equal, never by a test or
+the gate, both of which stayed green through all six:
+
+1. `esco_pro_forma._apply_de_levelization` - the three `cash_flow_inputs`
+   quantities. Note it is the SAVINGS DELTA that scales by `1/lambda`, not the
+   bill: BAU carries no PV and is a true first year.
+2. `esco_pro_forma._apply_de_levelization_to_dispatch` - the grid-CfD DPPA
+   settlement basis. Symptom that led here: Vietnam cases 5 and 6 moved by only
+   2 cells when the others moved by 340+, because `cash_flow.py:271` zeroes
+   `base_energy_revenue_vnd` for grid-CfD.
+3. `esco_pro_forma._apply_surplus_export` - latent, no case enables it.
+4. `report_data` dispatch series and `run_case.summarize_results` - the
+   displayed figures, which had diverged from the corrected cash flow.
+5. `report_data._results_comparison` - Technical Results reported 263279 of
+   savings where Executive Summary reported 272717. Same quantity, two numbers,
+   one workbook, and the client-facing sheet held the wrong one.
+6. `emissions.annual_avoided_tco2e` - avoided emissions understated 3.6 percent.
+
+`_apply_physical_dppa` was checked and is correct: it consumes the already
+corrected `project_served_pv_kwh`.
+
+Lambda is term-dependent: 0.960612 at 25 years, 0.965392 at 20. Do not hardcode
+it; `_levelization_factor(pv_outputs)` derives it per case.
+
+## Method that actually worked
+
+Every defect this session came from reconciling two numbers that had to agree,
+not from adding tests. When you change anything here, pick a quantity that
+appears in two places and check it end to end. The suites and the gate are
+necessary and they are not sufficient; they were green for all six.
+
+## Gate limitations, now four
+
+- `values_only=True`, so it is blind to number formats, fonts, widths, charts.
+- It rebuilds from saved `results.json`, so `case_builder`, `pvwatts_client`
+  and `validators` are outside its coverage.
+- `baseline_workbooks/` is gitignored scratch (`.gitignore:139`, added in the
+  same commit that created the gate). It has NEVER been tracked, so the gate
+  protects only within a session that generated baselines first. Never
+  `git add -f` it.
+- **New:** it locates baselines by FILENAME, and filenames carry the run uuid.
+  After any re-solve the gate cannot find its own baselines and raises
+  FileNotFoundError. Comparing by content is a manual step today. Fixing this
+  properly means separating baseline identity from filename.
+
+## Client-confirmed inputs, 2026-09-09
+
+PV 500 USD/kWp, project life 20 years, BESS 100 USD/kW + 150 USD/kWh,
+replacement at 70 percent of install, discount rate 11 percent. O&M is coupled
+at 1.5 percent of PV capex and `defaults/__init__._assert_couplings_hold()`
+fails at IMPORT if a price change desyncs it. That guard has already earned its
+place once. Power factor and grid connection are excluded from capex at client
+direction, which is a scoping decision and is disclosed as one, not as a
+finding that no mitigation is needed.
+
+The 500 USD/kWp is roughly 19 percent below the bottom of every published Thai
+benchmark located (Krungsri 615-769, MDPI 767). Returns scale directly off it,
+so the memo states plainly that it is client-supplied rather than benchmarked.
+
+## Results and the two conclusions
+
+Six cases, all optimal. Storage is selected wherever permitted: 429 kWh at the
+roof-limited size, 2378 kWh with the roof relaxed, neither at a bound.
+
+**This REVERSES the previously shipped advice that storage never pays.** It
+survived a deliberate robustness check: the cases were run at 475/25yr and at
+500/20yr, the second worse for storage on both counts, and storage was selected
+both times.
+
+**The roof binds.** Unconstrained optimum 2549 kW against a most-generous roof
+estimate of 2106 kW. Measuring the roof is the highest-value open item.
+
+A claim that did NOT survive: at 475/25yr the transformer also bound and that
+was reported to the user; at 500/20yr it does not. Only the roof is now called
+a constraint.
+
+## Open items
+
+- **Repo size.** 112 MB under `outputs/thailand_case`, 76 MB under
+  `outputs/vietnam_case`, both tracked. `baseline_workbooks/` is another 133 MB
+  but gitignored. The gate rebuilds from those `results.json` files, so
+  deleting them breaks it. This needs an LFS-or-prune decision, not a
+  unilateral cleanup.
+- **Dead code, reported not deleted** per CLAUDE.md: four unreachable ESCO
+  discount-to-EVN strings in `audit_sheets.py` at lines 295, 1136, 2004, 2521.
+  Reachable only when the structure is neither DPPA, physical, nor direct
+  ownership.
+- **Power factor** is still not computed; the site kVAR maximum was never
+  requested, by client direction.
+- **Grid export** is modelled as strictly prohibited. Curtailment runs 8.6
+  percent at the roof-limited size and 19.2 percent at the unconstrained
+  optimum. If export can be negotiated at any price, the optimal size rises
+  again and the economics improve materially. No price was available to model.
+- **Fourteen inputs remain provisional**, marked with the exact string
+  `PLACEHOLDER - pending Keen confirmation`, matched by equality. Do not invent
+  a variant.
+- **Not pushed.** `origin/master` is 97 commits behind.
+
 # 2026-09-08 - HANDOFF: Vietnam shared core and Thailand adaptation
 
 Written for the next session picking this up cold. Branch `thailand-adaptation`
