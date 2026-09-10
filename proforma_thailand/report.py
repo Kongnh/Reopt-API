@@ -21,6 +21,7 @@ from proforma_thailand.emissions import (
 )
 from proforma_vietnam.country_profile import THAILAND_PROFILE
 from proforma_vietnam.esco_pro_forma import (
+    _levelization_factor,
     calculate_esco_pro_forma_from_reopt_results,
     # Private-by-convention, imported anyway: esco_pro_forma.py already uses
     # _pv_capex to compute pv_capex_vnd, the depreciation basis. If Thailand
@@ -180,6 +181,13 @@ def annual_opex_usd(pv_capex_usd, bess_capex_usd, other_capex_usd,
     return (annual_om_usd or 0.0) + total_capex * (insurance_rate_fraction or 0.0)
 
 
+def _as_pv_list(pv_outputs):
+    """REopt returns PV as a dict for one array and a list for several."""
+    if not pv_outputs:
+        return []
+    return pv_outputs if isinstance(pv_outputs, list) else [pv_outputs]
+
+
 def build_thailand_report(reopt_results, assumptions):
     """Return ``(workbook, extras)`` for a Thailand DIRECT_OWNERSHIP run."""
     power_factor = compute_power_factor_compensation(assumptions)
@@ -267,6 +275,7 @@ def build_thailand_report(reopt_results, assumptions):
         load_outputs.get("annual_calculated_kwh"),
         utility_outputs.get("annual_energy_supplied_kwh"),
         emission_factor,
+        levelization_factor=_levelization_factor(_as_pv_list(outputs.get("PV"))),
     )
 
     workbook_assumptions = dict(assumptions)

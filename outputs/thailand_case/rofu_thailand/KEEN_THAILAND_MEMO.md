@@ -33,12 +33,12 @@ storage at the roof-limited and roof-relaxed sizes.
 
 | | PV (kW) | Storage | Capex (USD) | Year 1 savings | Grid offset | tCO2e/yr | Equity IRR | Equity NPV |
 |---|---|---|---|---|---|---|---|---|
-| 1. Roof, low | 1,685 | none | 842,500 | 272,717 | 30.8% | 1,058 | 66.4% | 1,304,997 |
-| 2. Roof, mid | 1,895 | none | 947,500 | 299,784 | 33.8% | 1,163 | 64.5% | 1,415,588 |
-| 3. Roof, high | 2,106 | none | 1,053,000 | 324,301 | 36.6% | 1,258 | 62.2% | 1,506,642 |
-| 4. No roof limit | 2,549 | none | 1,274,321 | 364,048 | 41.1% | 1,414 | 56.1% | 1,610,103 |
-| 5. Roof, low, with storage | 1,685 | 238 kW / 429 kWh | 930,596 | 291,754 | 31.4% | 1,079 | 63.8% | 1,363,615 |
-| 6. No roof limit, with storage | 2,957 | 575 kW / 2,378 kWh | 1,892,524 | 482,282 | 50.9% | 1,749 | 47.8% | 1,922,690 |
+| 1. Roof, low | 1,685 | none | 842,500 | 272,717 | 30.8% | 1,096 | 66.4% | 1,304,997 |
+| 2. Roof, mid | 1,895 | none | 947,500 | 299,784 | 33.8% | 1,205 | 64.5% | 1,415,588 |
+| 3. Roof, high | 2,106 | none | 1,053,000 | 324,301 | 36.6% | 1,304 | 62.2% | 1,506,642 |
+| 4. No roof limit | 2,549 | none | 1,274,321 | 364,048 | 41.1% | 1,465 | 56.1% | 1,610,103 |
+| 5. Roof, low, with storage | 1,685 | 238 kW / 429 kWh | 930,596 | 291,754 | 31.4% | 1,117 | 63.8% | 1,363,615 |
+| 6. No roof limit, with storage | 2,957 | 575 kW / 2,378 kWh | 1,892,524 | 482,282 | 50.9% | 1,812 | 47.8% | 1,922,690 |
 
 Financing throughout is 70% debt at 6.5% over 10 years, against a 20 year
 project life and an 11% discount rate. Case 1 equity is 252,750 USD against

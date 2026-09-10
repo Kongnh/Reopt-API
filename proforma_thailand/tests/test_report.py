@@ -93,11 +93,17 @@ class ThailandReportTests(TestCase):
         self.assertTrue(any("THB" in text for text in texts))
         self.assertFalse(any("VND" in text or "EVN" in text for text in texts))
 
-    def test_technical_results_labels_the_levelized_rows_correctly(self):
+    def test_technical_results_labels_the_rows_as_year_one(self):
         # Important 8 / Ruling 23: REopt's year_one_bill_before_tax and
         # electric_to_load_series_kw are already levelized across the 25-year
         # horizon, not a true undegraded first year, so these Technical
-        # Results section headers must say "Levelized Annual", not "Year 1".
+        # These headers used to read "Levelized Annual" because the figures
+        # under them carried REopt's escalation/discount/degradation weighting.
+        # The de-levelization work of 2026-09-08/09 removed that weighting from
+        # the dispatch series, the tariff comparison and the emissions basis, so
+        # they are now a true first year and the old headers would misdescribe
+        # them in the opposite direction. The assertion is inverted rather than
+        # deleted: it still guards against a header that lies about its basis.
         workbook, _ = build_thailand_report(_results(), ASSUMPTIONS)
         sheet = workbook["Technical Results"]
 
@@ -106,10 +112,10 @@ class ThailandReportTests(TestCase):
             for value in row if isinstance(value, str)
         ]
 
-        self.assertIn("Annual Energy Balance (Levelized Annual)", titles)
-        self.assertIn("Levelized Annual Utility Bill Comparison", titles)
-        self.assertNotIn("Annual Energy Balance (Year 1)", titles)
-        self.assertNotIn("Year-1 Utility Bill Comparison", titles)
+        self.assertIn("Annual Energy Balance (Year 1)", titles)
+        self.assertIn("Year-1 Utility Bill Comparison", titles)
+        self.assertNotIn("Annual Energy Balance (Levelized Annual)", titles)
+        self.assertNotIn("Levelized Annual Utility Bill Comparison", titles)
 
     def test_power_factor_compensation_is_computed_from_billed_demand(self):
         assumptions = dict(ASSUMPTIONS, billed_demand_kw=800.0)
@@ -656,7 +662,7 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
         for label in (
             "Grid emission factor",
             "Grid emission factor vintage",
-            "Avoided emissions, levelized annual",
+            "Avoided emissions, year 1",
         ):
             rows = self._rows_with_label(sheet, label)
             self.assertEqual(
@@ -664,7 +670,7 @@ class ScopeTwoAvoidedEmissionsAuditRowTests(TestCase):
                 "expected exactly one {!r} row, found {}".format(label, len(rows)),
             )
 
-        row = self._rows_with_label(sheet, "Avoided emissions, levelized annual")[0]
+        row = self._rows_with_label(sheet, "Avoided emissions, year 1")[0]
         self.assertAlmostEqual(
             sheet.cell(row=row, column=3).value, extras["annual_avoided_tco2e"],
         )

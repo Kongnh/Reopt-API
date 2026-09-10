@@ -13,11 +13,22 @@ as the grid offset, so the emissions figure and the offset figure cannot drift.
 
 
 def annual_avoided_tco2e(annual_load_kwh, annual_grid_kwh,
-                         grid_emission_factor_kg_per_kwh):
-    """Year-one avoided Scope 2 emissions in tonnes CO2e."""
+                         grid_emission_factor_kg_per_kwh,
+                         levelization_factor=1.0):
+    """Year-one avoided Scope 2 emissions in tonnes CO2e.
+
+    ``levelization_factor`` undoes the weighting REopt applies inside the
+    optimisation. Load is the customer's own and carries none, but the grid
+    figure is load minus a levelized PV contribution, so their DIFFERENCE is
+    levelized and must be divided back out. Without this the annual figure
+    already carried degradation and lifetime_avoided_tco2e below then applied
+    degradation again, understating avoided emissions by about 3.6 percent.
+    """
     if not grid_emission_factor_kg_per_kwh:
         return 0.0
     avoided_kwh = max(0.0, (annual_load_kwh or 0.0) - (annual_grid_kwh or 0.0))
+    if levelization_factor and levelization_factor != 1.0:
+        avoided_kwh /= levelization_factor
     return avoided_kwh * grid_emission_factor_kg_per_kwh / 1000.0
 
 

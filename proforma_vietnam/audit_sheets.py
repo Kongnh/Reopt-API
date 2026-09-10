@@ -833,13 +833,14 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
             ),
         )
         entry(
-            # "year 1" figures built from load_outputs.annual_calculated_kwh /
-            # utility_outputs.annual_energy_supplied_kwh are REopt's levelized
-            # (escalation/discount/degradation-weighted) annual outputs, not a
-            # true undegraded first year (Important 8 / Ruling 23). This block
-            # only renders for Thailand today (Vietnam never sets
+            # Was "levelized annual" because the basis carried REopt's
+            # escalation/discount/degradation weighting while
+            # lifetime_avoided_tco2e then applied degradation again, a double
+            # count worth about 3.6 percent. emissions.annual_avoided_tco2e now
+            # divides the levelization back out, so this is a true first year.
+            # Only Thailand renders this block (Vietnam never sets
             # annual_avoided_tco2e), so no profile gate is needed here.
-            "Avoided emissions, levelized annual",
+            "Avoided emissions, year 1",
             avoided,
             unit="tonnes CO2e",
             source="Allotrope calculation from avoided grid import. Not a REopt output.",

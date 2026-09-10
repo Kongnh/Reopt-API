@@ -837,16 +837,14 @@ def _write_technical_results(worksheet, report_data, profile=VIETNAM_PROFILE):
     # not a true undegraded first year (Important 8 / Ruling 23: fix the
     # label, not the engine, since the double-count is pre-existing
     # shared-core behaviour). Vietnam's heading text is left unchanged.
-    energy_balance_title = (
-        "Annual Energy Balance (Year 1)"
-        if profile.country == "Vietnam" else
-        "Annual Energy Balance (Levelized Annual)"
-    )
-    bill_comparison_title = (
-        "Year-1 Utility Bill Comparison"
-        if profile.country == "Vietnam" else
-        "Levelized Annual Utility Bill Comparison"
-    )
+    # Both countries now display a true first year. The de-levelization work of
+    # 2026-09-08/09 removed the levelization from the dispatch series, the
+    # tariff comparison and the emissions basis, so the country gate that used
+    # to distinguish them is gone. Leaving Thailand labelled "Levelized Annual"
+    # would now misdescribe the number in the opposite direction.
+    energy_balance_title = "Annual Energy Balance (Year 1)"
+    bill_comparison_title = "Year-1 Utility Bill Comparison"
+
     sections = [
         ("System Sizing", SYSTEM_SIZING_ROWS, report_data.get("system_sizing", {})),
         (energy_balance_title, ANNUAL_PRODUCTION_ROWS,
