@@ -32,6 +32,8 @@ VIETNAM_REPORT_QUERY_KEYS = [
     "pv_degradation_rate",
     "pv_depreciation_years",
     "battery_replacement_year",
+    "pv_inverter_replacement_year",
+    "pv_inverter_replacement_fraction_of_pv_capex",
     "demand_savings_esco_share",
     "grid_charging_enabled",
 ]

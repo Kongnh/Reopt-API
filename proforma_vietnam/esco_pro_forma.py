@@ -29,6 +29,10 @@ def calculate_esco_pro_forma_from_reopt_results(
     extra_replacement_costs = cash_flow_overrides.pop(
         "extra_replacement_costs_by_year", None
     )
+    pv_inverter_year = cash_flow_overrides.pop("pv_inverter_replacement_year", None)
+    pv_inverter_fraction = cash_flow_overrides.pop(
+        "pv_inverter_replacement_fraction_of_pv_capex", None
+    )
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
 
@@ -144,6 +148,21 @@ def calculate_esco_pro_forma_from_reopt_results(
             exchange_rate_vnd_per_usd,
             tariff_money_values_currency,
         )
+    # Shared replacement policy: one PV inverter event at a fraction of the
+    # SOLVED PV capex, derived here so both countries book it from one place.
+    # Added, never assigned: a bare override would delete the BESS event.
+    pv_inverter_replacement = _pv_inverter_replacement(
+        pv_outputs, pv_inverter_year, pv_inverter_fraction
+    )
+    if pv_inverter_replacement is not None:
+        cash_flow_inputs["replacement_costs_by_year"] = _merge_replacement_costs(
+            cash_flow_inputs.get("replacement_costs_by_year"),
+            _money_series(
+                pv_inverter_replacement["series"],
+                exchange_rate_vnd_per_usd,
+                tariff_money_values_currency,
+            ),
+        )
     if extra_replacement_costs:
         # Added, not assigned: a bare override would silently delete the BESS
         # replacement derived above.
@@ -243,7 +262,18 @@ def calculate_esco_pro_forma_from_reopt_results(
     # of aliasing USD values under VND labels.
     cash_flow_inputs.setdefault("exchange_rate_vnd_per_usd", exchange_rate_vnd_per_usd)
 
-    return calculate_vietnam_esco_cash_flow(**cash_flow_inputs)
+    result = calculate_vietnam_esco_cash_flow(**cash_flow_inputs)
+    if pv_inverter_replacement is not None:
+        result["derivation"]["pv_inverter_replacement"] = {
+            "year": pv_inverter_replacement["year"],
+            "fraction": pv_inverter_replacement["fraction"],
+            "cost_usd": _money(
+                pv_inverter_replacement["cost"],
+                exchange_rate_vnd_per_usd,
+                tariff_money_values_currency,
+            ),
+        }
+    return result
 
 
 def _levelization_factor(pv_outputs):
@@ -518,6 +548,23 @@ def _bess_replacement_costs(storage_inputs, storage_outputs, replacement_year_ov
     costs = [0.0] * int(replacement_year)
     costs[int(replacement_year) - 1] = cost
     return costs
+
+
+def _pv_inverter_replacement(pv_outputs, year, fraction):
+    """One PV inverter event at ``fraction`` of the solved PV capex in ``year``.
+
+    Returns None when either policy value is unset or the run has no PV, so a
+    battery-only case books nothing and a caller that never adopted the policy
+    is unchanged. Money is in REopt's own currency here; the caller converts.
+    """
+    if not year or not fraction:
+        return None
+    cost = _pv_capex(pv_outputs) * fraction
+    if cost <= 0:
+        return None
+    series = [0.0] * int(year)
+    series[int(year) - 1] = cost
+    return {"year": int(year), "fraction": fraction, "cost": cost, "series": series}
 
 
 def _merge_replacement_costs(base, extra):

@@ -50,6 +50,10 @@ PASSTHROUGH_OVERRIDE_KEYS = (
     "battery_replacement_year",
     "bess_depreciation_years",
     "cit_standard_rate",
+    # Shared replacement policy; the core derives the PV inverter event from
+    # these and the solved PV capex.
+    "pv_inverter_replacement_year",
+    "pv_inverter_replacement_fraction_of_pv_capex",
 )
 
 
@@ -86,15 +90,6 @@ def cash_flow_overrides_from_assumptions(assumptions):
     )
     if assumptions.get("direct_ownership") is not None:
         overrides["direct_ownership"] = assumptions["direct_ownership"]
-    # REopt.jl models no PV inverter replacement, and neither did this proforma,
-    # which overstates a 25-year case. Book it as its own replacement event so it
-    # hits the year it actually falls in rather than being smeared into O&M.
-    inverter_year = assumptions.get("inverter_replacement_year")
-    inverter_cost = assumptions.get("inverter_replacement_cost_usd")
-    if inverter_year and inverter_cost:
-        series = [0.0] * int(inverter_year)
-        series[int(inverter_year) - 1] = float(inverter_cost)
-        overrides["extra_replacement_costs_by_year"] = series
     return overrides
 
 
@@ -195,9 +190,9 @@ def build_thailand_report(reopt_results, assumptions):
     mitigation_cost = power_factor["mitigation_cost_usd"]
 
     # Capex comes from the solved results, not the roof-area cap handed to
-    # REopt, so the inverter replacement (below) and insurance (further down)
-    # are both derived here rather than in the case builder, which does not
-    # yet know the optimized sizes.
+    # REopt, so insurance (below) is derived here rather than in the case
+    # builder, which does not yet know the optimized sizes. The PV inverter
+    # event is derived the same way inside the shared core.
     outputs = reopt_results.get("outputs") or {}
     inputs = reopt_results.get("inputs") or {}
     # PVOutputs carries no initial_capital_cost field (that only exists on
@@ -214,13 +209,6 @@ def build_thailand_report(reopt_results, assumptions):
     storage_outputs = outputs.get("ElectricStorage") or {}
     financial_outputs = outputs.get("Financial") or {}
     pv_capex = _pv_capex(pv_outputs_list)
-
-    # Copy so the caller's assumptions dict is untouched; the derived cost
-    # only needs to reach cash_flow_overrides_from_assumptions below.
-    assumptions = dict(assumptions)
-    assumptions["inverter_replacement_cost_usd"] = pv_capex * value_of(
-        FINANCIAL_DEFAULTS, "inverter_replacement_fraction_of_pv_capex"
-    )
 
     overrides = cash_flow_overrides_from_assumptions(assumptions)
     if mitigation_cost:

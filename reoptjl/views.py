@@ -490,6 +490,8 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         "pv_degradation_rate": "pv_degradation_rate",
         "pv_depreciation_years": "pv_depreciation_years",
         "battery_replacement_year": "battery_replacement_year",
+        "pv_inverter_replacement_year": "pv_inverter_replacement_year",
+        "pv_inverter_replacement_fraction_of_pv_capex": "pv_inverter_replacement_fraction_of_pv_capex",
         "demand_savings_esco_share": "esco_demand_savings_share",
     }
 
@@ -500,7 +502,8 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
             value = float(request.GET[query_key])
         except ValueError:
             raise ValueError(f"{query_key} must be a number.")
-        if query_key in ("debt_term_years", "pv_depreciation_years", "battery_replacement_year"):
+        if query_key in ("debt_term_years", "pv_depreciation_years", "battery_replacement_year",
+                         "pv_inverter_replacement_year"):
             value = int(value)
         assumptions[query_key] = value
         if query_key.endswith("_vnd"):

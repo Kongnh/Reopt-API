@@ -869,6 +869,80 @@ class ExtraReplacementCostsTests(unittest.TestCase):
         self.assertEqual(merged, [0.0, 100.0])
 
 
+class PvInverterReplacementTests(TestCase):
+    """The shared core books the PV inverter event for both countries:
+    fraction x SOLVED PV capex in the policy year, added to the BESS event."""
+
+    def _results(self, pv_kw=100, bess=False):
+        results = deepcopy(_fake_reopt_results(can_grid_charge=True))
+        results["outputs"]["PV"]["size_kw"] = pv_kw
+        if bess:
+            results["inputs"]["ElectricStorage"].update(
+                {"replace_cost_per_kw": 100.0, "replace_cost_per_kwh": 150.0,
+                 "battery_replacement_year": 10}
+            )
+            results["outputs"]["ElectricStorage"].update({"size_kw": 10, "size_kwh": 20})
+        return results
+
+    def test_the_event_lands_at_fraction_of_solved_pv_capex_in_the_policy_year(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(pv_kw=100),
+            esco_energy_discount_fraction=0.9,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
+        )
+        series = result["derivation"]["replacement_costs_by_year_usd"]
+        self.assertEqual(len(series), 11)
+        self.assertAlmostEqual(series[10], 10000.0)      # 100 kW x 1000 x 0.10, year 11
+        self.assertEqual(sum(series[:10]), 0.0)
+        self.assertEqual(
+            result["derivation"]["pv_inverter_replacement"],
+            {"year": 11, "fraction": 0.10, "cost_usd": 10000.0},
+        )
+
+    def test_the_event_adds_to_the_bess_event_rather_than_replacing_it(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(pv_kw=100, bess=True),
+            esco_energy_discount_fraction=0.9,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
+        )
+        series = result["derivation"]["replacement_costs_by_year_usd"]
+        self.assertAlmostEqual(series[9], 10 * 100.0 + 20 * 150.0)   # BESS, year 10
+        self.assertAlmostEqual(series[10], 10000.0)                   # PV inverter, year 11
+
+    def test_the_event_adds_to_an_explicit_extra_series_too(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(pv_kw=100),
+            esco_energy_discount_fraction=0.9,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
+            extra_replacement_costs_by_year=[0.0] * 10 + [1.0],
+        )
+        self.assertAlmostEqual(
+            result["derivation"]["replacement_costs_by_year_usd"][10], 10001.0
+        )
+
+    def test_no_pv_means_no_event_and_no_block(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(pv_kw=0, bess=True),
+            esco_energy_discount_fraction=0.9,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
+        )
+        series = result["derivation"]["replacement_costs_by_year_usd"]
+        self.assertEqual(len(series), 10)
+        self.assertNotIn("pv_inverter_replacement", result["derivation"])
+
+    def test_omitting_the_policy_keys_books_nothing(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(pv_kw=100),
+            esco_energy_discount_fraction=0.9,
+        )
+        self.assertEqual(result["derivation"].get("replacement_costs_by_year_usd"), [])
+        self.assertNotIn("pv_inverter_replacement", result["derivation"])
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

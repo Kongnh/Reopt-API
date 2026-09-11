@@ -247,14 +247,13 @@ def _results_with_replacements():
     return results
 
 
-# inverter_replacement_year matches case_builder.py's production default (11);
-# inverter_replacement_cost_usd is overwritten by build_thailand_report from
-# the fixture's own PV capex, but must be set here so cash_flow_overrides_
-# from_assumptions treats the inverter series as active before that happens.
+# The shared replacement policy as case_builder.py records it (year 11, 10
+# percent of PV capex); the shared core derives the cost from the fixture's
+# own solved PV capex.
 PROVENANCE_ASSUMPTIONS = dict(
     ASSUMPTIONS,
-    inverter_replacement_year=11,
-    inverter_replacement_cost_usd=118_000.0,
+    pv_inverter_replacement_year=11,
+    pv_inverter_replacement_fraction_of_pv_capex=0.10,
 )
 
 
@@ -407,8 +406,8 @@ class DirectOwnershipLabelTests(TestCase):
         results["outputs"]["PV"]["installed_cost_per_kw"] = 1_000.0
         assumptions = dict(
             ASSUMPTIONS,
-            inverter_replacement_year=11,
-            inverter_replacement_cost_usd=118_000.0,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
         )
         workbook, _ = build_thailand_report(results, assumptions)
         sheet = workbook["Pro Forma (Audit)"]
@@ -470,19 +469,21 @@ class DepreciationAndInverterReplacementTests(TestCase):
         )
         self.assertEqual(overrides["bess_depreciation_years"], 5)
 
-    def test_inverter_replacement_lands_in_the_right_year(self):
+    def test_pv_inverter_policy_is_passed_to_the_core(self):
         overrides = cash_flow_overrides_from_assumptions(dict(
             ASSUMPTIONS,
-            inverter_replacement_year=11,
-            inverter_replacement_cost_usd=118_000.0,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
         ))
-        series = overrides["extra_replacement_costs_by_year"]
-        self.assertEqual(len(series), 11)
-        self.assertEqual(series[10], 118_000.0)
-        self.assertEqual(sum(series[:10]), 0.0)
+        self.assertEqual(overrides["pv_inverter_replacement_year"], 11)
+        self.assertEqual(overrides["pv_inverter_replacement_fraction_of_pv_capex"], 0.10)
+        # The report layer no longer builds the series itself.
+        self.assertNotIn("extra_replacement_costs_by_year", overrides)
 
-    def test_no_inverter_replacement_emits_no_series(self):
+    def test_no_pv_inverter_policy_emits_no_keys(self):
         overrides = cash_flow_overrides_from_assumptions(dict(ASSUMPTIONS))
+        self.assertNotIn("pv_inverter_replacement_year", overrides)
+        self.assertNotIn("pv_inverter_replacement_fraction_of_pv_capex", overrides)
         self.assertNotIn("extra_replacement_costs_by_year", overrides)
 
     def test_cit_rate_is_passed_through(self):
@@ -492,15 +493,17 @@ class DepreciationAndInverterReplacementTests(TestCase):
         self.assertAlmostEqual(overrides["cit_standard_rate"], 0.20)
 
     def test_inverter_replacement_does_not_displace_a_battery_replacement(self):
-        # extra_replacement_costs_by_year is merged ADDITIVELY onto the battery
-        # schedule (proforma_vietnam/esco_pro_forma.py:_merge_replacement_costs).
-        # A wholesale override would silently zero out the battery cost, so this
+        # The PV inverter event is merged ADDITIVELY onto the battery schedule
+        # (proforma_vietnam/esco_pro_forma.py:_merge_replacement_costs). A
+        # wholesale override would silently zero out the battery cost, so this
         # checks the full merged series rather than just the inverter value.
         from proforma_vietnam.esco_pro_forma import (
             calculate_esco_pro_forma_from_reopt_results,
         )
 
         results = _results()
+        # 1000 kW x 1180 USD/kW x 0.10 = 118,000 for the PV inverter.
+        results["outputs"]["PV"]["installed_cost_per_kw"] = 1180.0
         results["inputs"]["ElectricStorage"] = {
             "can_grid_charge": False,
             "battery_replacement_year": 10,
@@ -512,8 +515,8 @@ class DepreciationAndInverterReplacementTests(TestCase):
 
         assumptions = dict(
             ASSUMPTIONS,
-            inverter_replacement_year=11,
-            inverter_replacement_cost_usd=118_000.0,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
         )
         overrides = cash_flow_overrides_from_assumptions(assumptions)
 
@@ -782,12 +785,13 @@ class InverterCostIsDerivedFromSolvedCapexTests(TestCase):
         return results
 
     def _assumptions_without_explicit_inverter_cost(self):
-        # ASSUMPTIONS carries no inverter_replacement_cost_usd key to begin
-        # with; setting only the replacement year means build_thailand_report's
-        # own pv_capex derivation is the sole source of the cost figure.
-        assumptions = dict(ASSUMPTIONS, inverter_replacement_year=11)
-        assumptions.pop("inverter_replacement_cost_usd", None)
-        return assumptions
+        # Only the policy year and fraction are recorded; the shared core's
+        # derivation from solved PV capex is the sole source of the cost.
+        return dict(
+            ASSUMPTIONS,
+            pv_inverter_replacement_year=11,
+            pv_inverter_replacement_fraction_of_pv_capex=0.10,
+        )
 
     def _replacement_row_value_at_year(self, workbook, year):
         # The Pro Forma (Audit) sheet's replacement row is written from

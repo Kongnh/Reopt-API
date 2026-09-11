@@ -174,6 +174,8 @@ def cash_flow_overrides_from_assumptions(assumptions):
         "pv_degradation_rate": "pv_degradation_rate",
         "pv_depreciation_years": "pv_depreciation_years",
         "battery_replacement_year": "battery_replacement_year",
+        "pv_inverter_replacement_year": "pv_inverter_replacement_year",
+        "pv_inverter_replacement_fraction_of_pv_capex": "pv_inverter_replacement_fraction_of_pv_capex",
         "demand_savings_esco_share": "esco_demand_savings_share",
         "grid_charging_enabled": "grid_charging_enabled",
         "dppa": "dppa_inputs",
