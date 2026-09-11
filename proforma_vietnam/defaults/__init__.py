@@ -19,6 +19,30 @@ FINANCIAL_DEFAULTS = _DEFAULTS["financial"]
 TAX_DEFAULTS = _DEFAULTS["tax"]
 SURPLUS_EXPORT_DEFAULTS = _DEFAULTS["surplus_export"]
 
+# Equipment replacement policy shared by every country branch (rulings of
+# 2026-09-11). A country's JSON carries its own prices and provenance, but its
+# horizon and replacement schedule must agree with these or its defaults
+# module refuses to import; that is what keeps the two branches from drifting.
+PROJECT_YEARS = 20
+BESS_REPLACEMENT_YEAR = 10                       # storage inverter and pack together
+BESS_REPLACE_FRACTION_OF_INSTALL = 1.0           # replacement priced at install cost
+PV_INVERTER_REPLACEMENT_YEAR = 11
+PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX = 0.10
+
+
+def _assert_policy_holds():
+    if FINANCIAL_DEFAULTS["project_years"] != PROJECT_YEARS:
+        raise ValueError(
+            "vietnam_defaults.json financial.project_years is {} but the shared "
+            "replacement policy is {} years. Change the policy for both countries "
+            "or re-derive the JSON.".format(
+                FINANCIAL_DEFAULTS["project_years"], PROJECT_YEARS
+            )
+        )
+
+
+_assert_policy_holds()
+
 _EVN_TARIFF_PATH = os.path.join(os.path.dirname(__file__), "evn_tariff_rates.json")
 
 with open(_EVN_TARIFF_PATH, encoding="utf-8") as _evn_tariff_f:

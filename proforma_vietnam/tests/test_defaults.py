@@ -57,3 +57,33 @@ class SurplusExportPriceVndPerKwhTests(TestCase):
             surplus_export_price_vnd_per_kwh("east")
 
         self.assertIn("east", str(context.exception))
+
+
+class ReplacementPolicyTests(TestCase):
+    """The rule both countries book. Numbers here are the 2026-09-11 rulings;
+    a change to any of them is a change to both countries' deliverables."""
+
+    def test_policy_constants(self):
+        from proforma_vietnam import defaults
+
+        self.assertEqual(defaults.PROJECT_YEARS, 20)
+        self.assertEqual(defaults.BESS_REPLACEMENT_YEAR, 10)
+        self.assertEqual(defaults.BESS_REPLACE_FRACTION_OF_INSTALL, 1.0)
+        self.assertEqual(defaults.PV_INVERTER_REPLACEMENT_YEAR, 11)
+        self.assertEqual(defaults.PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX, 0.10)
+
+    def test_vietnam_horizon_matches_the_policy(self):
+        from proforma_vietnam.defaults import FINANCIAL_DEFAULTS, PROJECT_YEARS
+
+        self.assertEqual(FINANCIAL_DEFAULTS["project_years"], PROJECT_YEARS)
+
+    def test_a_desynced_horizon_fails_at_import(self):
+        from proforma_vietnam import defaults
+
+        original = defaults.FINANCIAL_DEFAULTS["project_years"]
+        defaults.FINANCIAL_DEFAULTS["project_years"] = 25
+        try:
+            with self.assertRaises(ValueError):
+                defaults._assert_policy_holds()
+        finally:
+            defaults.FINANCIAL_DEFAULTS["project_years"] = original
