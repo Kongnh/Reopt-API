@@ -1,3 +1,142 @@
+# 2026-09-11 - Follow-up register from the Thailand adaptation
+
+Answers three questions asked at close: does Vietnam need re-running, what
+defects did the Thailand work expose in the shared codebase, and how should the
+repository be pushed. Each open item below is a task; each is sized.
+
+## Does Vietnam need re-running? Two different answers
+
+**Re-SOLVE (REopt/Julia): NO.** Verified against git: no commit since the
+merge-base touched `outputs/vietnam_case/**/{case,payload,results}.json`, and
+the only `case_builder.py` change (`a62ac7d3`, resolution-aware CSV reader) was
+proven byte-identical for Vietnam by the gate throughout. The saved Vietnam
+`results.json` files are still exactly what the solver would return.
+
+**Re-BUILD (workbook from saved results): YES, and it is now done.** The six
+`factory_a` workbooks committed under `outputs/vietnam_case/` were built by the
+OLD proforma and carried the levelization double count. Measured before the
+rebuild: every one understated savings by exactly `1/lambda = 1.049463`, e.g.
+case_1 538,255 committed against 564,878 corrected. The two battery-only
+arbitrage cases were correctly unchanged (no PV, lambda 1.0). All six were
+rebuilt in place on 2026-09-11 with `proforma_vietnam.rebuild_report`; same
+run uuid, same filename, so no stale duplicate.
+
+Also stale but NOT touched, because they are the user's own untracked files:
+.
+They carry the old figures. Note for anyone verifying: a name-sorted glob
+picks these over the uuid-named workbook, which is failure mode 8 from the
+handoff and tripped the controller once during this very check. Select
+workbooks by the run uuid in results.json, never by sort order.
+
+**Still stale, NOT done, needs a decision:** the Vietnam narrative deliverables
+were written against the old numbers and are now about 5 percent low on every
+savings, NPV and IRR figure:
+- `outputs/vietnam_case/factory_a/Factory_A_Solar_BESS_Case_Study.pptx`
+- `outputs/vietnam_case/factory_a/Narrative_Session_4.3_VN.md`
+- `outputs/vietnam_case/factory_a/SpeakerNotes_Session_4.3_VN.md`,
+  `SpeakerNotes_Session_5.2_VN.md`
+- `proforma_vietnam/MODEL_AUDIT.md` reconciliation figures, if any were pinned
+- The CEBA training deck, if it quotes Factory A figures
+Task: regenerate every number in these from the rebuilt workbooks. Do not edit
+by hand; the previous Thailand memo shipped stale figures exactly that way.
+Size: half a day. Owner: whoever presents them next.
+
+## Defects found in the shared core during the Thailand work
+
+### Fixed this session, in master
+
+1. **Levelization double count, six sites.** REopt dispatch and tariff
+   outputs are lifetime-weighted averages despite the `year_one_` prefix; the
+   proforma applied `(1-deg)^y` on top. Fixed in `esco_pro_forma` (three
+   `cash_flow_inputs` entries, the grid-CfD DPPA dispatch, surplus export),
+   `report_data` (dispatch display, results comparison) and
+   `emissions` (avoided tCO2e). Understated savings 4.1 percent (Thailand) and
+   4.9 percent (Vietnam); emissions 3.6 percent. Every site was found by
+   reconciling two figures that had to agree; tests and the gate were green
+   through all six.
+2. **No end-to-end test covered the de-levelization path.** Added, and each
+   new guard was proven to fail on a reverted change.
+3. **Coupled defaults stored as literals.** O&M at 1.5 percent of PV capex and
+   BESS replacement at 70 percent of install now fail at import if desynced
+   (`defaults/__init__._assert_couplings_hold`). Already caught one price change.
+4. **Provenance mismatch.** An MDPI citation assuming 1 percent O&M stood as
+   the source for a 1.5 percent value; demoted to a lower-bound note.
+5. **Inverter cost derivation from solved capex was unguarded**, the exact path
+   that broke once before via a nonexistent field. Now tested.
+6. **Power factor status read as a technical finding** ("none required") when
+   it was a client scoping choice. Reworded and returned as a dict.
+7. **Three "Levelized Annual" labels went stale in the opposite direction**
+   after the fix and were corrected; one was left until its data was fixed
+   first, because changing a label ahead of its data produces a lie.
+
+### Open, recorded as tasks
+
+8. **Gate finds baselines by filename, and filenames carry the run uuid.**
+   After any re-solve the gate raises `FileNotFoundError` on its own baselines.
+   Content comparison is a manual step today. Task: key baselines by case
+   name, not by workbook filename, in `compare_workbooks.rebuild_all_cases`.
+   Size: an hour. Blocks: nothing, but every future re-solve trips on it.
+9. **Gate is blind to number formats** (`values_only=True`). An FX cell once
+   displayed 32.5 as "33" and the gate could not see it. Task: compare
+   `number_format` alongside value for numeric cells. Size: an hour.
+10. **Gate does not cover the input path.** `case_builder`, `pvwatts_client`
+    and `validators` are outside it because it rebuilds from saved results.
+    Task: a dry-run payload snapshot test per case. Size: half a day.
+11. **`baseline_workbooks/` is gitignored scratch**, so the gate protects only
+    within a session that generated baselines first. Deliberate design
+    (`3a8e418a`), not a bug, but it means a fresh clone cannot run the gate.
+    Task: document the regenerate step in the README, or decide to track them
+    (133 MB). Size: decision, then an hour.
+12. **"PV O&M cost, sent to REopt" row mislabels its source.** It claims
+    `case.json` but `report.py` reads `FINANCIAL_DEFAULTS`. They agree only
+    right after a re-solve. Task: read the value from the echoed payload, or
+    relabel. Size: 30 minutes.
+13. **Four unreachable ESCO discount-to-EVN strings** in
+    `proforma_vietnam/audit_sheets.py` at 295, 1136, 2004, 2521, live only when
+    the structure is neither DPPA, physical, nor direct ownership. Reported,
+    not deleted, per CLAUDE.md. Size: 15 minutes if you want them gone.
+14. **Em dash removal design (2026-07-09, section 1) is moot for current
+    output** (0 cells in either country) but the two f-strings remain in
+    source on branches no current case reaches. Task: close the design as
+    done-by-circumstance or strip the strings. Size: 15 minutes.
+15. **Vietnam DPPA residual.** Dividing DPPA savings by lambda over-corrects
+    the storage-attributable share; bounded per case at 0.00 to 2.17 pp of the
+    4.95 percent correction and recorded in `MODEL_AUDIT.md`. The exact fix is
+    a second dispatch-only solve at fixed sizes with degradation zeroed. Task
+    only if a Vietnam client challenges the DPPA figures. Size: a day.
+16. **Thailand: power factor not computed** (site kVAR never requested, by
+    client direction), **grid export not modelled** (no price available;
+    curtailment runs 8.6 to 19.2 percent), **14 inputs provisional**. All
+    disclosed in the memo. Tasks wait on Keen.
+
+## Repository: push as-is now, LFS forward-only later, never prune
+
+Measured 2026-09-11:
+- `.git` 562 MB. Largest files in HEAD are upstream REopt binaries under the
+  untouchable `reo/` (`climate_cities.shp` 42 MB, `ssc.*` 15 to 18 MB each),
+  already on origin. Largest of ours: `results.json` at 14 MB.
+- **No file approaches the GitHub 100 MB hard limit.** The repo is under the
+  1 GB soft limit with room.
+- History holds 67 `results.json` blobs (336 MB) and 112 xlsx blobs (105 MB):
+  about 440 MB of the 562 is repeated re-solves and rebuilds. Growth is about
+  90 MB per full six-case re-solve.
+
+**Push as-is now.** Nothing blocks it, and both alternatives rewrite history
+and force-push, which breaks every other clone (Codex works this repo too).
+
+**Do not prune.** Filter-repo would drop old `results.json` versions, and those
+are the only record of pre-change behaviour: the baselines are gitignored by
+design and the handoff explicitly points at git history for recovery. Pruning
+destroys the reproducibility the gate design depends on.
+
+**When size matters, use LFS forward-only, not a migration.** `git lfs track
+"outputs/**/results.json" "outputs/**/*.xlsx"` then commit `.gitattributes`.
+New versions go to LFS; old ones stay in ordinary history; no rewrite, no force
+push. The GitHub free tier is 1 GB storage and 1 GB/month bandwidth, so a fresh
+clone costs about 190 MB of bandwidth; that is five clones a month free, then
+5 USD per 50 GB. Trigger point: about 800 MB in `.git`, roughly three more
+full re-solves at the current rate.
+
 # 2026-09-10 - Keen Thailand deliverable complete, merged to master
 
 Branch `thailand-adaptation` merged to `master` by fast-forward, 97 commits,
