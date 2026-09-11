@@ -1,35 +1,38 @@
 # Rofu Thailand: rooftop solar and storage feasibility
 
-Prepared for Keen by Allotrope Partners, 9 September 2026.
+Prepared for Keen by Allotrope Partners, 12 September 2026.
 Site: Rofu, Phimai, Nakhon Ratchasima. Supply: PEA Schedule 4.2 Large General
 Service TOU, 22-33 kV, rate code 4224.
 
-## One thing has changed since our last memo
+## Where the storage conclusion now stands
 
-Our previous memo concluded that battery storage did not pay at this site and
-recommended solar alone. **That conclusion no longer holds, and we are
-withdrawing it.**
+Our first memo concluded that battery storage did not pay at this site and
+recommended solar alone. We withdrew that conclusion in the second memo, and
+this third memo tests it at the most conservative replacement assumption Keen
+has asked for. **Storage is still selected. The conclusion has now held at
+three price points and we consider it settled.**
 
-The reason is price. The earlier analysis used a battery cost of 300 USD/kW plus
-250 USD/kWh, which for a 1.5 hour system is 675 USD/kW installed. Keen has since
-confirmed 100 USD/kW plus 150 USD/kWh, which is 325 USD/kW, a little under half.
-At that price the optimiser builds storage without being asked to: 429 kWh
-alongside a roof-limited array, and 2,378 kWh when the roof constraint is
-relaxed. Neither figure sits at a modelling limit, so these are economic
-choices rather than artefacts of a cap.
-
-We tested whether this depends on a favourable set of assumptions. It does not.
-We ran the cases twice, first at 475 USD/kWp over 25 years and then at Keen's
-confirmed 500 USD/kWp over 20 years. The second run is worse for storage on both
-counts, a higher capital cost and five fewer years to recover it, and storage
-was still selected in both cases where it was permitted. **The storage
-conclusion is robust; the earlier one was not.**
+The history in one paragraph. The first analysis priced the battery at 300
+USD/kW plus 250 USD/kWh, which for a 1.5 hour system is 675 USD/kW installed,
+and the optimiser rejected storage. Keen then confirmed 100 USD/kW plus 150
+USD/kWh, 325 USD/kW installed, and the optimiser selected storage whether we
+ran 475 USD/kWp over 25 years or 500 USD/kWp over 20 years; at that stage the
+battery was replaced in year 10 at 70 percent of its install cost. Keen has now
+ruled that the replacement is priced at 100 percent of install cost, for the
+whole system, storage inverter and pack together. Discounted at 11 percent, a
+full-price replacement in year 10 adds about 35 percent of the install cost to
+the battery's lifetime cost. The optimiser still builds storage: 367 kWh
+alongside the roof-limited array, and 1,881 kWh when the roof constraint is
+relaxed. Both are smaller than at 70 percent (429 and 2,378 kWh), which is the
+right direction and the right size of response. Neither sits at a modelling
+limit, so these are economic choices rather than artefacts of a cap.
 
 ## The six cases
 
 All six solved to optimality. Cases 1 to 3 span the plausible roof range, case 4
 removes the roof limit to find the economic optimum, and cases 5 and 6 permit
-storage at the roof-limited and roof-relaxed sizes.
+storage at the roof-limited and roof-relaxed sizes. Cases 1 to 4 have no
+storage and are unchanged from the previous memo to the cent.
 
 | | PV (kW) | Storage | Capex (USD) | Year 1 savings | Grid offset | tCO2e/yr | Equity IRR | Equity NPV |
 |---|---|---|---|---|---|---|---|---|
@@ -37,27 +40,44 @@ storage at the roof-limited and roof-relaxed sizes.
 | 2. Roof, mid | 1,895 | none | 947,500 | 299,784 | 33.8% | 1,205 | 64.5% | 1,415,588 |
 | 3. Roof, high | 2,106 | none | 1,053,000 | 324,301 | 36.6% | 1,304 | 62.2% | 1,506,642 |
 | 4. No roof limit | 2,549 | none | 1,274,321 | 364,048 | 41.1% | 1,465 | 56.1% | 1,610,103 |
-| 5. Roof, low, with storage | 1,685 | 238 kW / 429 kWh | 930,596 | 291,754 | 31.4% | 1,117 | 63.8% | 1,363,615 |
-| 6. No roof limit, with storage | 2,957 | 575 kW / 2,378 kWh | 1,892,524 | 482,282 | 50.9% | 1,812 | 47.8% | 1,922,690 |
+| 5. Roof, low, with storage | 1,685 | 222 kW / 367 kWh | 919,716 | 289,920 | 32.1% | 1,116 | 64.2% | 1,353,566 |
+| 6. No roof limit, with storage | 2,847 | 507 kW / 1,881 kWh | 1,756,407 | 460,458 | 50.4% | 1,740 | 49.6% | 1,855,912 |
 
 Financing throughout is 70% debt at 6.5% over 10 years, against a 20 year
 project life and an 11% discount rate. Case 1 equity is 252,750 USD against
-589,750 USD of debt; case 6 equity is 567,757 USD against 1,324,767 USD.
+589,750 USD of debt; case 6 equity is 526,922 USD against 1,229,485 USD.
 
 Equity IRR falls as the system grows because each additional kilowatt is worth
 less than the one before it, being pushed further from the load. That is normal
 and is not an argument against the larger systems: case 6 produces the largest
-NPV, 1.92 million USD, and by far the largest emissions reduction.
+NPV, 1.86 million USD, and by far the largest emissions reduction.
+
+## One consequence of the year-10 replacement that Keen should see
+
+The battery is now replaced in year 10, which is also the final year of the
+10 year loan. In case 6 the replacement costs 378,411 USD in that year, which
+takes cash available for debt service down to 109,516 USD against a debt
+payment of 171,027 USD: a debt service coverage of 0.64 in year 10 alone,
+against 2.31 on average and above 2.0 in every other year. Case 5 stays above
+2.2 throughout because its battery is small.
+
+This is not a reason to drop the battery. It is a structuring point: a lender
+will expect the year-10 replacement to be funded from a reserve built up in
+years 1 to 9, or the loan tenor to be set so that the replacement falls after
+the final payment. We have modelled neither, deliberately, so that the raw
+effect is visible. Either fix is routine. What Keen should not do is read the
+minimum coverage figure on the case 6 workbook as a sign of a weak project.
 
 ## What we recommend Keen do next, in order
 
 **1. Measure the roof.** This is the highest value open item by a wide margin.
-The economic optimum with no roof constraint is 2,549 kW. Our most generous
-estimate of usable roof is 2,106 kW. The roof therefore binds across the entire
-plausible range, which means every square metre confirmed is a square metre that
-earns. Our estimate derives from the site survey as five roofs, 108 m long,
-recorded at widths between 24 m and 30 m, at 65% usable area and 0.20 kW/m2. The
-widths are the uncertain term and the pitch was never recorded.
+The economic optimum with no roof constraint is 2,549 kW without storage and
+2,847 kW with it. Our most generous estimate of usable roof is 2,106 kW. The
+roof therefore binds across the entire plausible range, which means every
+square metre confirmed is a square metre that earns. Our estimate derives from
+the site survey as five roofs, 108 m long, recorded at widths between 24 m and
+30 m, at 65% usable area and 0.20 kW/m2. The widths are the uncertain term and
+the pitch was never recorded.
 
 **2. Get an EPC quote and check it against 500 USD/kWp.** Every return in this
 memo scales directly off that figure. See the caveat below.
@@ -99,8 +119,8 @@ with system size.
 | 2 | 1,895 | 10.7% |
 | 3 | 2,106 | 13.0% |
 | 4 | 2,549 | 19.2% |
-| 5 | 1,685 with storage | 6.3% |
-| 6 | 2,957 with storage | 12.2% |
+| 5 | 1,685 with storage | 6.5% |
+| 6 | 2,847 with storage | 12.7% |
 
 At the unconstrained optimum, nearly one fifth of everything the array generates
 is discarded. Two things follow.
@@ -112,7 +132,7 @@ leave the question open than invent one.
 
 Second, **part of what the battery is buying is recovered curtailment.** Compare
 cases 1 and 5, which have identical arrays: adding storage takes curtailment
-from 8.6% down to 6.3%. The battery is not only arbitraging the tariff, it is
+from 8.6% down to 6.5%. The battery is not only arbitraging the tariff, it is
 catching energy that would otherwise be thrown away. That is a more durable
 argument for storage than the tariff spread alone, because it does not depend on
 the peak and off peak differential staying where it is.
@@ -122,6 +142,29 @@ the peak and off peak differential staying where it is.
 Specific yield is 1,498 kWh/kWp in year one against plane of array irradiation
 of 2,049 kWh/m2, a performance ratio of 0.731. Annual site load is 7,235,301 kWh
 and the business as usual electricity bill is 843,443 USD per year.
+
+**Equipment replacement.** The battery system, storage inverter and pack
+together, is replaced once, in year 10, at 100 percent of its install cost.
+That is Keen's ruling and it is the conservative choice: the optimiser's own
+storage operating cost is plain maintenance with no allowance for capacity
+fade, so this single event stands in for all battery ageing in the model. The
+PV inverter is replaced in year 11 at 10 percent of PV capital cost, an
+Allotrope convention still awaiting Keen's confirmation. Both replacements are
+capitalised and depreciated over the five year machinery life. The same rule
+now governs Allotrope's Vietnam work, so the two countries' models can be read
+side by side.
+
+We checked the year-10 assumption against the optimiser's own battery
+degradation model, which tracks state of health day by day from calendar age
+and cycling. Under that model and this site's dispatch the case 6 battery is
+still at 96 percent of its capacity after 20 years and never reaches the 80
+percent point at which a replacement is normally triggered; the cost of topping
+up lost cells would be about 3 percent of what the year-10 replacement costs.
+The year-10 whole-system replacement is therefore conservative by a wide
+margin. We have not relied on the degradation model in the figures above
+because its coefficients are laboratory defaults with no calibration to the
+chemistry or the 30 degree ambient here; the vendor's warranty, not the model,
+is what will decide when the system is actually replaced.
 
 Emissions are an Allotrope calculation, not a model output: avoided grid import
 multiplied by the Thailand Greenhouse Gas Management Organization grid mix
@@ -141,7 +184,8 @@ so both are excluded from the capital costs above and must be added when quoted.
 Fourteen inputs are still Allotrope estimates rather than confirmed figures, and
 each is marked as such on the Assumptions sheet of the accompanying workbooks.
 The ones that would move the answer are the roof area, the debt terms, and the
-insurance rate. The rest are immaterial at this scale.
+insurance rate. The PV inverter replacement year and fraction are two of the
+fourteen. The rest are immaterial at this scale.
 
 Two disclosures on the mechanics. The model applies PV operating cost at 8.00
 USD/kWp per year rather than the 7.50 supplied, because the optimiser rounds
