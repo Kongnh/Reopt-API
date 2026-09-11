@@ -17,6 +17,7 @@ from proforma_thailand.defaults import (
     value_of,
 )
 from proforma_vietnam import pvwatts_client
+from proforma_vietnam.defaults import BESS_REPLACEMENT_YEAR, BESS_REPLACE_FRACTION_OF_INSTALL
 from proforma_vietnam.case_builder import _read_load_csv
 from proforma_vietnam.country_profile import THAILAND_PROFILE
 from reoptjl.src.thailand.pea_tariff import build_pea_tariff
@@ -151,30 +152,39 @@ def build_thailand_case(case_config):
         }
 
     if storage_config.get("max_kw") or storage_config.get("max_kwh"):
+        installed_per_kw = storage_config.get(
+            "installed_cost_per_kw",
+            value_of(FINANCIAL_DEFAULTS, "bess_installed_cost_per_kw"),
+        )
+        installed_per_kwh = storage_config.get(
+            "installed_cost_per_kwh",
+            value_of(FINANCIAL_DEFAULTS, "bess_installed_cost_per_kwh"),
+        )
         payload["ElectricStorage"] = {
             "max_kw": storage_config.get("max_kw", 0),
             "max_kwh": storage_config.get("max_kwh", 0),
-            "installed_cost_per_kw": storage_config.get(
-                "installed_cost_per_kw",
-                value_of(FINANCIAL_DEFAULTS, "bess_installed_cost_per_kw"),
-            ),
-            "installed_cost_per_kwh": storage_config.get(
-                "installed_cost_per_kwh",
-                value_of(FINANCIAL_DEFAULTS, "bess_installed_cost_per_kwh"),
-            ),
+            "installed_cost_per_kw": installed_per_kw,
+            "installed_cost_per_kwh": installed_per_kwh,
             "installed_cost_constant": storage_config.get(
                 "installed_cost_constant", 0.0
             ),
-            # REopt schedules battery_replacement_year at 10 but defaults every
-            # replace_cost field to 0.0, which models a free replacement and
-            # overstates the BESS case across a 25-year analysis.
+            # Shared replacement policy: the whole system (storage inverter and
+            # pack) in one year at a fraction of the install price actually
+            # sent, so a price sensitivity keeps the rule true. REopt defaults
+            # every replace_cost field to 0.0, a free replacement.
             "replace_cost_per_kw": storage_config.get(
                 "replace_cost_per_kw",
-                value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kw"),
+                installed_per_kw * BESS_REPLACE_FRACTION_OF_INSTALL,
             ),
             "replace_cost_per_kwh": storage_config.get(
                 "replace_cost_per_kwh",
-                value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kwh"),
+                installed_per_kwh * BESS_REPLACE_FRACTION_OF_INSTALL,
+            ),
+            "inverter_replacement_year": storage_config.get(
+                "inverter_replacement_year", BESS_REPLACEMENT_YEAR
+            ),
+            "battery_replacement_year": storage_config.get(
+                "battery_replacement_year", BESS_REPLACEMENT_YEAR
             ),
             # REopt inherits 0.0 for both, which permits a physically meaningless
             # zero-duration battery and prices O&M at the US default of 2.5 percent.
@@ -239,16 +249,24 @@ def build_thailand_case(case_config):
         "cit_standard_rate": TAX_DEFAULTS["cit_standard_rate"],
         "pv_depreciation_years": TAX_DEFAULTS["pv_depreciation_years"],
         "bess_depreciation_years": TAX_DEFAULTS["bess_depreciation_years"],
-        "inverter_replacement_year": value_of(
-            FINANCIAL_DEFAULTS, "inverter_replacement_year"
+        # Shared replacement policy, recorded at case-build time so the
+        # workbook reads what was decided, not a live default. The PV inverter
+        # cost itself is derived by the shared core from the solved PV capex.
+        "pv_inverter_replacement_year": value_of(
+            FINANCIAL_DEFAULTS, "pv_inverter_replacement_year"
         ),
-        # inverter_replacement_cost_usd is NOT set here: pv_max_kw is the
-        # roof-area cap handed to REopt, not the size the optimizer actually
-        # chose. report.py derives the cost from the solved PV capex instead.
+        "pv_inverter_replacement_fraction_of_pv_capex": value_of(
+            FINANCIAL_DEFAULTS, "pv_inverter_replacement_fraction_of_pv_capex"
+        ),
         "direct_ownership": case_config.get("direct_ownership", {"enabled": True}),
         "placeholder_keys": sorted(placeholder_keys()),
         "pv_poa_irradiance_series": production.get("poa_wm2") or None,
     }
+    storage_sent = payload.get("ElectricStorage")
+    if storage_sent:
+        assumptions["battery_replacement_year"] = storage_sent["battery_replacement_year"]
+        assumptions["bess_replace_cost_per_kw"] = storage_sent["replace_cost_per_kw"]
+        assumptions["bess_replace_cost_per_kwh"] = storage_sent["replace_cost_per_kwh"]
     for key in RATE_VINTAGE_KEYS:
         assumptions[key] = tariff_extras[key]
 
