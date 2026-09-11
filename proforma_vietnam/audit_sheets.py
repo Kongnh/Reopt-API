@@ -32,7 +32,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.workbook.defined_name import DefinedName
 
-from proforma_vietnam.cash_flow import calculate_fx_sensitivity
+from proforma_vietnam.cash_flow import DEFAULT_PROJECT_YEARS, calculate_fx_sensitivity
 from proforma_vietnam.country_profile import VIETNAM_PROFILE
 from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
@@ -72,7 +72,9 @@ CURATED_ASSUMPTION_KEYS = {
     "tou_schedule", "exchange_rate_vnd_per_usd", "evn_energy_escalation_rate",
     "evn_capacity_escalation_rate", "esco_energy_discount_fraction",
     "demand_savings_esco_share", "grid_charging_enabled",
-    "battery_replacement_year", "annual_om_usd", "pv_capex_usd",
+    "battery_replacement_year", "bess_replace_cost_per_kw", "bess_replace_cost_per_kwh",
+    "pv_inverter_replacement_year", "pv_inverter_replacement_fraction_of_pv_capex",
+    "annual_om_usd", "pv_capex_usd",
     "bess_capex_usd", "om_escalation_rate", "pv_degradation_rate",
     "pv_depreciation_years", "debt_fraction", "debt_interest_rate_fraction",
     "debt_term_years", "construction_months", "principal_grace_years",
@@ -95,7 +97,7 @@ STORAGE_CASE_ROWS = [
     ("Replacement cost per kW", "replace_cost_per_kw", "USD/kW"),
     ("Replacement cost per kWh", "replace_cost_per_kwh", "USD/kWh"),
     ("Replacement fixed cost", "replace_cost_constant", "USD"),
-    ("Inverter replacement year", "inverter_replacement_year", "year"),
+    ("Storage inverter (PCS) replacement year", "inverter_replacement_year", "year"),
     ("Battery replacement year", "battery_replacement_year", "year"),
     ("Fixed-cost replacement year", "cost_constant_replacement_year", "year"),
     ("O&M (fraction of installed cost)", "om_cost_fraction_of_installed_cost", "per year"),
@@ -301,8 +303,11 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     if assumptions.get("run_uuid"):
         entry("REopt run UUID", assumptions["run_uuid"], source="REopt API")
     entry("Report prepared", prepared_on)
-    entry("Analysis period", d.get("project_years", assumptions.get("analysis_years", 25)),
-          unit="years", source="case.json financial.analysis_years",
+    entry("Analysis period",
+          d.get("project_years", assumptions.get("analysis_years", DEFAULT_PROJECT_YEARS)),
+          unit="years",
+          source="proforma_vietnam.defaults replacement policy (PROJECT_YEARS) unless "
+                 "case.json financial.analysis_years overrides",
           name="PROJECT_YEARS", fmt="0")
     if assumptions.get("tariff_year"):
         entry("Tariff year", assumptions.get("tariff_year"), source="case.json tariff.year", fmt="0")
@@ -384,10 +389,31 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     entry("O&M escalation", get("om_escalation_rate") or 0.0, unit="per year",
           source="{defaults_file} / case.json financial.om_escalation_rate".format(defaults_file=profile.defaults_file),
           name="ESC_OM", fmt=FMT_PERCENT)
-    if assumptions.get("battery_replacement_year"):
-        entry("Battery replacement year", assumptions["battery_replacement_year"],
-              unit="year", source="case.json technologies.storage.battery_replacement_year",
-              fmt="0")
+    if assumptions.get("battery_replacement_year") or assumptions.get("pv_inverter_replacement_year"):
+        section("Replacement Policy")
+        policy_source = (
+            "proforma_vietnam.defaults replacement policy unless case.json "
+            "technologies.storage overrides"
+        )
+        if assumptions.get("battery_replacement_year"):
+            entry("BESS replacement year (storage inverter and pack together)",
+                  assumptions["battery_replacement_year"], unit="year",
+                  source=policy_source, fmt="0")
+            entry("BESS replacement cost per kW", assumptions.get("bess_replace_cost_per_kw"),
+                  unit="USD/kW", source=policy_source + " (sent to REopt)", fmt=FMT_AMOUNT_2)
+            entry("BESS replacement cost per kWh", assumptions.get("bess_replace_cost_per_kwh"),
+                  unit="USD/kWh", source=policy_source + " (sent to REopt)", fmt=FMT_AMOUNT_2)
+        pv_inverter = d.get("pv_inverter_replacement") or {}
+        if assumptions.get("pv_inverter_replacement_year"):
+            entry("PV inverter replacement year", assumptions["pv_inverter_replacement_year"],
+                  unit="year", source="proforma_vietnam.defaults replacement policy", fmt="0")
+            entry("PV inverter replacement fraction of PV capex",
+                  assumptions.get("pv_inverter_replacement_fraction_of_pv_capex"),
+                  unit="fraction", source="proforma_vietnam.defaults replacement policy",
+                  fmt=FMT_PERCENT)
+            entry("PV inverter replacement cost", pv_inverter.get("cost_usd"), unit="USD",
+                  source="Engine: fraction x solved PV capex (none booked when the run has no PV)",
+                  fmt=FMT_AMOUNT)
 
     section("Tariff & Escalation")
     entry("{} energy escalation".format(profile.utility_label),
@@ -1200,18 +1226,12 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
         formula=lambda y, c: "=" + trunc(c, f"OM_YEAR1*{c}{r_fac_om}"))
     replacement = list(d.get("replacement_costs_by_year_usd") or [])
     replacement_by_year = [0.0] + replacement + [0.0] * years
-    # This row is the MERGED battery + inverter/extra replacement series
-    # (esco_pro_forma._merge_replacement_costs adds them together), so a
-    # PV-only case with an inverter replacement and zero battery must not be
-    # labelled "Battery" (Critical 2). Vietnam never merges an extra series
-    # in today, so its label is unchanged.
-    repl_label = (
-        "Battery replacement (engine schedule)"
-        if profile.country == "Vietnam" else
-        "Equipment replacement (engine schedule)"
-    )
+    # This row is the MERGED battery + PV inverter/extra replacement series
+    # (esco_pro_forma._merge_replacement_costs adds them together). Both
+    # countries now book the PV inverter, so neither may call it "Battery"
+    # (Critical 2 found exactly that label on a PV-only case).
     r_repl = w.line(
-        "repl", repl_label, "USD",
+        "repl", "Equipment replacement (engine schedule)", "USD",
         values=replacement_by_year[:years + 1], fill=INPUT_FILL)
     r_ebitda = w.line(
         "ebitda", "EBITDA", "USD",
@@ -2077,6 +2097,40 @@ def _settlement_bullets(is_dppa, is_physical, is_direct=False, assume_profitable
     ]
 
 
+def _replacement_bullet(assumptions, derivation):
+    """Model Basis sentence naming every replacement event the engine booked,
+    from the record (assumptions + derivation), never from a live default."""
+    assumptions = assumptions or {}
+    pv_inverter = (derivation or {}).get("pv_inverter_replacement") or {}
+    parts = ["O&M escalates at its own rate."]
+    if assumptions.get("battery_replacement_year"):
+        parts.append(
+            "Battery replacement (storage inverter and pack together) is booked in year {} "
+            "at the replacement unit prices on the Assumptions sheet ({} USD/kW, {} USD/kWh), "
+            "the shared replacement policy of both country branches.".format(
+                assumptions["battery_replacement_year"],
+                _format_unit_price(assumptions.get("bess_replace_cost_per_kw")),
+                _format_unit_price(assumptions.get("bess_replace_cost_per_kwh")),
+            )
+        )
+    else:
+        parts.append(
+            "Battery replacement, when a case schedules one, is booked in the configured year "
+            "at REopt replacement unit costs."
+        )
+    if pv_inverter.get("cost_usd"):
+        parts.append(
+            "The PV inverter is booked in year {} at {:.0f} percent of the solved PV capex.".format(
+                pv_inverter["year"], pv_inverter["fraction"] * 100
+            )
+        )
+    return " ".join(parts)
+
+
+def _format_unit_price(value):
+    return "n/a" if value is None else "{:,.2f}".format(value)
+
+
 def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_PROFILE):
     derivation = derivation or {}
     is_dppa = derivation.get("structure") == DPPA
@@ -2086,6 +2140,11 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
         (derivation.get("direct_ownership") or {}).get("assume_profitable_host")
     )
     fx = derivation.get("exchange_rate_vnd_per_usd") or assumptions.get("exchange_rate_vnd_per_usd")
+    horizon = (
+        derivation.get("project_years")
+        or (assumptions or {}).get("analysis_years")
+        or DEFAULT_PROJECT_YEARS
+    )
 
     # Construction/IDC/grace disclosures, gated on the engine derivation so
     # overnight-build (default) cases stay byte-identical.
@@ -2355,11 +2414,11 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
                 "{} time-of-use tariff over an 8760-hour year."
             ).format(profile.utility_label),
             "proforma_vietnam post-processes the REopt run: an hourly ND57/2025 DPPA settlement layer "
-            "(when applicable) and a 25-year developer cash flow with Vietnam tax and debt."
+            "(when applicable) and a {}-year developer cash flow with Vietnam tax and debt.".format(horizon)
             if profile.country == "Vietnam" else
-            "The proforma engine post-processes the REopt run into a 25-year owner cash flow "
+            "The proforma engine post-processes the REopt run into a {}-year owner cash flow "
             "with {} tax and debt. There is no wholesale settlement layer: this is "
-            "a behind-the-meter self-consumption case with no export.".format(profile.country),
+            "a behind-the-meter self-consumption case with no export.".format(horizon, profile.country),
             "This workbook is generated from that engine. The Pro Forma (Audit) sheet re-derives the "
             "full cash flow with live Excel formulas from the named inputs on the Assumptions sheet; "
             "the Checks block ties every metric back to the engine (PASS/REVIEW).",
@@ -2402,8 +2461,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
                 "PV degradation compounds on generation-linked terms; energy lost to degradation is "
                 "repurchased from {} at retail (added to the buyer's residual bill)."
             ).format(profile.utility_label),
-            "O&M escalates at its own rate; battery replacement is booked in the configured year at REopt "
-            "replacement unit costs.",
+            _replacement_bullet(assumptions, derivation),
             *debt_bullets,
             cit_regime_text if is_direct else (
                 cit_regime_text + " The 4-year exemption and 9-year 50%-reduction periods count from the "

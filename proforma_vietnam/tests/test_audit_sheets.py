@@ -893,7 +893,7 @@ class BatteryReplacementCapitalizationAuditTests(TestCase):
         ebt = sheet.cell(
             row=labels["Taxable income before loss relief (EBT)"], column=4
         ).value
-        repl_col_ref = f"D{labels['Battery replacement (engine schedule)']}"
+        repl_col_ref = f"D{labels['Equipment replacement (engine schedule)']}"
         self.assertIn("+" + repl_col_ref, ebt)
 
     def test_expense_mode_keeps_legacy_depreciation_ebt_and_register(self):
@@ -1190,6 +1190,103 @@ class VatOnCapexAuditTests(TestCase):
         self.assertIn("Capex input-VAT timing IS modelled", text)
         # The operating-stage float stays disclosed as pass-through.
         self.assertIn("pass-through", text)
+
+
+class ReplacementPolicyRowsTests(TestCase):
+    """The workbook reads the replacement record (assumptions + derivation),
+    never a live default, and names both events from data."""
+
+    POLICY_ASSUMPTIONS = dict(
+        ESCO_ASSUMPTIONS,
+        battery_replacement_year=10,
+        bess_replace_cost_per_kw=80.0,
+        bess_replace_cost_per_kwh=120.0,
+        pv_inverter_replacement_year=11,
+        pv_inverter_replacement_fraction_of_pv_capex=0.10,
+    )
+
+    def _result_with_pv_inverter(self, **overrides):
+        result = _esco_result(
+            replacement_costs_by_year=[0.0] * 9 + [26000.0, 50000.0], **overrides
+        )
+        result["derivation"]["pv_inverter_replacement"] = {
+            "year": 11, "fraction": 0.10, "cost_usd": 50000.0,
+        }
+        return result
+
+    def _text(self, sheet):
+        return "\n".join(
+            str(cell.value) for row in sheet.iter_rows() for cell in row
+            if cell.value is not None
+        )
+
+    def test_assumptions_sheet_has_a_replacement_policy_section(self):
+        workbook = build_vietnam_esco_workbook(
+            self._result_with_pv_inverter(), assumptions=self.POLICY_ASSUMPTIONS
+        )
+        text = self._text(workbook["Assumptions"])
+
+        self.assertIn("Replacement Policy", text)
+        self.assertIn("BESS replacement year", text)
+        self.assertIn("BESS replacement cost per kW", text)
+        self.assertIn("PV inverter replacement year", text)
+        self.assertIn("PV inverter replacement cost", text)
+        self.assertIn("proforma_vietnam.defaults replacement policy", text)
+        # Curated, so nothing falls through to the raw echo.
+        self.assertNotIn("Other Assumptions (assumptions.json echo)", text)
+
+    def test_model_basis_reads_the_horizon_and_names_both_events(self):
+        workbook = build_vietnam_esco_workbook(
+            self._result_with_pv_inverter(), assumptions=self.POLICY_ASSUMPTIONS
+        )
+        text = self._text(workbook["Model Basis"])
+
+        self.assertIn("20-year", text)
+        self.assertNotIn("25-year", text)
+        self.assertIn("year 10", text)
+        self.assertIn("year 11", text)
+        self.assertIn("PV inverter", text)
+
+    def test_model_basis_says_25_when_the_data_says_25(self):
+        workbook = build_vietnam_esco_workbook(
+            self._result_with_pv_inverter(project_years=25),
+            assumptions=self.POLICY_ASSUMPTIONS,
+        )
+        text = self._text(workbook["Model Basis"])
+
+        self.assertIn("25-year", text)
+        self.assertNotIn("20-year", text)
+
+    def test_model_basis_drops_the_pv_clause_without_pv(self):
+        assumptions = {
+            key: value for key, value in self.POLICY_ASSUMPTIONS.items()
+            if not key.startswith("pv_inverter")
+        }
+        workbook = build_vietnam_esco_workbook(_esco_result(), assumptions=assumptions)
+        text = self._text(workbook["Model Basis"])
+
+        self.assertIn("year 10", text)
+        self.assertNotIn("PV inverter", text)
+
+    def test_storage_pcs_row_is_labelled_as_the_storage_inverter(self):
+        labels = {key: label for label, key, unit in audit_sheets.STORAGE_CASE_ROWS}
+
+        self.assertEqual(
+            labels["inverter_replacement_year"], "Storage inverter (PCS) replacement year"
+        )
+
+    def test_audit_replacement_row_is_equipment_not_battery(self):
+        # The merged series now carries the PV inverter for Vietnam too.
+        workbook = build_vietnam_esco_workbook(
+            self._result_with_pv_inverter(), assumptions=self.POLICY_ASSUMPTIONS
+        )
+        sheet = workbook["Pro Forma (Audit)"]
+        labels = [
+            sheet.cell(row=row, column=1).value for row in range(1, sheet.max_row + 1)
+        ]
+
+        self.assertIn("Equipment replacement (engine schedule)", labels)
+        self.assertNotIn("Battery replacement (engine schedule)", labels)
 
 
 class CoverSheetTests(TestCase):
