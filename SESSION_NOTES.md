@@ -108,6 +108,35 @@ Size: half a day. Owner: whoever presents them next.
     client direction), **grid export not modelled** (no price available;
     curtailment runs 8.6 to 19.2 percent), **14 inputs provisional**. All
     disclosed in the memo. Tasks wait on Keen.
+17. **Vietnam books no PV inverter replacement; Thailand does.** Found
+    2026-09-11 on a client question. Thailand's `report.py` derives a year 11
+    event at 10 percent of solved PV capex and passes it through
+    `extra_replacement_costs_by_year`; Vietnam's builder never populates that
+    hook, and its `inverter_replacement_year` is REopt's
+    `ElectricStorage.inverter_replacement_year` (the BATTERY inverter, paid
+    via `replace_cost_per_kw`), not the PV inverter. Vietnam PV O&M is 6
+    USD/kW-yr (1.25 percent of 480) with no documented statement that it
+    carries an inverter reserve, so the omission is real and unfunded.
+    Measured in memory against the six factory_a runs (year 11, 10 percent of
+    PV capex, no other change): equity IRR falls 0.4 to 0.5 pp, equity NPV
+    falls 52 to 92 kUSD, project IRR 0.2 to 0.3 pp; case_3 NPV 174.5 to 85.0
+    kUSD. Direction is one way (returns only go down), so the shipped Vietnam
+    figures are optimistic on this axis. Task: add `inverter_replacement_year`
+    and `inverter_replacement_fraction_of_pv_capex` to the Vietnam profile
+    with a Vietnam source (or state in the O&M provenance that the 6 USD/kW
+    reserve covers it), rebuild the six workbooks, re-baseline. This
+    compounds item 1: the narrative decks then move twice. Size: half a day
+    plus the deck refresh already listed.
+18. **Thailand Model Basis sheet says "25-year owner cash flow"** in every
+    shipped workbook while the Assumptions sheet says 20. The string is a
+    literal in `proforma_vietnam/audit_sheets.py:2360`, not read from
+    `project_years`; the Vietnam branch of the same conditional is also a
+    literal 25. The neighbouring bullet (`audit_sheets.py:2405`) names only
+    the battery replacement, though Thailand books an inverter event too.
+    Task: format both from `project_years` and list both replacement events
+    when `extra_replacement_costs_by_year` is present; rebuild the six
+    Thailand workbooks (text-only change, gate should show exactly those
+    cells). Size: an hour.
 
 ## Repository: push as-is now, LFS forward-only later, never prune
 
