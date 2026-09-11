@@ -41,8 +41,8 @@ class ThailandDefaultsTests(TestCase):
             "usable_roof_area_m2",
             "pv_max_kw",
             "power_factor_mitigation_cost",
-            "inverter_replacement_year",
-            "inverter_replacement_fraction_of_pv_capex",
+            "pv_inverter_replacement_year",
+            "pv_inverter_replacement_fraction_of_pv_capex",
             "bess_min_duration_hours",
             "bess_om_fraction_of_installed_cost",
             "pv_tilt_degrees",
@@ -151,8 +151,9 @@ class CoupledDefaultsAreDerivedTests(TestCase):
         self.assertAlmostEqual(om, pv_capex * 0.015, places=9)
         self.assertAlmostEqual(om, 7.5, places=9)
 
-    def test_replacement_is_seventy_percent_of_install(self):
+    def test_replacement_matches_the_shared_policy(self):
         from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+        from proforma_vietnam.defaults import BESS_REPLACE_FRACTION_OF_INSTALL
 
         for install_key, replace_key in (
             ("bess_installed_cost_per_kw", "bess_replace_cost_per_kw"),
@@ -160,7 +161,12 @@ class CoupledDefaultsAreDerivedTests(TestCase):
         ):
             install = value_of(FINANCIAL_DEFAULTS, install_key)
             replace = value_of(FINANCIAL_DEFAULTS, replace_key)
-            self.assertAlmostEqual(replace, install * 0.70, places=9)
+            self.assertAlmostEqual(
+                replace, install * BESS_REPLACE_FRACTION_OF_INSTALL, places=9
+            )
+        # The 2026-09-11 ruling: replacement at install cost, 100 / 150.
+        self.assertEqual(value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kw"), 100.0)
+        self.assertEqual(value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kwh"), 150.0)
 
     def test_replacing_never_costs_more_than_buying_new(self):
         from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
@@ -169,10 +175,42 @@ class CoupledDefaultsAreDerivedTests(TestCase):
             ("bess_installed_cost_per_kw", "bess_replace_cost_per_kw"),
             ("bess_installed_cost_per_kwh", "bess_replace_cost_per_kwh"),
         ):
-            self.assertLess(
+            self.assertLessEqual(
                 value_of(FINANCIAL_DEFAULTS, replace_key),
                 value_of(FINANCIAL_DEFAULTS, install_key),
             )
+
+    def test_schedule_and_horizon_match_the_shared_policy(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+        from proforma_vietnam import defaults as policy
+
+        self.assertEqual(value_of(FINANCIAL_DEFAULTS, "project_years"), policy.PROJECT_YEARS)
+        self.assertEqual(
+            value_of(FINANCIAL_DEFAULTS, "pv_inverter_replacement_year"),
+            policy.PV_INVERTER_REPLACEMENT_YEAR,
+        )
+        self.assertEqual(
+            value_of(FINANCIAL_DEFAULTS, "pv_inverter_replacement_fraction_of_pv_capex"),
+            policy.PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
+        )
+
+    def test_a_desynced_schedule_fails_at_import(self):
+        from proforma_thailand import defaults
+
+        entry = defaults.FINANCIAL_DEFAULTS["pv_inverter_replacement_year"]
+        original = entry["value"]
+        entry["value"] = 12
+        try:
+            with self.assertRaises(ValueError):
+                defaults._assert_policy_holds()
+        finally:
+            entry["value"] = original
+
+    def test_the_old_inverter_key_names_are_gone(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS
+
+        self.assertNotIn("inverter_replacement_year", FINANCIAL_DEFAULTS)
+        self.assertNotIn("inverter_replacement_fraction_of_pv_capex", FINANCIAL_DEFAULTS)
 
     def test_the_seven_confirmed_inputs_lost_the_placeholder_marker(self):
         from proforma_thailand.defaults import placeholder_keys

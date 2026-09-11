@@ -9,6 +9,13 @@ newest vintage on or before it.
 import json
 import os
 
+from proforma_vietnam.defaults import (
+    BESS_REPLACE_FRACTION_OF_INSTALL,
+    PROJECT_YEARS,
+    PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
+    PV_INVERTER_REPLACEMENT_YEAR,
+)
+
 _DIR = os.path.dirname(__file__)
 
 with open(os.path.join(_DIR, "pea_tariff_rates.json"), encoding="utf-8") as _f:
@@ -63,11 +70,19 @@ TAX_DEFAULTS = {key: entry["value"] for key, entry in TAX_DEFAULTS_RAW.items()}
 # The coupling each derived default must satisfy: (derived, base, fraction).
 # Kept as an assertion rather than a computation so the JSON stays the single
 # readable source of every number, while a price change that desyncs a coupled
-# value fails at import instead of silently shipping.
+# value fails at import instead of silently shipping. The replacement fraction
+# is the shared policy's, so Thailand cannot drift from Vietnam on it.
 _DERIVED_COUPLINGS = (
     ("annual_om_per_kw", "pv_installed_cost_per_kw", 0.015),
-    ("bess_replace_cost_per_kw", "bess_installed_cost_per_kw", 0.70),
-    ("bess_replace_cost_per_kwh", "bess_installed_cost_per_kwh", 0.70),
+    ("bess_replace_cost_per_kw", "bess_installed_cost_per_kw", BESS_REPLACE_FRACTION_OF_INSTALL),
+    ("bess_replace_cost_per_kwh", "bess_installed_cost_per_kwh", BESS_REPLACE_FRACTION_OF_INSTALL),
+)
+
+# Schedule and horizon entries that must equal the shared policy outright.
+_POLICY_EQUALITIES = (
+    ("project_years", PROJECT_YEARS),
+    ("pv_inverter_replacement_year", PV_INVERTER_REPLACEMENT_YEAR),
+    ("pv_inverter_replacement_fraction_of_pv_capex", PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX),
 )
 
 
@@ -84,7 +99,21 @@ def _assert_couplings_hold():
             )
 
 
+def _assert_policy_holds():
+    for key, expected in _POLICY_EQUALITIES:
+        actual = FINANCIAL_DEFAULTS[key]["value"]
+        if actual != expected:
+            raise ValueError(
+                "thailand_defaults.json financial.{} is {} but the shared "
+                "replacement policy (proforma_vietnam.defaults) says {}. Change "
+                "the policy for both countries or re-derive the JSON.".format(
+                    key, actual, expected
+                )
+            )
+
+
 _assert_couplings_hold()
+_assert_policy_holds()
 
 
 def placeholder_keys():
