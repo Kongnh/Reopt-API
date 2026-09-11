@@ -266,6 +266,12 @@ equity cash flow, DSCR) is unchanged in both modes. Each replacement year spawns
 its own straight-line schedule in service that year (years R..R+7), truncated at
 the analysis horizon (the undepreciated remainder is not written off).
 
+> 2026-09-11: the figures below were computed under the year-11, 80/100 USD
+> replacement and a 25-year horizon. The shared replacement policy (year 10,
+> replacement at install cost, 20 years, PV inverter at 10 percent of PV capex
+> in year 11) supersedes them; the tables are kept as the audit record of that
+> earlier state and are regenerated in the 2026-09-11 handoff in SESSION_NOTES.md.
+
 All six Factory A cases carry `battery_replacement_year = 11`. Five have a
 non-zero year-11 replacement cost and therefore capitalize it; **case_4 has no
 battery replacement** (empty REopt replacement schedule) and is unaffected.

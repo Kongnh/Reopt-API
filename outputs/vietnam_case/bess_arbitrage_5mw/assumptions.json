@@ -18,5 +18,10 @@
   "debt_interest_rate_fraction": 0.085,
   "debt_term_years": 10,
   "contract_years": 15,
-  "contract_residual_value_usd": 0.0
+  "contract_residual_value_usd": 0.0,
+  "battery_replacement_year": 10,
+  "bess_replace_cost_per_kw": 80.0,
+  "bess_replace_cost_per_kwh": 120.0,
+  "pv_inverter_replacement_year": 11,
+  "pv_inverter_replacement_fraction_of_pv_capex": 0.1
 }

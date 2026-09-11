@@ -86,7 +86,8 @@
   "cit_standard_rate": 0.2,
   "pv_depreciation_years": 5,
   "bess_depreciation_years": 5,
-  "inverter_replacement_year": 11,
+  "pv_inverter_replacement_year": 11,
+  "pv_inverter_replacement_fraction_of_pv_capex": 0.1,
   "direct_ownership": {
     "enabled": true
   },
@@ -97,11 +98,11 @@
     "debt_term_years",
     "grid_connection_cost",
     "insurance_rate_fraction",
-    "inverter_replacement_fraction_of_pv_capex",
-    "inverter_replacement_year",
     "pea_tariff_escalation_rate",
     "permitting_and_eia_cost",
     "power_factor_mitigation_cost",
+    "pv_inverter_replacement_fraction_of_pv_capex",
+    "pv_inverter_replacement_year",
     "pv_max_kw",
     "pv_tilt_degrees",
     "usable_roof_area_m2"

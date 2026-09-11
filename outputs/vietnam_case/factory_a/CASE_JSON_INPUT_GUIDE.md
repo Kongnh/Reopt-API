@@ -101,7 +101,7 @@ Expected outputs (written into the same folder as `--case`):
 
 | Field | Example | Meaning |
 | --- | ---: | --- |
-| `financial.analysis_years` | `25` | REopt analysis period in years. Also used as the default project horizon for the Vietnam pro forma. |
+| `financial.analysis_years` | omit | REopt analysis period in years. Omit to use the shared replacement policy horizon (20 years, `proforma_vietnam.defaults.PROJECT_YEARS`), which is also the pro forma horizon; set only for a horizon sensitivity. |
 | `financial.owner_discount_rate_fraction` | `0.1` | Generation owner or ESCO discount rate. `0.1` means 10%. Used by REopt and the Vietnam NPV calculation. |
 | `financial.debt_fraction` | `0.7` | Share of total project capex funded by debt in the Vietnam ESCO cash flow. `0.7` means 70% debt and 30% equity. |
 | `financial.debt_interest_rate_fraction` | `0.085` | Annual debt interest rate. `0.085` means 8.5%. |
@@ -181,11 +181,11 @@ Storage size is optimized by core REopt. Battery power is controlled by kW bound
 | `technologies.storage.installed_cost_per_kw` | `120` | Battery power-related installed cost in USD per kW. |
 | `technologies.storage.installed_cost_per_kwh` | `180` | Battery energy-related installed cost in USD per kWh. |
 | `technologies.storage.installed_cost_constant` | `0` | Fixed one-time battery installed cost in USD that does not scale with kW or kWh. Use this for controls, integration, mobilization, or interconnection if those costs are not already included in per-kW or per-kWh costs. |
-| `technologies.storage.replace_cost_per_kw` | `0` | Battery power capacity replacement cost in USD/kW at `inverter_replacement_year`. |
-| `technologies.storage.replace_cost_per_kwh` | `0` | Battery energy capacity replacement cost in USD/kWh at `battery_replacement_year`. |
+| `technologies.storage.replace_cost_per_kw` | omit | Storage power-component (PCS/inverter) replacement cost in USD/kW at `inverter_replacement_year`. Omit to apply the shared replacement policy: 100 percent of the `installed_cost_per_kw` sent. Set only for a sensitivity on the replacement itself. |
+| `technologies.storage.replace_cost_per_kwh` | omit | Battery pack replacement cost in USD/kWh at `battery_replacement_year`. Omit to apply the shared replacement policy: 100 percent of the `installed_cost_per_kwh` sent. |
 | `technologies.storage.replace_cost_constant` | `0` | Fixed battery replacement cost in USD at `cost_constant_replacement_year`. |
-| `technologies.storage.inverter_replacement_year` | `10` | Project year for battery power/inverter replacement cost. |
-| `technologies.storage.battery_replacement_year` | `11` | Project year for battery energy capacity replacement cost. |
+| `technologies.storage.inverter_replacement_year` | omit | Project year for the STORAGE inverter (PCS) replacement, a REopt field. Omit to apply the policy year 10, the same year as the pack, so the whole system is replaced together. Not the PV inverter. |
+| `technologies.storage.battery_replacement_year` | omit | Project year for the battery pack replacement. Omit to apply the policy year 10. The PV inverter is not a REopt input: the pro forma books it at 10 percent of solved PV capex in year 11 from `proforma_vietnam.defaults`. |
 | `technologies.storage.cost_constant_replacement_year` | `10` | Project year for fixed replacement cost. |
 | `technologies.storage.om_cost_fraction_of_installed_cost` | `0.02` | Core REopt annual storage O&M field. It is a fraction of total installed storage cost. Total installed storage cost includes `installed_cost_per_kw * optimized_kw`, `installed_cost_per_kwh * optimized_kwh`, and `installed_cost_constant`. `0.02` means 2% of total installed storage cost per year. |
 
@@ -222,11 +222,11 @@ Storage replacement is supported by core REopt through storage replacement field
 
 | Optional field | Meaning |
 | --- | --- |
-| `technologies.storage.replace_cost_per_kw` | Battery power capacity replacement cost in USD/kW at the inverter replacement year. |
-| `technologies.storage.replace_cost_per_kwh` | Battery energy capacity replacement cost in USD/kWh at the battery replacement year. |
+| `technologies.storage.replace_cost_per_kw` | Storage PCS replacement cost in USD/kW at the storage inverter replacement year; policy fills it at 100 percent of install when omitted. |
+| `technologies.storage.replace_cost_per_kwh` | Battery pack replacement cost in USD/kWh at the battery replacement year; policy fills it at 100 percent of install when omitted. |
 | `technologies.storage.replace_cost_constant` | Fixed replacement cost in USD. |
-| `technologies.storage.inverter_replacement_year` | Project year for power-capacity replacement. |
-| `technologies.storage.battery_replacement_year` | Project year for energy-capacity replacement. |
+| `technologies.storage.inverter_replacement_year` | Project year for the storage inverter (PCS) replacement; policy year 10 when omitted. Not the PV inverter. |
+| `technologies.storage.battery_replacement_year` | Project year for the battery pack replacement; policy year 10 when omitted. |
 | `technologies.storage.cost_constant_replacement_year` | Project year for fixed replacement cost. |
 
 The Vietnam pro forma reads the REopt-scheduled replacement costs and reflects them in the cash flow at their scheduled years. By default the replacement is capitalized and depreciated over the 8-year BESS class per Circular 45/2013 (`financial.battery_replacement_treatment = "capitalize"`); set `"expense"` for the legacy expense-in-year treatment. Cash flows are identical under both — only the CIT timing differs.

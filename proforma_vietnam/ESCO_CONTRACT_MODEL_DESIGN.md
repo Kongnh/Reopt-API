@@ -479,7 +479,8 @@ period (all opt-out by overriding the relevant input):
 - **O&M escalation**: `om_escalation_rate` compounds annual O&M (default 3%/yr
   from `vietnam_defaults.json`).
 - **Battery replacement**: a replacement expense is booked in the configured
-  `battery_replacement_year` assumption (Factory A cases use year 11) at
+  `battery_replacement_year` assumption (Factory A cases follow the shared
+  replacement policy, year 10, since 2026-09-11) at
   `size_kw × replace_cost_per_kw + size_kwh × replace_cost_per_kwh`,
   derived automatically from REopt inputs/outputs unless the assumption or
   `replacement_costs_by_year` is overridden.
