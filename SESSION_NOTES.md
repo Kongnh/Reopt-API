@@ -1,3 +1,177 @@
+# 2026-09-12 - Handoff: replacement policy sync, both branches, 20 years
+
+Executed overnight on the user's instruction to write the plan and implement
+it without checkpoints. Spec: `docs/superpowers/specs/2026-09-11-replacement-policy-sync-design.md`.
+Plan: `docs/superpowers/plans/2026-09-11-replacement-policy-sync.md`. Branch
+`replacement-policy-sync`, fast-forwarded onto `master` at the end. Docker
+stack left running.
+
+## What was ruled and why
+
+A client question on 2026-09-11 exposed that the two branches booked equipment
+replacement differently. Four rulings followed, all the user's:
+
+1. A battery system's life is 10 years and covers the storage inverter and the
+   pack together; year 10 replaces the whole system.
+2. Replacement priced at 100 percent of install cost, both countries. This
+   supersedes the 70 percent Thailand ruling of 2026-09-09.
+3. Vietnam moves to a 20-year horizon to match Thailand.
+4. The PV inverter event (10 percent of solved PV capex, year 11) applies to
+   Vietnam too.
+
+On `model_degradation`: kept off. Verified in REopt.jl v0.57.0 source that the
+storage O&M fraction is plain maintenance with no capacity-fade allowance, that
+enabling degradation zeroes the replace_cost inputs the proforma reads, returns
+the maintenance cost as one present value rather than a yearly series, and
+never feeds SOH back into dispatch. A throwaway probe was run instead (below).
+
+## What changed in the code
+
+- `proforma_vietnam/defaults/__init__.py`: five policy constants
+  (`PROJECT_YEARS` 20, `BESS_REPLACEMENT_YEAR` 10,
+  `BESS_REPLACE_FRACTION_OF_INSTALL` 1.0, `PV_INVERTER_REPLACEMENT_YEAR` 11,
+  `PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX` 0.10) and an import-time
+  guard on `vietnam_defaults.json project_years` (now 20).
+- `proforma_thailand/defaults/`: `bess_replace_cost` 100/150; coupling uses
+  the policy fraction; `project_years` and the two `pv_inverter_*` entries
+  (renamed from `inverter_*`) asserted equal to the policy at import.
+- `proforma_vietnam/case_builder.py`: `_apply_replacement_policy` derives
+  replace costs from the install price actually sent and sets both REopt
+  replacement years; `analysis_years` defaults to `FINANCIAL_DEFAULTS["project_years"]`
+  (the literal 25 is gone); what was sent is recorded in assumptions
+  (`battery_replacement_year`, `bess_replace_cost_per_kw/kwh`,
+  `pv_inverter_replacement_year`, `pv_inverter_replacement_fraction_of_pv_capex`).
+- `proforma_thailand/case_builder.py`: same derivation and record.
+- `proforma_vietnam/esco_pro_forma.py`: `_pv_inverter_replacement` books the
+  PV inverter event in the shared core from `pv_inverter_replacement_year` and
+  `_fraction_of_pv_capex`; result carries
+  `derivation["pv_inverter_replacement"] = {year, fraction, cost_usd}`.
+- `proforma_thailand/report.py`: local derivation deleted; passes the two keys.
+  `run_dppa_negotiation_sweep.cash_flow_overrides_from_assumptions`,
+  `run_case.VIETNAM_REPORT_QUERY_KEYS` and `reoptjl/views.py` map them.
+- `proforma_vietnam/audit_sheets.py`: Replacement Policy section on
+  Assumptions; storage PCS row named "Storage inverter (PCS) replacement year";
+  audit replacement row "Equipment replacement (engine schedule)" for both
+  countries; Model Basis horizon and replacement bullet from data.
+- Eight Vietnam `case.json` files dropped `analysis_years` and the storage
+  replacement keys; all fourteen `payload.json`/`assumptions.json` regenerated
+  by dry run (Thailand 1-4 payloads identical; 5-6 replacement keys only;
+  Vietnam horizon and replacement only).
+- Docs: `CASE_JSON_INPUT_GUIDE.md`, `ESCO_CONTRACT_MODEL_DESIGN.md`, a dated
+  note in `MODEL_AUDIT.md`.
+
+Tests: Thailand 143, Vietnam 551, tariff 14, all green; gate TOTAL DIFFS 0 on
+all fourteen after re-baselining. Before the re-solve, a gate check of the six
+Thailand cases rebuilt from the regenerated records against the pre-change
+baselines gave 0 numeric diffs, which proves the core PV inverter derivation
+reproduces the old report-layer figure exactly.
+
+## Reconcile, old (pre-change workbooks at `cafedbad`) against new
+
+Ten cases re-solved (8 Vietnam, Thailand 5 and 6); Thailand 1 to 4 rebuilt
+only and unchanged to the cent.
+
+| case | PV kW | BESS kW / kWh | Equity IRR old -> new | Equity NPV old -> new | Capex old -> new | Min DSCR old -> new | Avg DSCR old -> new |
+|---|---|---|---|---|---|---|---|
+| rofu case_1 | 1,685 | 0 / 0 | 66.4% -> 66.4% | 1,304,997 -> 1,304,997 | 842,500 -> 842,500 | 2.86 -> 2.86 | 3.04 -> 3.04 |
+| rofu case_2 | 1,895 | 0 / 0 | 64.5% -> 64.5% | 1,415,588 -> 1,415,588 | 947,500 -> 947,500 | 2.79 -> 2.79 | 2.98 -> 2.98 |
+| rofu case_3 | 2,106 | 0 / 0 | 62.2% -> 62.2% | 1,506,642 -> 1,506,642 | 1,053,000 -> 1,053,000 | 2.72 -> 2.72 | 2.90 -> 2.90 |
+| rofu case_4 | 2,549 | 0 / 0 | 56.1% -> 56.1% | 1,610,103 -> 1,610,103 | 1,274,321 -> 1,274,321 | 2.51 -> 2.51 | 2.69 -> 2.69 |
+| rofu case_5 | 1,685 | 222 / 367 | 63.8% -> 64.2% | 1,363,615 -> 1,353,566 | 930,596 -> 919,716 | 2.37 -> 2.21 | 2.89 -> 2.89 |
+| rofu case_6 | 2,847 | 507 / 1,881 | 47.8% -> 49.6% | 1,922,690 -> 1,855,912 | 1,892,524 -> 1,756,407 | 0.93 -> 0.64 | 2.28 -> 2.31 |
+| factory_a case_1 | 4,568 | 1,452 / 5,679 | 16.7% -> 16.5% | 1,293,942 -> 773,960 | 3,773,743 -> 2,990,365 | 1.15 -> -0.92 | 1.32 -> 1.15 |
+| factory_a case_2 | 5,448 | 1,611 / 9,461 | 14.6% -> 11.6% | 1,032,758 -> 262,548 | 4,295,753 -> 3,879,459 | 1.07 -> -1.68 | 1.23 -> 0.91 |
+| factory_a case_3 | 4,649 | 1,258 / 7,822 | 10.7% -> 8.7% | 174,522 -> -177,968 | 4,385,448 -> 3,270,852 | 0.87 -> -1.74 | 1.03 -> 0.78 |
+| factory_a case_4 | 3,243 | 0 / 0 | 18.9% -> 16.8% | 768,034 -> 440,925 | 1,657,573 -> 1,556,758 | 1.19 -> 1.17 | 1.35 -> 1.33 |
+| factory_a case_5 | 5,448 | 1,611 / 9,461 | 16.3% -> 14.8% | 1,412,732 -> 759,543 | 4,295,753 -> 3,879,459 | 1.12 -> -1.51 | 1.31 -> 1.04 |
+| factory_a case_6 | 5,914 | 592 / 1,184 | 26.7% -> 25.7% | 2,505,981 -> 1,929,382 | 3,028,160 -> 3,028,160 | 1.48 -> 1.38 | 1.71 -> 1.65 |
+| bess_arbitrage_5mw | 0 | 5,000 / 25,000 | 56.4% -> 54.3% | 4,606,891 -> 3,436,606 | 3,400,000 -> 3,400,000 | 2.42 -> -6.13 | 2.79 -> 1.86 |
+| bess_arbitrage_5mw_mfg | 0 | 5,000 / 25,000 | 27.1% -> 18.1% | 1,798,483 -> 578,999 | 3,400,000 -> 3,400,000 | 1.52 -> -7.29 | 1.78 -> 0.86 |
+
+Three drivers act at once on Vietnam: five fewer years of revenue, a
+full-price whole-system replacement instead of 80/100 USD, and the new PV
+inverter event. The optimiser shrank most Vietnam systems in response
+(case_1 PV 5,421 to 4,568 kW, BESS 8,640 to 5,679 kWh). Vietnam case_3 NPV
+is now negative.
+
+**The finding that matters most.** The year-10 replacement now falls inside
+the 10-year debt term. The previous year-11 schedule sat one year outside it,
+which is why minimum DSCR looked fine before. With a large battery the
+year-10 cash outflow exceeds that year's operating cash and the minimum DSCR
+in debt years goes negative (Vietnam) or to 0.64 (Thailand case 6). The model
+books the replacement as an operating outflow with no reserve and no
+debt-sizing response, deliberately, so the raw effect is visible. The memo
+tells Keen a lender would expect a replacement reserve built in years 1 to 9
+or a tenor ending before year 10. For Vietnam the same disclosure is owed in
+whatever narrative next quotes these workbooks.
+
+## Thailand storage outcome at 100 percent
+
+Storage survives in both cases: 222 kW / 367 kWh alongside the roof-limited
+array (was 238 / 429 at 70 percent) and 507 kW / 1,881 kWh with PV 2,847 kW
+when the roof is relaxed (was 575 / 2,378 with PV 2,957). Conclusion held at
+three price points; the memo calls it settled.
+
+## SOH check (throwaway, scratchpad only)
+
+Kept solves re-run against the Julia server with `model_degradation: true`,
+augmentation strategy, sizes pinned. Under NREL's laboratory default
+coefficients: Thailand case_6 SOH 0.959 at year 20, never below 0.8,
+augmentation present value 3,943 USD against 117,239 USD for our year-10
+event; Vietnam bess_arbitrage_5mw SOH 0.823 at year 20, never below 0.8,
+230,802 USD against 1,310,847 USD. The year-10 whole-system replacement is
+conservative against REopt's own fade model by a wide margin. Caveats: no LFP
+or 30 degree calibration; REopt scales daily fade by hours per time step, so
+the 15-minute Thailand run shows a quarter of the fade the same duty would
+show hourly (a units artefact, the hourly Vietnam row is the fairer one); SOH
+never reduces delivered energy. Recorded in the memo's technical basis.
+
+## Deliverables reissued
+
+`KEEN_THAILAND_MEMO.md` (12 September 2026), `KEEN_THAILAND_MEMO_VI.md`
+(figures machine-checked identical to EN: 56 large numbers, all
+percentages), `Rofu_Thailand_Tariff_Structure_Internal.pptx` slides 8 and
+10, HTML artifact redeployed at the same URL. Every memo figure traced to
+`memo_figures.json` pulled from the six new workbooks; no em dash anywhere.
+
+## What did not change
+
+- Thailand 1 to 4 solver results and workbooks: payloads identical, figures
+  identical to the cent.
+- The Vietnam DPPA residual (register item 15).
+- The API query mapping gaps beyond the two new keys (item 19 below).
+
+## Housekeeping
+
+- Two superseded workbooks were locked by another process (open in Excel?)
+  and could not be deleted: `outputs/vietnam_case/factory_a/case_6/vietnam_report_5b999b24-d8c1-4d91-aa2e-1ea0a973af38.xlsx`
+  and `outputs/thailand_case/rofu_thailand/case_6/thailand_report_fa6aa4e5-7c38-42d3-9186-3453f4477dce.xlsx`.
+  They are untracked now; close them and delete from disk. They are the OLD
+  figures, not the current ones.
+- The user's `vietnam_report_review*.xlsx` files were not touched and are
+  now three changes stale (levelization, horizon, replacement).
+- `baseline_workbooks/` regenerated locally (gitignored, never committed).
+- Docker stack up; Julia healthy.
+
+## Follow-ups (register items 17 and 18 closed; new item 19)
+
+- Vietnam narrative deliverables (register item 1) are now stale on three
+  axes and Vietnam case_3 has flipped to a negative NPV; the year-10 DSCR
+  point needs its own paragraph in whatever next quotes them.
+- Item 19: `reoptjl/views.py` query mapping lacks `direct_ownership`,
+  `contract_years`, the VAT keys and `surplus_export`, so a solve-time
+  workbook for such a case differs from the rebuilt one; the rebuilt one is
+  canonical. Size: an hour to add the keys and a test that the two paths
+  agree on one case.
+- The PV inverter is capitalised under the BESS depreciation class (8 years
+  Vietnam, 5 Thailand) because the merged series is one series. Permissible;
+  a separate PV-class schedule is a refinement.
+- A replacement reserve or a debt-sizing response to the year-10 event is a
+  modelling gap now that the event sits inside the debt term (see above).
+  Size: half a day, needs a ruling on the reserve convention first.
+- Gate still keys baselines by filename (item 8); tripped again this pass
+  and handled by regenerating.
+
 # 2026-09-11 - Follow-up register from the Thailand adaptation
 
 Answers three questions asked at close: does Vietnam need re-running, what
@@ -108,7 +282,7 @@ Size: half a day. Owner: whoever presents them next.
     client direction), **grid export not modelled** (no price available;
     curtailment runs 8.6 to 19.2 percent), **14 inputs provisional**. All
     disclosed in the memo. Tasks wait on Keen.
-17. **Vietnam books no PV inverter replacement; Thailand does.** Found
+17. **Closed 2026-09-12, see the handoff above.** Vietnam books no PV inverter replacement; Thailand does. Found
     2026-09-11 on a client question. Thailand's `report.py` derives a year 11
     event at 10 percent of solved PV capex and passes it through
     `extra_replacement_costs_by_year`; Vietnam's builder never populates that
@@ -127,7 +301,7 @@ Size: half a day. Owner: whoever presents them next.
     reserve covers it), rebuild the six workbooks, re-baseline. This
     compounds item 1: the narrative decks then move twice. Size: half a day
     plus the deck refresh already listed.
-18. **Thailand Model Basis sheet says "25-year owner cash flow"** in every
+18. **Closed 2026-09-12, see the handoff above.** Thailand Model Basis sheet says "25-year owner cash flow" in every
     shipped workbook while the Assumptions sheet says 20. The string is a
     literal in `proforma_vietnam/audit_sheets.py:2360`, not read from
     `project_years`; the Vietnam branch of the same conditional is also a
@@ -137,6 +311,14 @@ Size: half a day. Owner: whoever presents them next.
     when `extra_replacement_costs_by_year` is present; rebuild the six
     Thailand workbooks (text-only change, gate should show exactly those
     cells). Size: an hour.
+
+19. **API workbook query mapping lags the sweep helper** (`reoptjl/views.py`
+    `_vietnam_proforma_overrides` vs `run_dppa_negotiation_sweep.cash_flow_overrides_from_assumptions`):
+    `direct_ownership`, `contract_years`, `vat_rate_fraction`, `vat_refund_year`
+    and `surplus_export` never reach the solve-time workbook, so it differs
+    from the rebuilt one for any case using them. The rebuilt workbook is the
+    canonical one. Task: add the keys and a test that the two paths agree on
+    one case. Size: an hour.
 
 ## Repository: push as-is now, LFS forward-only later, never prune
 
