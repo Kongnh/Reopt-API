@@ -3,7 +3,11 @@ from pathlib import Path
 
 from proforma_vietnam import pvwatts_client
 from proforma_vietnam.defaults import (
+    BESS_REPLACEMENT_YEAR,
+    BESS_REPLACE_FRACTION_OF_INSTALL,
     FINANCIAL_DEFAULTS,
+    PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
+    PV_INVERTER_REPLACEMENT_YEAR,
     SURPLUS_EXPORT_DEFAULTS,
     dppa_regulatory_for_year,
 )
@@ -26,7 +30,9 @@ from reoptjl.src.vietnam.evn_tariff import RATE_VINTAGE_KEYS, _normalize_voltage
 
 
 DEFAULT_COUNTRY = "Vietnam"
-DEFAULT_ANALYSIS_YEARS = 25
+# One horizon: the same value the cash flow runs (vietnam_defaults.json
+# project_years, asserted equal to the shared policy at import).
+DEFAULT_ANALYSIS_YEARS = FINANCIAL_DEFAULTS["project_years"]
 DEFAULT_TOU_SCHEDULE = "current"
 DEFAULT_TARIFF_CATEGORY = "manufacturing"
 DEFAULT_DEMAND_SAVINGS_ESCO_SHARE = 0.8
@@ -274,6 +280,7 @@ def _pv_inputs(pv_config, site):
 
 def _storage_inputs(storage_config, esco_contract, dppa_inputs):
     storage = _allowlisted(storage_config, STORAGE_PAYLOAD_KEYS)
+    _apply_replacement_policy(storage)
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         # Co-located BESS only under DPPA: charges from PV, not from the grid.
         storage["can_grid_charge"] = False
@@ -285,6 +292,28 @@ def _storage_inputs(storage_config, esco_contract, dppa_inputs):
         )
     storage.setdefault("can_grid_charge", DEFAULT_GRID_CHARGING_ENABLED)
     return storage
+
+
+def _apply_replacement_policy(storage):
+    """Fill the REopt replacement inputs from the shared policy.
+
+    REopt defaults every replace_cost field to 0.0, which models a free
+    replacement; the two bess_arbitrage cases shipped that way. The policy
+    replaces the whole system (storage inverter and pack) in one year at a
+    fraction of the install price actually being sent, so a price sensitivity
+    keeps the rule true. An explicit case.json value for any key still wins.
+    Only applied when the case sends a storage system at all.
+    """
+    if not any(storage.get(key) for key in ("max_kw", "max_kwh", "min_kw", "min_kwh")):
+        return
+    for install_key, replace_key in (
+        ("installed_cost_per_kw", "replace_cost_per_kw"),
+        ("installed_cost_per_kwh", "replace_cost_per_kwh"),
+    ):
+        if replace_key not in storage and storage.get(install_key) is not None:
+            storage[replace_key] = storage[install_key] * BESS_REPLACE_FRACTION_OF_INSTALL
+    storage.setdefault("inverter_replacement_year", BESS_REPLACEMENT_YEAR)
+    storage.setdefault("battery_replacement_year", BESS_REPLACEMENT_YEAR)
 
 
 def _dppa_inputs(dppa_config, voltage_key, tariff_config):
@@ -527,9 +556,25 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         ),
     }
     assumptions.update(_allowlisted(financial, FINANCIAL_ASSUMPTION_KEYS))
-    storage = technologies.get("storage", {})
-    if storage.get("battery_replacement_year") is not None:
-        assumptions["battery_replacement_year"] = storage["battery_replacement_year"]
+    # Record what the payload sent for replacement (policy or case override),
+    # recomputed the same way _storage_inputs did, so the workbook reads a
+    # record rather than a live default.
+    storage_sent = _allowlisted(technologies.get("storage", {}), STORAGE_PAYLOAD_KEYS)
+    _apply_replacement_policy(storage_sent)
+    for sent_key, record_key in (
+        ("battery_replacement_year", "battery_replacement_year"),
+        ("replace_cost_per_kw", "bess_replace_cost_per_kw"),
+        ("replace_cost_per_kwh", "bess_replace_cost_per_kwh"),
+    ):
+        if storage_sent.get(sent_key) is not None:
+            assumptions[record_key] = storage_sent[sent_key]
+    # The PV inverter event is booked by the shared core from these two values;
+    # written at case-build time so the workbook reads a record, not a live
+    # default (the O&M lesson of 2026-09-10).
+    assumptions["pv_inverter_replacement_year"] = PV_INVERTER_REPLACEMENT_YEAR
+    assumptions["pv_inverter_replacement_fraction_of_pv_capex"] = (
+        PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX
+    )
     exchange_rate = tariff_config.get("exchange_rate_vnd_per_usd")
     if financial.get("annual_om_vnd") is not None:
         assumptions["annual_om_usd"] = _vnd_to_usd(financial["annual_om_vnd"], exchange_rate)
