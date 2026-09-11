@@ -1,26 +1,26 @@
 {
   "pv_kw": 1685.0,
-  "bess_kw": 237.91,
-  "bess_kwh": 428.7,
+  "bess_kw": 222.2,
+  "bess_kwh": 366.64,
   "annual_load_kwh": 7235301.0,
   "annual_pv_kwh": 2524235.0,
-  "grid_offset_fraction": 0.3138295987962353,
+  "grid_offset_fraction": 0.31341517236117755,
   "power_factor_compensation_kvar": 0.0,
   "power_factor_mitigation_cost_usd": 0.0,
   "billed_demand_kw_by_month": [
-    967.248,
-    843.421,
-    914.095,
-    1078.29,
-    1108.7530000000002,
-    1176.0120000000002,
-    1079.045,
-    992.217,
-    993.311,
-    1159.462,
-    941.731,
-    984.113
+    990.776,
+    859.129,
+    939.225,
+    1090.923,
+    1132.281,
+    1188.183,
+    1102.573,
+    1015.745,
+    1009.019,
+    1171.775,
+    968.62,
+    994.869
   ],
-  "annual_avoided_tco2e": 1117.2249240468755,
-  "lifetime_avoided_tco2e": 21314.309786011647
+  "annual_avoided_tco2e": 1115.7495770936039,
+  "lifetime_avoided_tco2e": 21286.16325855147
 }
