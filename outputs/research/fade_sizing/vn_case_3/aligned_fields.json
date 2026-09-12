@@ -1,0 +1,50 @@
+{
+ "Financial.owner_discount_rate_fraction": [
+  0.0624,
+  0.1
+ ],
+ "Financial.offtaker_discount_rate_fraction": [
+  0.0624,
+  0.1
+ ],
+ "Financial.owner_tax_rate_fraction": [
+  0.26,
+  0.2
+ ],
+ "Financial.offtaker_tax_rate_fraction": [
+  0.26,
+  0.2
+ ],
+ "Financial.elec_cost_escalation_rate_fraction": [
+  0.0166,
+  0.04
+ ],
+ "Financial.om_cost_escalation_rate_fraction": [
+  0.025,
+  0.03
+ ],
+ "PV.federal_itc_fraction": [
+  0.3,
+  0
+ ],
+ "PV.macrs_option_years": [
+  5,
+  0
+ ],
+ "PV.macrs_bonus_fraction": [
+  1.0,
+  0
+ ],
+ "ElectricStorage.total_itc_fraction": [
+  0.3,
+  0
+ ],
+ "ElectricStorage.macrs_option_years": [
+  5,
+  0
+ ],
+ "ElectricStorage.macrs_bonus_fraction": [
+  1.0,
+  0
+ ]
+}

@@ -1,0 +1,20 @@
+kept           blind      PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,092,688  minDSCR 2.40  SOH20 0.819  Nones
+aligned Vietnam objective: {"Financial.owner_discount_rate_fraction": [0.0624, 0.1], "Financial.offtaker_discount_rate_fraction": [0.0624, 0.1], "Financial.owner_tax_rate_fraction": [0.26, 0.2], "Financial.offtaker_tax_rate_fraction": [0.26, 0.2], "Financial.elec_cost_escalation_rate_fraction": [0.0166, 0.04], "Financial.om_cost_escalation_rate_fraction": [0.025, 0.03], "PV.federal_itc_fraction": [0.3, 0], "PV.macrs_option_years": [5, 0], "PV.macrs_bonus_fraction": [1.0, 0], "ElectricStorage.total_itc_fraction": [0.3, 0], "ElectricStorage.macrs_option_years": [5, 0], "ElectricStorage.macrs_bonus_fraction": [1.0, 0]}
+blind          blind      PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,092,688  minDSCR 2.40  SOH20 0.819  5.5s
+deg            deg        PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,100,100  minDSCR 2.40  SOH20 0.821  6.1s
+grid_0.250     grid       PV        0 kW  BESS    5000 kW /     6250 kWh  NPV      714,861  minDSCR 1.75  SOH20 0.812  4.6s
+grid_0.250_deg grid_deg   PV        0 kW  BESS    5000 kW /     6250 kWh  NPV      731,262  minDSCR 1.75  SOH20 0.827  6.2s
+grid_0.500     grid       PV        0 kW  BESS    5000 kW /    12500 kWh  NPV    1,835,885  minDSCR 2.14  SOH20 0.815  4.7s
+grid_0.500_deg grid_deg   PV        0 kW  BESS    5000 kW /    12500 kWh  NPV    1,859,126  minDSCR 2.14  SOH20 0.825  6.4s
+grid_0.750     grid       PV        0 kW  BESS    5000 kW /    18750 kWh  NPV    2,961,685  minDSCR 2.30  SOH20 0.817  4.6s
+grid_0.750_deg grid_deg   PV        0 kW  BESS    5000 kW /    18750 kWh  NPV    2,982,215  minDSCR 2.31  SOH20 0.823  6.9s
+grid_1.000     grid       PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,092,688  minDSCR 2.40  SOH20 0.819  4.6s
+grid_1.000_deg grid_deg   PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,100,100  minDSCR 2.40  SOH20 0.821  6.4s
+grid_1.250     grid       PV        0 kW  BESS    5000 kW /    31250 kWh  NPV    3,992,207  minDSCR 2.12  SOH20 0.831  4.5s
+grid_1.250_deg grid_deg   PV        0 kW  BESS    5000 kW /    31250 kWh  NPV    4,026,155  minDSCR 2.12  SOH20 0.838  6.8s
+grid_at_deg    grid       PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,092,688  minDSCR 2.40  SOH20 0.819  5.2s
+grid_at_deg_deg grid_deg   PV        0 kW  BESS    5000 kW /    25000 kWh  NPV    4,100,100  minDSCR 2.40  SOH20 0.821  6.3s
+grid_0.875     grid       PV        0 kW  BESS    5000 kW /    21875 kWh  NPV    3,526,573  minDSCR 2.36  SOH20 0.818  4.7s
+grid_0.875_deg grid_deg   PV        0 kW  BESS    5000 kW /    21875 kWh  NPV    3,541,771  minDSCR 2.36  SOH20 0.822  6.5s
+grid_1.125     grid       PV        0 kW  BESS    5000 kW /    28125 kWh  NPV    4,307,126  minDSCR 2.33  SOH20 0.819  4.7s
+grid_1.125_deg grid_deg   PV        0 kW  BESS    5000 kW /    28125 kWh  NPV    4,319,062  minDSCR 2.33  SOH20 0.821  6.4s

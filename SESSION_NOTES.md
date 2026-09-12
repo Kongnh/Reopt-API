@@ -1,3 +1,123 @@
+# 2026-09-13 (overnight handoff) - Permanent worktree; fade-aware sizing research (A + D)
+
+Research line only. Ruling 2026-09-12 22:30 (user, before sleeping): the
+split is a permanent, independent **worktree**, not checkout switching;
+run A + D on it; full delegation. Everything below happened on
+`REopt_API-soh` (branch `battery-soh-fade`); `master` was not changed,
+except that its gitignored gate baselines were regenerated (below).
+
+## Layout now
+
+- `REopt_API` (main tree) = `master` (ac68e5cb). Docker compose (Django
+  8000, Julia 8081, celery) mounts this tree. Baselines regenerated from
+  master's own workbooks: gate 0 diffs on all 14.
+- `REopt_API-soh` (worktree) = `battery-soh-fade`. `.venv` is a junction to
+  the main tree's venv (`./.venv/Scripts/python.exe` works unchanged);
+  `keys.py`, `outputs/pvwatts_cache/` copied in; `baseline_workbooks/`
+  (the SOH baselines) moved in. `git worktree list` shows both.
+- The research line has its own Julia server: container `julia_api_soh`
+  (image `reopt_api-julia:soh`, `docker commit` of the running `julia_api`,
+  so no recompilation), port 8082, mounting the worktree's `julia_src`.
+  Its `http.jl` coerces `ElectricStorage.degradation.{cycle_fade_coefficient,
+  cycle_fade_fraction, maintenance_cost_per_kwh}` to `Vector{Float64}`;
+  without that REopt.jl 0.57 rejects them (`Vector{<:Real}` against
+  `Vector{Any}` from JSON). `docker start julia_api_soh` after a reboot.
+  Django does not accept `model_degradation`, so research solves post to
+  8082 directly with the kept run's echoed inputs.
+- Stray file in the master tree: `outputs/thailand_case/rofu_thailand/
+  case_5/thailand_report_f27e1bf5-...xlsx` is the SOH-branch workbook that
+  git could not unlink on the switch (Excel holds it). Close Excel, delete
+  it; it is untracked on master.
+
+## What was run
+
+`proforma_vietnam/tools/fade_sizing_probe.py` (new, committed) on Vietnam
+case_1, Vietnam case_3, Thailand case_6 and Vietnam bess_arbitrage_5mw (energy grid at 5 MW pinned). Per case: the kept
+solve; `blind` (free sizes, no ageing; Vietnam with the objective aligned,
+see below); `deg` (method A: `model_degradation`, augmentation, coefficients
+scaled by 1/h so REopt's SOH equals `battery_soh` at h = 1, k_cyc 2.5e-5
+from the 8,000 EFC ruling, price declination 3 percent); a grid of pinned
+energy capacities at 0, 0.25 ... 1.25 of the blind size plus the deg size
+and one refinement round (method D), each also re-solved with degradation
+on; and for the ESCO cases a `share` solve sized on the contract shares of
+the rates. Every candidate scored by the fade-derated pro forma with the
+case's own assumptions. Summaries committed under
+`outputs/research/fade_sizing/<case>/summary.{json,md}`; per-solve results
+gitignored (4 MB each, `solves/`). Note with the tables and the reading:
+`docs/superpowers/notes/2026-09-12-fade-aware-sizing-research.md`.
+
+## Findings (numbers in the note)
+
+1. **The Vietnam objective carries the US defaults** (both lines, older
+   than the SOH work): 30 percent ITC and 5-year MACRS bonus on PV and
+   storage, 6.24 percent discount rate (REopt discards the sent owner rate
+   when `third_party_ownership` is false and the offtaker rate is absent),
+   26 percent tax, 1.66 percent escalation. REopt's echo:
+   `initial_capital_costs_after_incentives` is 51 percent of
+   `initial_capital_costs`. Thailand's builder zeroes all of it (C2 critical
+   of 2026-09-05); the Vietnam builder never did. Aligned objective:
+   case_1 PV 5,701 to 3,520 kW, BESS 11,087 to 4,079 kWh, derated NPV
+   585,319 to 1,111,148; case_3 PV 6,071 to 2,188, BESS 14,337 to 3,088,
+   NPV -470,729 to +389,852. The aligned REopt NPV lands within 1 percent of
+   the pro forma NPV. **This needs a ruling for master** (it changes every
+   Vietnam deliverable).
+2. **Sizing.** Once aligned, the ageing-blind size sits on the flat top of
+   the derated-NPV curve on both Vietnam cases (within 200 USD over a plus
+   or minus 5 percent band). Method A moves the size +3.5 / +6 / +3.9
+   percent (case_1 / case_3 / Thailand) and is no better on the curve; its
+   bias is REopt dropping the kWh O&M when degradation is on (10 USD/kWh
+   present worth against a fade cost of 7), not fade. Fade is a 6
+   percent-of-capex effect on these duty cycles and does not bend the
+   curve. Thailand case_6 is different for a financing reason: its levered
+   equity NPV (70 percent debt at 6.5 percent against 11 percent, 5-year
+   depreciation) keeps rising to 1.25 to 1.5 times the blind size (best
+   5,565 kWh, +30,500 USD, +1.4 percent); REopt's unlevered objective
+   cannot see that and neither does A. Arbitrage 5 MW: optimum duration
+   about 5.6 h (28,125 kWh, +5 percent), design point sound.
+3. **Dispatch.** Same size, degradation on: +0.5 percent (case_1), +1.5
+   (case_3), +0.2 (Thailand), +0.2 (arbitrage). EFC and revenue identical; the gain is resting
+   SOC (charge late, do not park full), calendar fade down a quarter. An
+   EMS rule, not a sizing input. The first scoring pass showed a false 4.6
+   to 8.5 percent gain because the pro forma reads REopt's O&M output;
+   `restore_kwh_om` in the probe fixes that and the note carries the
+   corrected numbers.
+4. **ESCO share in the objective: tested, worse.** Sizing on 0.9 x energy
+   and 0.8 x demand rates gives smaller systems whose equity NPV on the
+   true-rate curve is lower (case_1 1,080,697 against 1,111,148; case_3
+   341,180 against 389,852): the levered equity NPV rewards capex the
+   optimiser does not see, and the two biases roughly cancel at full rates.
+5. **Augmentation against derate.** Derate present worth 25 to 31 USD/kWh
+   of capacity; daily augmentation at the installed price declining 3
+   percent costs 7.6 USD/kWh (REopt's degradation cost within 3 percent).
+   Booking capacity maintenance instead of derating would lift the Vietnam
+   NPVs by about 70,000 USD each; needs a vendor price to be more than a
+   scenario.
+6. REopt's `state_of_health` matches the replica to 5e-4 on every deg
+   solve (Thailand at 15 minutes included), so the 1/h correction is right.
+
+## Recommendation (in the note, short form)
+
+Port the alignment to master (ruling needed); keep the aligned blind solve
+as the sizing standard; `model_degradation` only as the consistency proof
+and the EMS resting-SOC rule; add `battery_ageing_treatment: derate |
+augment` to the pro forma; run the probe as the sizing check on new
+projects; then soc_min 0.10 for arbitrage, calendar-fade calibration,
+dispatch-realism haircut, 15 minute Vietnam demand-charge cases.
+
+## Housekeeping
+
+- Research line: 3 commits tonight (probe + http.jl coercion + ignore;
+  probe fixes + summaries + note + MODEL_AUDIT item; this handoff). Not
+  pushed by me. Scratch: `run_probes*.sh`, `render_research_tables.py`,
+  `baseline_master.py` in the session scratchpad.
+- `docs/superpowers/notes/2026-09-12-fade-aware-sizing-research.md` is the
+  deliverable of the night; `summary.md` per case has every solve.
+- The two locked old case_6 workbooks and the user's
+  `vietnam_report_review*.xlsx` untouched.
+- Tests not re-run tonight (no change to package code except the new tool
+  module, which imports private helpers `_as_list`, `_levelization_factor`,
+  `_series` from `esco_pro_forma`).
+
 # 2026-09-12 (second handoff, 09:00) - Replacement off, SOH curve, fade derate
 
 Branch `battery-soh-fade`, kept independent of `master` at the user's request:

@@ -541,3 +541,25 @@ cycle life 8,000 EFC to 80 percent, the REopt recurrence taken at h = 1 so
 Reissuing the Keen memo, deck and artifact; a replacement reserve in the
 debt sizing (moot unless a case opts into a replacement).
 
+
+## 11. 2026-09-13 sizing objective: US incentive defaults in the Vietnam solve (open, both lines)
+
+Found by the fade-aware sizing probe
+(`docs/superpowers/notes/2026-09-12-fade-aware-sizing-research.md`). The
+Vietnam builder sends no incentive or tax fields, so REopt optimises with
+its US defaults: 30 percent ITC and 5-year MACRS with 100 percent bonus on
+PV and storage, a 26 percent tax rate, 1.66 percent electricity escalation,
+and a 6.24 percent discount rate (with `third_party_ownership` false REopt
+overrides the sent owner rate with the absent offtaker rate's default).
+REopt's echo shows `initial_capital_costs_after_incentives` at 51 percent of
+`initial_capital_costs` on case_1. The pro forma books none of this, so the
+optimiser buys PV and batteries at half price and sizes them 1.6 (PV) to
+2.7 to 4.6 (battery) times too large for the economics the workbook
+reports; with the objective aligned, case_1's NPV goes from 585,319 to
+1,111,148 USD and case_3's from -470,729 to +389,852. The Thailand builder
+zeroes all of it (`proforma_thailand/case_builder.py`); the Vietnam builder
+does not. Status: research finding; the fix on `master` is the user's
+ruling because it changes every Vietnam deliverable. The optimiser also does
+not see the pro forma's leverage or depreciation (Thailand case_6's levered
+equity NPV peaks 25 to 40 percent above REopt's size, +1.4 percent NPV);
+the sizing check for that is the grid in `proforma_vietnam/tools/fade_sizing_probe.py`.

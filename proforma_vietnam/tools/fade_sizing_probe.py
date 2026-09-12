@@ -253,7 +253,30 @@ def daily_soh(results, cycle_life_efc=BESS_CYCLE_LIFE_EFC, de_levelize=True):
     return None if soh is None else soh["soh_fraction_by_day"]
 
 
+def restore_kwh_om(results):
+    """With model_degradation on, REopt drops the kWh share of storage O&M
+    from its O&M outputs (deemed covered by augmentation). The pro forma
+    reads year_one_om_costs_before_tax, so a deg solve would be scored with
+    less O&M than the same battery in a blind solve; put it back so every
+    candidate carries the same O&M convention. Returns (results, restored)."""
+    es_in = results["inputs"].get("ElectricStorage") or {}
+    if not es_in.get("model_degradation"):
+        return results, 0.0
+    size_kwh = (results["outputs"].get("ElectricStorage") or {}).get("size_kwh") or 0.0
+    restored = (es_in.get("om_cost_fraction_of_installed_cost") or 0.0) * (
+        es_in.get("installed_cost_per_kwh") or 0.0) * size_kwh
+    if restored <= 0:
+        return results, 0.0
+    patched = dict(results)
+    patched["outputs"] = dict(results["outputs"])
+    patched["outputs"]["Financial"] = dict(results["outputs"]["Financial"])
+    patched["outputs"]["Financial"]["year_one_om_costs_before_tax"] = (
+        results["outputs"]["Financial"]["year_one_om_costs_before_tax"] + restored)
+    return patched, restored
+
+
 def evaluate(results, assumptions, country, declination):
+    results, om_restored = restore_kwh_om(results)
     outputs = results["outputs"]
     es = outputs.get("ElectricStorage") or {}
     financial = outputs.get("Financial") or {}
@@ -281,6 +304,8 @@ def evaluate(results, assumptions, country, declination):
         "fade_loss_pv_usd": _present_value(
             [row.get("battery_fade_loss_usd", 0.0) or 0.0 for row in rows], rate
         ),
+        "annual_om_year1_usd": cash["derivation"].get("annual_om_year1_usd"),
+        "kwh_om_restored_usd": om_restored,
     }
     fade = cash["derivation"].get("battery_fade")
     if fade:
@@ -377,11 +402,30 @@ def run_probe(case_dir, out_dir, fractions, declination, deg_grid, julia_url, lo
     if deg["bess_kwh"] > 0:
         grid_point(deg["bess_kwh"] / blind_kwh if blind_kwh else 0.0, deg["bess_kwh"], tag="grid_at_deg")
 
-    # One refinement round around the best coarse point.
+    # ESCO share: the optimiser maximises the host's bill savings while the
+    # ESCO earns a contract share of them. Size with the rates scaled by the
+    # shares, then score that size on the true-rate curve like any grid point.
+    energy_share = assumptions.get("esco_energy_discount_fraction")
+    demand_share = assumptions.get("demand_savings_esco_share")
+    if country == "vietnam" and energy_share and energy_share < 1.0:
+        share_inputs = json.loads(json.dumps(inputs))
+        tariff = share_inputs["ElectricTariff"]
+        tariff["tou_energy_rates_per_kwh"] = [v * energy_share for v in tariff["tou_energy_rates_per_kwh"]]
+        for key in ("monthly_demand_rates", "coincident_peak_load_charge_per_kw"):
+            if tariff.get(key) and demand_share:
+                tariff[key] = [v * demand_share for v in tariff[key]]
+        share = record("share_blind", "share", solve(share_inputs, "share_blind", solves_dir, julia_url),
+                       "sized on the ESCO's share of the rates (energy %.2f, demand %s); NPV here is NOT comparable (scaled bill)" % (
+                           energy_share, demand_share))
+        if share["bess_kwh"] > 0:
+            grid_point(share["bess_kwh"] / blind_kwh if blind_kwh else 0.0, share["bess_kwh"], tag="grid_at_share")
+
+    # One refinement round around the best point, at half the coarse spacing.
     grid = sorted((m["fraction"], m["npv_usd"]) for m in variants.values() if m["kind"] == "grid")
-    if len(grid) >= 3:
+    coarse = sorted(fractions)
+    if len(grid) >= 3 and len(coarse) >= 2:
         best_index = max(range(len(grid)), key=lambda i: grid[i][1])
-        step = min(abs(grid[i + 1][0] - grid[i][0]) for i in range(len(grid) - 1)) / 2.0
+        step = min(coarse[i + 1] - coarse[i] for i in range(len(coarse) - 1)) / 2.0
         for fraction in (grid[best_index][0] - step, grid[best_index][0] + step):
             if fraction > 0 and all(abs(fraction - f) > 1e-6 for f, _ in grid):
                 grid_point(fraction, fraction * blind_kwh)
