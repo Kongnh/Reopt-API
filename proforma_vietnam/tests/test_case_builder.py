@@ -100,12 +100,8 @@ class VietnamCaseBuilderTests(TestCase):
                         "installed_cost_per_kwh": 4500000,
                         "installed_cost_constant": 250000000,
                         "om_cost_fraction_of_installed_cost": 0.02,
-                        "replace_cost_per_kw": 1000000,
-                        "replace_cost_per_kwh": 2000000,
-                        "replace_cost_constant": 50000000,
-                        "inverter_replacement_year": 10,
-                        "battery_replacement_year": 10,
-                        "cost_constant_replacement_year": 10,
+                        "replacement": {"enabled": True, "cost_per_kw": 1000000,
+                                        "cost_per_kwh": 2000000},
                         "unsupported_storage_key": 1,
                     },
                 },
@@ -141,10 +137,8 @@ class VietnamCaseBuilderTests(TestCase):
             "om_cost_fraction_of_installed_cost": 0.02,
             "replace_cost_per_kw": 1000000,
             "replace_cost_per_kwh": 2000000,
-            "replace_cost_constant": 50000000,
             "inverter_replacement_year": 10,
             "battery_replacement_year": 10,
-            "cost_constant_replacement_year": 10,
             "can_grid_charge": True,
         })
         self.assertEqual(assumptions["owner_discount_rate_fraction"], 0.12)
@@ -167,7 +161,9 @@ class VietnamCaseBuilderTests(TestCase):
                 "tariff": {"year": 2025, "voltage_level": "22-110kV"},
                 "financial": {"pv_depreciation_years": 15},
                 "technologies": {
-                    "storage": {"battery_replacement_year": 11},
+                    "storage": {"max_kw": 100, "max_kwh": 200, "installed_cost_per_kw": 80,
+                                "installed_cost_per_kwh": 120,
+                                "replacement": {"enabled": True, "year": 11}},
                 },
                 "esco_contract": {"esco_energy_discount_fraction": 0.9},
             }
@@ -1325,8 +1321,9 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(case["payload"]["ElectricStorage"]["can_grid_charge"], True)
 
 
-class ReplacementPolicyInTheBuilderTests(TestCase):
-    """The shared replacement policy fills what case.json leaves out."""
+class ReplacementSwitchInTheBuilderTests(TestCase):
+    """technologies.storage.replacement is the one way to schedule a battery
+    replacement; the policy default (2026-09-12) is none."""
 
     def _case(self, storage=None, financial=None):
         load_csv_path = _write_load_csv([500.0] * 8760)
@@ -1342,47 +1339,121 @@ class ReplacementPolicyInTheBuilderTests(TestCase):
             config["financial"] = financial
         return build_vietnam_case(config)
 
-    def test_replacement_defaults_to_the_shared_policy(self):
-        from proforma_vietnam.defaults import (
-            BESS_REPLACEMENT_YEAR, BESS_REPLACE_FRACTION_OF_INSTALL,
-            PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX, PV_INVERTER_REPLACEMENT_YEAR,
-        )
-        case = self._case(storage={
-            "max_kw": 1000, "max_kwh": 4000,
-            "installed_cost_per_kw": 80, "installed_cost_per_kwh": 120,
-        })
+    def _storage(self, extra=None):
+        storage = {"max_kw": 1000, "max_kwh": 4000,
+                   "installed_cost_per_kw": 80, "installed_cost_per_kwh": 120}
+        storage.update(extra or {})
+        return storage
+
+    def test_default_sends_a_zero_replacement_and_no_years(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        payload = {"max_kw": 100, "max_kwh": 200, "installed_cost_per_kw": 80,
+                   "installed_cost_per_kwh": 120}
+
+        record = apply_replacement_policy(self._storage(), payload)
+
+        self.assertEqual(payload["replace_cost_per_kw"], 0.0)
+        self.assertEqual(payload["replace_cost_per_kwh"], 0.0)
+        self.assertNotIn("battery_replacement_year", payload)
+        self.assertNotIn("inverter_replacement_year", payload)
+        self.assertIs(record["bess_replacement_enabled"], False)
+        self.assertNotIn("battery_replacement_year", record)
+        self.assertEqual(record["bess_cycle_life_efc"], 8000)
+
+    def test_enabled_block_prices_the_whole_system_in_one_year(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        payload = {"max_kw": 100, "max_kwh": 200, "installed_cost_per_kw": 80,
+                   "installed_cost_per_kwh": 120}
+
+        record = apply_replacement_policy(
+            self._storage({"replacement": {"enabled": True}}), payload)
+
+        self.assertEqual(payload["replace_cost_per_kw"], 80.0)
+        self.assertEqual(payload["replace_cost_per_kwh"], 120.0)
+        self.assertEqual(payload["battery_replacement_year"], 10)
+        self.assertEqual(payload["inverter_replacement_year"], 10)
+        self.assertIs(record["bess_replacement_enabled"], True)
+        self.assertEqual(record["battery_replacement_year"], 10)
+        self.assertEqual(record["bess_replace_cost_per_kw"], 80.0)
+        self.assertEqual(record["bess_replace_cost_per_kwh"], 120.0)
+
+    def test_enabled_block_accepts_year_fraction_and_absolute_costs(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        payload = {"installed_cost_per_kw": 80, "installed_cost_per_kwh": 120, "max_kwh": 1}
+        apply_replacement_policy(
+            self._storage({"replacement": {"enabled": True, "year": 8, "fraction_of_install": 0.5}}),
+            payload)
+        self.assertEqual((payload["replace_cost_per_kw"], payload["replace_cost_per_kwh"]), (40.0, 60.0))
+        self.assertEqual(payload["battery_replacement_year"], 8)
+        self.assertEqual(payload["inverter_replacement_year"], 8)
+
+        payload = {"installed_cost_per_kw": 80, "installed_cost_per_kwh": 120, "max_kwh": 1}
+        apply_replacement_policy(
+            self._storage({"replacement": {"enabled": True, "cost_per_kw": 30, "cost_per_kwh": 45}}),
+            payload)
+        self.assertEqual((payload["replace_cost_per_kw"], payload["replace_cost_per_kwh"]), (30, 45))
+
+    def test_fraction_and_absolute_costs_together_are_refused(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        with self.assertRaises(ValueError):
+            apply_replacement_policy(
+                self._storage({"replacement": {"enabled": True, "fraction_of_install": 1.0,
+                                               "cost_per_kw": 30}}),
+                {"installed_cost_per_kw": 80, "installed_cost_per_kwh": 120, "max_kwh": 1})
+
+    def test_raw_reopt_replacement_keys_are_refused(self):
+        from proforma_vietnam.case_builder import REPLACEMENT_RAW_KEYS, apply_replacement_policy
+        self.assertEqual(len(REPLACEMENT_RAW_KEYS), 6)
+        for key in REPLACEMENT_RAW_KEYS:
+            with self.assertRaises(ValueError, msg=key):
+                apply_replacement_policy(
+                    self._storage({key: 1}), {"installed_cost_per_kw": 80, "max_kwh": 1})
+
+    def test_cycle_life_override_is_recorded(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        record = apply_replacement_policy(
+            self._storage({"cycle_life_efc": 6000}), {"installed_cost_per_kw": 80, "max_kwh": 1})
+        self.assertEqual(record["bess_cycle_life_efc"], 6000)
+        with self.assertRaises(ValueError):
+            apply_replacement_policy(
+                self._storage({"cycle_life_efc": 0}), {"installed_cost_per_kw": 80, "max_kwh": 1})
+
+    def test_no_storage_means_no_record(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        payload = {}
+        self.assertEqual(apply_replacement_policy({}, payload), {})
+        self.assertEqual(payload, {})
+
+    def test_built_case_records_the_switch_in_assumptions(self):
+        case = self._case(storage=self._storage())
 
         storage = case["payload"]["ElectricStorage"]
-        self.assertEqual(storage["replace_cost_per_kw"], 80 * BESS_REPLACE_FRACTION_OF_INSTALL)
-        self.assertEqual(storage["replace_cost_per_kwh"], 120 * BESS_REPLACE_FRACTION_OF_INSTALL)
-        self.assertEqual(storage["inverter_replacement_year"], BESS_REPLACEMENT_YEAR)
-        self.assertEqual(storage["battery_replacement_year"], BESS_REPLACEMENT_YEAR)
-
+        self.assertEqual(storage["replace_cost_per_kw"], 0.0)
+        self.assertEqual(storage["replace_cost_per_kwh"], 0.0)
+        self.assertNotIn("battery_replacement_year", storage)
+        self.assertNotIn("inverter_replacement_year", storage)
         assumptions = case["assumptions"]
-        self.assertEqual(assumptions["battery_replacement_year"], BESS_REPLACEMENT_YEAR)
-        self.assertEqual(assumptions["bess_replace_cost_per_kw"], 80.0)
-        self.assertEqual(assumptions["bess_replace_cost_per_kwh"], 120.0)
-        self.assertEqual(assumptions["pv_inverter_replacement_year"], PV_INVERTER_REPLACEMENT_YEAR)
-        self.assertEqual(
-            assumptions["pv_inverter_replacement_fraction_of_pv_capex"],
-            PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
-        )
+        self.assertIs(assumptions["bess_replacement_enabled"], False)
+        self.assertEqual(assumptions["bess_cycle_life_efc"], 8000)
+        self.assertNotIn("battery_replacement_year", assumptions)
+        self.assertNotIn("bess_replace_cost_per_kw", assumptions)
+        self.assertEqual(assumptions["pv_inverter_replacement_year"], 11)
+        self.assertEqual(assumptions["pv_inverter_replacement_fraction_of_pv_capex"], 0.10)
 
-    def test_an_explicit_replacement_in_case_json_wins_over_the_policy(self):
-        case = self._case(storage={
-            "max_kw": 1000, "max_kwh": 4000,
-            "installed_cost_per_kw": 80, "installed_cost_per_kwh": 120,
-            "replace_cost_per_kwh": 60, "battery_replacement_year": 12,
-        })
+    def test_built_case_with_an_opt_in_records_the_event(self):
+        case = self._case(storage=self._storage({"replacement": {"enabled": True, "year": 12}}))
 
         storage = case["payload"]["ElectricStorage"]
-        self.assertEqual(storage["replace_cost_per_kwh"], 60)
+        self.assertEqual(storage["replace_cost_per_kwh"], 120.0)
         self.assertEqual(storage["battery_replacement_year"], 12)
-        # The untouched half still follows the policy.
-        self.assertEqual(storage["replace_cost_per_kw"], 80.0)
-        self.assertEqual(storage["inverter_replacement_year"], 10)
-        self.assertEqual(case["assumptions"]["bess_replace_cost_per_kwh"], 60)
-        self.assertEqual(case["assumptions"]["battery_replacement_year"], 12)
+        assumptions = case["assumptions"]
+        self.assertIs(assumptions["bess_replacement_enabled"], True)
+        self.assertEqual(assumptions["battery_replacement_year"], 12)
+        self.assertEqual(assumptions["bess_replace_cost_per_kw"], 80.0)
+
+    def test_a_raw_key_in_case_json_fails_the_build(self):
+        with self.assertRaises(ValueError):
+            self._case(storage=self._storage({"replace_cost_per_kwh": 60}))
 
     def test_analysis_years_defaults_to_the_policy_horizon(self):
         from proforma_vietnam.defaults import PROJECT_YEARS
@@ -1401,7 +1472,8 @@ class ReplacementPolicyInTheBuilderTests(TestCase):
 
         self.assertNotIn("replace_cost_per_kw", case["payload"]["ElectricStorage"])
         self.assertNotIn("battery_replacement_year", case["payload"]["ElectricStorage"])
-        self.assertNotIn("bess_replace_cost_per_kw", case["assumptions"])
+        self.assertNotIn("bess_replacement_enabled", case["assumptions"])
+        self.assertNotIn("bess_cycle_life_efc", case["assumptions"])
         self.assertNotIn("battery_replacement_year", case["assumptions"])
         # The PV inverter policy is written regardless: it needs PV, not storage.
         self.assertEqual(case["assumptions"]["pv_inverter_replacement_year"], 11)

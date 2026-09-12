@@ -3,6 +3,8 @@ from pathlib import Path
 
 from proforma_vietnam import pvwatts_client
 from proforma_vietnam.defaults import (
+    BESS_CYCLE_LIFE_EFC,
+    BESS_REPLACEMENT_ENABLED,
     BESS_REPLACEMENT_YEAR,
     BESS_REPLACE_FRACTION_OF_INSTALL,
     FINANCIAL_DEFAULTS,
@@ -105,17 +107,22 @@ STORAGE_PAYLOAD_KEYS = [
     "installed_cost_per_kw",
     "installed_cost_per_kwh",
     "installed_cost_constant",
+    "om_cost_fraction_of_installed_cost",
+    "can_grid_charge",
+    "soc_min_fraction",
+    "soc_init_fraction",
+]
+# Raw REopt replacement keys are not accepted in case.json: the replacement
+# block (technologies.storage.replacement) is the one way to say it, and the
+# builder refuses a case that carries any of these (ruling 2026-09-12).
+REPLACEMENT_RAW_KEYS = (
     "replace_cost_per_kw",
     "replace_cost_per_kwh",
     "replace_cost_constant",
     "inverter_replacement_year",
     "battery_replacement_year",
     "cost_constant_replacement_year",
-    "om_cost_fraction_of_installed_cost",
-    "can_grid_charge",
-    "soc_min_fraction",
-    "soc_init_fraction",
-]
+)
 
 
 def build_vietnam_case(case_config):
@@ -280,7 +287,7 @@ def _pv_inputs(pv_config, site):
 
 def _storage_inputs(storage_config, esco_contract, dppa_inputs):
     storage = _allowlisted(storage_config, STORAGE_PAYLOAD_KEYS)
-    _apply_replacement_policy(storage)
+    apply_replacement_policy(storage_config, storage)
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         # Co-located BESS only under DPPA: charges from PV, not from the grid.
         storage["can_grid_charge"] = False
@@ -294,26 +301,64 @@ def _storage_inputs(storage_config, esco_contract, dppa_inputs):
     return storage
 
 
-def _apply_replacement_policy(storage):
-    """Fill the REopt replacement inputs from the shared policy.
+def apply_replacement_policy(storage_config, storage_payload):
+    """Fill the REopt replacement inputs from technologies.storage.replacement.
 
-    REopt defaults every replace_cost field to 0.0, which models a free
-    replacement; the two bess_arbitrage cases shipped that way. The policy
-    replaces the whole system (storage inverter and pack) in one year at a
-    fraction of the install price actually being sent, so a price sensitivity
-    keeps the rule true. An explicit case.json value for any key still wins.
-    Only applied when the case sends a storage system at all.
+    Default (policy 2026-09-12): no scheduled replacement, so REopt is sent a
+    zero replacement price explicitly and no replacement years; battery
+    ageing is carried by the state-of-health curve instead. A case opts in
+    with ``replacement: {"enabled": true, "year": 10, "fraction_of_install": 1.0}``
+    (or ``cost_per_kw`` / ``cost_per_kwh`` instead of the fraction); the whole
+    system, storage inverter and pack, is then replaced in that one year at a
+    fraction of the install price actually being sent. Returns the record the
+    workbook reads (bess_replacement_enabled and, when enabled, the year and
+    unit prices; the cycle life either way). Empty, and the payload untouched,
+    when the case sends no storage system at all.
     """
-    if not any(storage.get(key) for key in ("max_kw", "max_kwh", "min_kw", "min_kwh")):
-        return
-    for install_key, replace_key in (
-        ("installed_cost_per_kw", "replace_cost_per_kw"),
-        ("installed_cost_per_kwh", "replace_cost_per_kwh"),
+    if not any(storage_payload.get(key) for key in ("max_kw", "max_kwh", "min_kw", "min_kwh")):
+        return {}
+    present = [key for key in REPLACEMENT_RAW_KEYS if key in storage_config]
+    if present:
+        raise ValueError(
+            "technologies.storage carries {}; use technologies.storage.replacement "
+            "{{enabled, year, fraction_of_install | cost_per_kw, cost_per_kwh}} "
+            "instead.".format(", ".join(present))
+        )
+    cycle_life = storage_config.get("cycle_life_efc", BESS_CYCLE_LIFE_EFC)
+    if isinstance(cycle_life, bool) or not isinstance(cycle_life, (int, float)) or cycle_life <= 0:
+        raise ValueError("technologies.storage.cycle_life_efc must be a positive number.")
+    record = {"bess_cycle_life_efc": cycle_life}
+    replacement = storage_config.get("replacement") or {}
+    enabled = bool(replacement.get("enabled", BESS_REPLACEMENT_ENABLED))
+    record["bess_replacement_enabled"] = enabled
+    if not enabled:
+        storage_payload["replace_cost_per_kw"] = 0.0
+        storage_payload["replace_cost_per_kwh"] = 0.0
+        return record
+    absolute = {
+        key: replacement[key] for key in ("cost_per_kw", "cost_per_kwh") if key in replacement
+    }
+    if absolute and "fraction_of_install" in replacement:
+        raise ValueError(
+            "technologies.storage.replacement: give fraction_of_install or "
+            "cost_per_kw / cost_per_kwh, not both."
+        )
+    fraction = replacement.get("fraction_of_install", BESS_REPLACE_FRACTION_OF_INSTALL)
+    year = int(replacement.get("year", BESS_REPLACEMENT_YEAR))
+    for install_key, replace_key, absolute_key in (
+        ("installed_cost_per_kw", "replace_cost_per_kw", "cost_per_kw"),
+        ("installed_cost_per_kwh", "replace_cost_per_kwh", "cost_per_kwh"),
     ):
-        if replace_key not in storage and storage.get(install_key) is not None:
-            storage[replace_key] = storage[install_key] * BESS_REPLACE_FRACTION_OF_INSTALL
-    storage.setdefault("inverter_replacement_year", BESS_REPLACEMENT_YEAR)
-    storage.setdefault("battery_replacement_year", BESS_REPLACEMENT_YEAR)
+        if absolute_key in absolute:
+            storage_payload[replace_key] = absolute[absolute_key]
+        elif storage_payload.get(install_key) is not None:
+            storage_payload[replace_key] = storage_payload[install_key] * fraction
+    storage_payload["inverter_replacement_year"] = year
+    storage_payload["battery_replacement_year"] = year
+    record["battery_replacement_year"] = year
+    record["bess_replace_cost_per_kw"] = storage_payload.get("replace_cost_per_kw")
+    record["bess_replace_cost_per_kwh"] = storage_payload.get("replace_cost_per_kwh")
+    return record
 
 
 def _dppa_inputs(dppa_config, voltage_key, tariff_config):
@@ -556,18 +601,12 @@ def _assumptions(case_config, financial, technologies, esco_contract, tariff_con
         ),
     }
     assumptions.update(_allowlisted(financial, FINANCIAL_ASSUMPTION_KEYS))
-    # Record what the payload sent for replacement (policy or case override),
+    # Record what the payload sent for replacement (policy or case opt-in),
     # recomputed the same way _storage_inputs did, so the workbook reads a
     # record rather than a live default.
-    storage_sent = _allowlisted(technologies.get("storage", {}), STORAGE_PAYLOAD_KEYS)
-    _apply_replacement_policy(storage_sent)
-    for sent_key, record_key in (
-        ("battery_replacement_year", "battery_replacement_year"),
-        ("replace_cost_per_kw", "bess_replace_cost_per_kw"),
-        ("replace_cost_per_kwh", "bess_replace_cost_per_kwh"),
-    ):
-        if storage_sent.get(sent_key) is not None:
-            assumptions[record_key] = storage_sent[sent_key]
+    storage_config = technologies.get("storage", {})
+    storage_sent = _allowlisted(storage_config, STORAGE_PAYLOAD_KEYS)
+    assumptions.update(apply_replacement_policy(storage_config, storage_sent))
     # The PV inverter event is booked by the shared core from these two values;
     # written at case-build time so the workbook reads a record, not a live
     # default (the O&M lesson of 2026-09-10).
