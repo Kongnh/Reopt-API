@@ -478,12 +478,30 @@ period (all opt-out by overriding the relevant input):
   volume and does not degrade.
 - **O&M escalation**: `om_escalation_rate` compounds annual O&M (default 3%/yr
   from `vietnam_defaults.json`).
-- **Battery replacement**: a replacement expense is booked in the configured
-  `battery_replacement_year` assumption (Factory A cases follow the shared
-  replacement policy, year 10, since 2026-09-11) at
-  `size_kw × replace_cost_per_kw + size_kwh × replace_cost_per_kwh`,
-  derived automatically from REopt inputs/outputs unless the assumption or
+- **Battery replacement**: none by default since 2026-09-12 (the policy sends
+  REopt a zero replacement price). A case that opts in through
+  `technologies.storage.replacement` books
+  `size_kw × replace_cost_per_kw + size_kwh × replace_cost_per_kwh` in the
+  configured year, derived automatically from REopt inputs/outputs unless
   `replacement_costs_by_year` is overridden.
+- **Battery state of health (2026-09-12)**: `battery_soh.py` replays REopt.jl
+  v0.57.0's daily fade recurrence on the solved year-1 dispatch with the
+  hours-per-time-step factor removed (h = 1); cycle life 8,000 EFC to 80
+  percent sets the cycle coefficient, calendar fade keeps NREL's. The
+  cash flow multiplies the battery's share of each generation-linked base by
+  the year-average SOH where the PV part keeps `(1 - deg)^y`: ESCO energy
+  revenue and the offtaker's retail repurchase (battery-served kWh when the
+  storage is PV-charged), the net value of battery energy outside the served
+  series (grid-charged storage under direct ownership, battery-only
+  arbitrage), the battery's demand relief (PV-only counterfactual demand
+  charge minus the solved one, `demand_charge.py`, tied out against REopt's
+  own demand costs), grid arbitrage, and under DPPA the generation-linked
+  terms through an energy-share blend. Who bears the fade follows the
+  structure's own PV-degradation mechanics. Energy delivered is assumed to
+  scale with capacity (an upper bound on the loss); the optimiser does not
+  see the curve. Grid-charged storage beside PV under an ESCO structure has
+  no attributed energy value in this model and is therefore not derated,
+  which the Assumptions sheet states.
 - **Vietnam CIT**: 4-year exemption + 9-year 50 percent reduction counted
   from the first profitable year (no later than year 4, Circular 78/2014
   Art. 18), with 5-year tax-loss carryforward (Art. 9).

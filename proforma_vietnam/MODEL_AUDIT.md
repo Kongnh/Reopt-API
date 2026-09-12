@@ -490,3 +490,54 @@ brief), tariff (`reoptjl/test/test_thailand_tariff.py`) 14/14. No pinned test
 in any of the three suites changed state, consistent with Task 4 Step 10's
 finding that neither suite covers `calculate_esco_pro_forma_from_reopt_results`
 with an absolute-value assertion on this path.
+
+## 10. 2026-09-12 battery ageing: replacement switch, SOH curve, fade derate
+
+Rulings of 2026-09-12: no scheduled battery replacement inside the 20 year
+horizon (both countries; `technologies.storage.replacement` opts a case back
+in), battery ageing carried by a state-of-health curve replayed from the
+solved dispatch, the battery's share of the savings derated by that curve,
+cycle life 8,000 EFC to 80 percent, the REopt recurrence taken at h = 1 so
+15 minute and hourly solves age alike. Spec:
+`docs/superpowers/specs/2026-09-12-battery-soh-fade-design.md`.
+
+### What changed in the engine
+
+- `proforma_vietnam/battery_soh.py`: REopt.jl v0.57.0 `add_degradation`
+  recurrence, day by day, year-1 pattern repeated. Verified against REopt's
+  own `state_of_health` on the 2026-09-12 probe solve (hourly, so the two
+  recurrences coincide): worst daily difference 5.0e-4 over 7,300 days, the
+  SOC rounding REopt applies before returning the series.
+- `proforma_vietnam/demand_charge.py`: year-1 demand charge from a purchase
+  series for the two structures in use (coincident-peak periods, monthly
+  demand rates). Tie-outs on the saved solves: Thailand case_6 BAU and
+  optimized coincident-peak costs, Vietnam case_3 BAU and optimized monthly
+  demand costs, all within 0.5 USD of REopt. The PV-only counterfactual
+  (grid purchase = max(load - PV, 0), no optimiser needed) gives the
+  battery's demand relief: Thailand case_6 22,166 of the 31,347 USD demand
+  savings, case_5 8,893 of 16,695, Vietnam case_3 89,153 of 98,666. This
+  closes the "storage share is not separable" limit recorded in section 9
+  for the demand line.
+- `esco_pro_forma._battery_fade_inputs` and `cash_flow(battery_fade=...)`:
+  the battery part of ESCO energy revenue, the retail repurchase, demand
+  savings, grid arbitrage and the DPPA generation-linked terms is multiplied
+  by the year-average SOH; the PV part keeps `(1 - deg)^y`. Direct ownership
+  adds the lost value to the optimized bill. Without a battery every path
+  is untouched: the four structures' audit formulas are frozen in
+  `tests/fixtures/plain_formulas.json` and asserted byte-identical.
+
+### Stated simplifications (also on the Model Basis sheet)
+
+- Energy delivered by the battery scales with SOH (capacity-bound every
+  day): the upper bound of the loss for a battery that is not fully cycled.
+- Calendar fade keeps NREL's laboratory coefficients; no LFP or ambient
+  temperature calibration.
+- Grid-charged storage beside PV under an ESCO structure carries no
+  attributed energy value in this model, so nothing is derated there.
+- The optimiser does not see the curve; sizing and dispatch are unchanged.
+
+### Out of scope
+
+Reissuing the Keen memo, deck and artifact; a replacement reserve in the
+debt sizing (moot unless a case opts into a replacement).
+

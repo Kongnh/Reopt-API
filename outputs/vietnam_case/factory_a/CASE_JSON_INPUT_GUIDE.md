@@ -181,12 +181,8 @@ Storage size is optimized by core REopt. Battery power is controlled by kW bound
 | `technologies.storage.installed_cost_per_kw` | `120` | Battery power-related installed cost in USD per kW. |
 | `technologies.storage.installed_cost_per_kwh` | `180` | Battery energy-related installed cost in USD per kWh. |
 | `technologies.storage.installed_cost_constant` | `0` | Fixed one-time battery installed cost in USD that does not scale with kW or kWh. Use this for controls, integration, mobilization, or interconnection if those costs are not already included in per-kW or per-kWh costs. |
-| `technologies.storage.replace_cost_per_kw` | omit | Storage power-component (PCS/inverter) replacement cost in USD/kW at `inverter_replacement_year`. Omit to apply the shared replacement policy: 100 percent of the `installed_cost_per_kw` sent. Set only for a sensitivity on the replacement itself. |
-| `technologies.storage.replace_cost_per_kwh` | omit | Battery pack replacement cost in USD/kWh at `battery_replacement_year`. Omit to apply the shared replacement policy: 100 percent of the `installed_cost_per_kwh` sent. |
-| `technologies.storage.replace_cost_constant` | `0` | Fixed battery replacement cost in USD at `cost_constant_replacement_year`. |
-| `technologies.storage.inverter_replacement_year` | omit | Project year for the STORAGE inverter (PCS) replacement, a REopt field. Omit to apply the policy year 10, the same year as the pack, so the whole system is replaced together. Not the PV inverter. |
-| `technologies.storage.battery_replacement_year` | omit | Project year for the battery pack replacement. Omit to apply the policy year 10. The PV inverter is not a REopt input: the pro forma books it at 10 percent of solved PV capex in year 11 from `proforma_vietnam.defaults`. |
-| `technologies.storage.cost_constant_replacement_year` | `10` | Project year for fixed replacement cost. |
+| `technologies.storage.replacement` | omit | Optional block scheduling a whole-system battery replacement (storage inverter and pack together). Omit, or `{"enabled": false}`, for the policy default since 2026-09-12: no replacement inside the horizon; REopt is sent `replace_cost_per_kw = replace_cost_per_kwh = 0` and battery ageing is carried by the SOH curve instead. `{"enabled": true}` inherits the policy year (10) and fraction (1.0 of the installed prices sent); `year`, `fraction_of_install`, or absolute `cost_per_kw` / `cost_per_kwh` (never both the fraction and absolute costs) refine it. The raw REopt keys `replace_cost_per_kw`, `replace_cost_per_kwh`, `replace_cost_constant`, `inverter_replacement_year`, `battery_replacement_year`, `cost_constant_replacement_year` are refused by the builder: this block is the one way to say it. The PV inverter is not a REopt input: the pro forma books it at 10 percent of solved PV capex in year 11 from `proforma_vietnam.defaults`. |
+| `technologies.storage.cycle_life_efc` | omit | Battery cycle life in equivalent full cycles to 80 percent state of health, LFP datasheet convention. Omit for the policy default (8,000). Sets the cycle-fade coefficient of the SOH curve: (1 - 0.80) / cycle life per kWh discharged. Recorded as `bess_cycle_life_efc` in assumptions.json. |
 | `technologies.storage.om_cost_fraction_of_installed_cost` | `0.02` | Core REopt annual storage O&M field. It is a fraction of total installed storage cost. Total installed storage cost includes `installed_cost_per_kw * optimized_kw`, `installed_cost_per_kwh * optimized_kwh`, and `installed_cost_constant`. `0.02` means 2% of total installed storage cost per year. |
 
 Sizing examples:
@@ -218,18 +214,16 @@ The Vietnam workbook is USD-based for investor-facing cash flow, NPV, capex, deb
 
 PV degradation is supported by core REopt through `technologies.pv.degradation_fraction`. If you omit it, REopt's model default is used. The current model default is 0.5% per year.
 
-Storage replacement is supported by core REopt through storage replacement fields, and the sample exposes those fields:
+Battery ageing (policy since 2026-09-12) is carried by a state-of-health curve rather than a scheduled replacement:
 
 | Optional field | Meaning |
 | --- | --- |
-| `technologies.storage.replace_cost_per_kw` | Storage PCS replacement cost in USD/kW at the storage inverter replacement year; policy fills it at 100 percent of install when omitted. |
-| `technologies.storage.replace_cost_per_kwh` | Battery pack replacement cost in USD/kWh at the battery replacement year; policy fills it at 100 percent of install when omitted. |
-| `technologies.storage.replace_cost_constant` | Fixed replacement cost in USD. |
-| `technologies.storage.inverter_replacement_year` | Project year for the storage inverter (PCS) replacement; policy year 10 when omitted. Not the PV inverter. |
-| `technologies.storage.battery_replacement_year` | Project year for the battery pack replacement; policy year 10 when omitted. |
-| `technologies.storage.cost_constant_replacement_year` | Project year for fixed replacement cost. |
+| `technologies.storage.replacement` | `{"enabled": true, "year": 10, "fraction_of_install": 1.0}` schedules a whole-system replacement (or `cost_per_kw` / `cost_per_kwh` instead of the fraction). Omitted: none, and REopt is sent a zero replacement price. |
+| `technologies.storage.cycle_life_efc` | Equivalent full cycles to 80 percent state of health; default 8,000. |
 
-The Vietnam pro forma reads the REopt-scheduled replacement costs and reflects them in the cash flow at their scheduled years. By default the replacement is capitalized and depreciated over the 8-year BESS class per Circular 45/2013 (`financial.battery_replacement_treatment = "capitalize"`); set `"expense"` for the legacy expense-in-year treatment. Cash flows are identical under both — only the CIT timing differs.
+The SOH curve is REopt.jl v0.57.0's daily fade recurrence (calendar fade on the average stored energy, cycle fade on the energy discharged) replayed over the horizon on the solved year-1 dispatch, with the hours-per-time-step factor removed so 15 minute and hourly solves age alike. The pro forma multiplies the battery's share of the savings (energy revenue, retail repurchase, demand relief from a PV-only counterfactual, grid arbitrage) by the year's average SOH; the "Battery SOH" sheet shows the curve, the yearly table and the value lost. Energy delivered is assumed to scale with capacity, an upper bound on the loss. The optimiser never sees the curve.
+
+When a case opts into a replacement, the Vietnam pro forma reads the REopt-scheduled replacement costs and reflects them in the cash flow at their scheduled years. By default the replacement is capitalized and depreciated over the 8-year BESS class per Circular 45/2013 (`financial.battery_replacement_treatment = "capitalize"`); set `"expense"` for the legacy expense-in-year treatment. Cash flows are identical under both, only the CIT timing differs.
 
 ## Common Edits
 
