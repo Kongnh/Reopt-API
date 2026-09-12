@@ -141,3 +141,7 @@ baseline_workbooks/
 # Scratch output from Vietnam workbook gate runs (see
 # proforma_vietnam/tools/compare_workbooks.py). Regenerate, never commit.
 gate_check*/
+
+# Research probes: the per-solve results files are 4 MB each; the summaries are kept
+outputs/research/**/solves/
+outputs/research/*.log

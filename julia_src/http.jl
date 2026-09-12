@@ -58,6 +58,18 @@ end
 function reopt(req::HTTP.Request)
     d = JSON.parse(String(req.body))
 	error_response = Dict()
+    # Research line (2026-09-12): REopt.jl 0.57 types the vector-valued
+    # degradation inputs as Vector{<:Real} but JSON.parse yields Vector{Any}
+    # and dictkeys_tosymbols does not convert these keys, so
+    # ElectricStorage.degradation.cycle_fade_coefficient cannot be driven over
+    # HTTP without this coercion. Scalars and unknown keys are left alone.
+    if haskey(d, "ElectricStorage") && isa(get(d["ElectricStorage"], "degradation", nothing), Dict)
+        for key in ("cycle_fade_coefficient", "cycle_fade_fraction", "maintenance_cost_per_kwh")
+            if isa(get(d["ElectricStorage"]["degradation"], key, nothing), AbstractVector)
+                d["ElectricStorage"]["degradation"][key] = convert(Vector{Float64}, d["ElectricStorage"]["degradation"][key])
+            end
+        end
+    end
     if !isempty(get(d, "api_key", ""))
         ENV["NREL_DEVELOPER_API_KEY"] = pop!(d, "api_key")
     else
