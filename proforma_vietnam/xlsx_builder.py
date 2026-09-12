@@ -3,6 +3,7 @@ from datetime import date
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, LineChart, Reference, Series
 from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 
 from proforma_vietnam import audit_sheets
 from proforma_vietnam import proforma_schema as schema
@@ -177,7 +178,22 @@ CUSTOM_LAYOUT_SHEETS = {
     "Model Basis",
     audit_sheets.PRO_FORMA_SHEET,
     "FX Sensitivity",
+    "Battery SOH",
 }
+
+# Battery SOH sheet (2026-09-12): the curve replayed from the solved dispatch
+# and the value the fade takes out of each year.
+SOH_COLUMNS = [
+    ("Year", "year"),
+    ("SOH end of year", "soh_end"),
+    ("SOH year average (derate factor)", "soh_average"),
+    ("Usable capacity (kWh)", "usable_kwh_end"),
+    ("EFC in year", "efc_in_year"),
+    ("Cumulative EFC", "efc_cumulative"),
+    ("Calendar fade (kWh)", "calendar_fade_kwh"),
+    ("Cycle fade (kWh)", "cycle_fade_kwh"),
+    ("Value lost to fade (USD)", "fade_loss_usd"),
+]
 
 BUYER_ANNUAL_COLUMNS = [
     ("Year", "year", None),
@@ -251,6 +267,10 @@ def build_vietnam_esco_workbook(cash_flow_result, assumptions=None, report_data=
     _write_technical_results(
         workbook.create_sheet("Technical Results"), report_data, profile=profile
     )
+    if (derivation or {}).get("battery_fade"):
+        _write_battery_soh_sheet(
+            workbook.create_sheet("Battery SOH"), cash_flow_result, profile=profile
+        )
     _write_dispatch_sheet(
         workbook.create_sheet("Dispatch Profile"),
         report_data.get("dispatch_profile", []),
@@ -956,6 +976,135 @@ def _write_dispatch_sheet(worksheet, rows, profile=VIETNAM_PROFILE):
     chart.height = 9
     chart.width = 24
     worksheet.add_chart(chart, "M2")
+
+
+def _write_battery_soh_sheet(worksheet, cash_flow_result, profile=VIETNAM_PROFILE):
+    """State of health curve replayed from the solved dispatch, with the derate it drives."""
+    fade = (cash_flow_result.get("derivation") or {}).get("battery_fade") or {}
+    soh = fade.get("soh") or {}
+    coefficients = soh.get("coefficients") or {}
+    annual = cash_flow_result.get("annual_cash_flows") or []
+    loss_by_year = {
+        row["year"]: row.get("battery_fade_loss_usd", row.get("battery_fade_loss_vnd", 0.0))
+        for row in annual
+    }
+    years = soh.get("years") or []
+    horizon = soh.get("project_years") or len(years)
+    first_below = soh.get("first_year_below_end_of_life")
+    cycle_life = coefficients.get("cycle_life_efc")
+    by_year = {entry["year"]: entry for entry in years}
+
+    row = 1
+    title = worksheet.cell(row=row, column=1, value="Battery state of health")
+    title.font = TITLE_FONT
+    title.fill = TITLE_FILL
+    row += 2
+    for line in (
+        "Method: REopt.jl v0.57.0 daily fade recurrence replayed over the horizon on the solved "
+        "year-1 dispatch. SOH[d] = SOH[d-1] - (k_cal x a x Eavg[d-1] x d^(a-1) + k_cyc x "
+        "E_discharged[d-1]), SOH in kWh, with the hours-per-time-step factor removed (h = 1) so "
+        "15 minute and hourly solves age alike.",
+        "Cycle fade: k_cyc = (1 - 0.80) / cycle life = {:.3e} kWh lost per kWh discharged "
+        "(cycle life {} EFC to 80 percent).".format(
+            coefficients.get("cycle_fade_coefficient", 0.0),
+            "{:,.0f}".format(cycle_life) if cycle_life else "n/a",
+        ),
+        "Calendar fade: k_cal = {:.2e}, exponent a = {} (NREL laboratory defaults, no chemistry "
+        "or temperature calibration).".format(
+            coefficients.get("calendar_fade_coefficient", 0.0),
+            coefficients.get("calendar_fade_exponent", 0.0),
+        ),
+        "Use: the year-average SOH multiplies the battery's share of the savings on the "
+        "Pro Forma (Audit) sheet (row 'Battery SOH factor'). Energy delivered is assumed to "
+        "scale with capacity, the battery treated as capacity-bound every day: an upper bound "
+        "on the loss. The optimiser does not see this curve; no battery replacement is "
+        "scheduled unless the case opts in.",
+        "Energy attribution: {}. Demand attribution: {}.".format(
+            fade.get("energy_attribution"), fade.get("demand_attribution")
+        ),
+    ):
+        worksheet.cell(row=row, column=1, value=line).font = NOTE_FONT
+        row += 1
+    row += 1
+
+    def result_line(label, value, fmt=None):
+        nonlocal row
+        worksheet.cell(row=row, column=1, value=label).font = KPI_FONT
+        cell = worksheet.cell(row=row, column=2, value=value)
+        if fmt:
+            cell.number_format = fmt
+        row += 1
+
+    result_line("Nominal capacity (kWh)", soh.get("size_kwh"), FORMAT_AMOUNT)
+    result_line("SOH end of year 10", (by_year.get(10) or {}).get("soh_end"), FORMAT_PERCENT)
+    result_line(
+        "SOH end of year {}".format(horizon),
+        (by_year.get(horizon) or {}).get("soh_end"), FORMAT_PERCENT,
+    )
+    result_line(
+        "First year below 80 percent",
+        first_below if first_below else "Not within the {} year horizon".format(horizon),
+    )
+    result_line("Equivalent full cycles, year 1", soh.get("year_one_efc"), FORMAT_AMOUNT)
+    result_line(
+        "Equivalent full cycles, cumulative",
+        (by_year.get(horizon) or {}).get("efc_cumulative"), FORMAT_AMOUNT,
+    )
+    result_line(
+        "Average daily discharge, year 1 (kWh)",
+        soh.get("year_one_daily_discharge_kwh"), FORMAT_AMOUNT,
+    )
+    result_line(
+        "Value lost to fade over the horizon (USD)", sum(loss_by_year.values()), FORMAT_AMOUNT
+    )
+    row += 1
+
+    header_row = row
+    for column_index, (header, _key) in enumerate(SOH_COLUMNS, start=1):
+        cell = worksheet.cell(row=row, column=column_index, value=header)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+    threshold_col = len(SOH_COLUMNS) + 1
+    cell = worksheet.cell(row=row, column=threshold_col, value="End of life (80 percent)")
+    cell.font = HEADER_FONT
+    cell.fill = HEADER_FILL
+    row += 1
+    table = [{
+        "year": 0, "soh_end": 1.0, "soh_average": 1.0, "usable_kwh_end": soh.get("size_kwh"),
+        "efc_in_year": 0.0, "efc_cumulative": 0.0, "calendar_fade_kwh": 0.0,
+        "cycle_fade_kwh": 0.0, "fade_loss_usd": 0.0,
+    }]
+    for entry in years:
+        table.append({**entry, "fade_loss_usd": loss_by_year.get(entry["year"], 0.0)})
+    for entry in table:
+        for column_index, (_header, key) in enumerate(SOH_COLUMNS, start=1):
+            cell = worksheet.cell(row=row, column=column_index, value=entry.get(key))
+            if key in ("soh_end", "soh_average"):
+                cell.number_format = FORMAT_PERCENT
+            elif key != "year":
+                cell.number_format = FORMAT_AMOUNT
+        worksheet.cell(row=row, column=threshold_col, value=0.8).number_format = FORMAT_PERCENT
+        row += 1
+    last_row = row - 1
+
+    chart = LineChart()
+    chart.title = "Battery state of health by year"
+    chart.y_axis.title = "SOH (fraction of nominal kWh)"
+    chart.x_axis.title = "Year"
+    chart.y_axis.scaling.min = 0.7
+    chart.y_axis.scaling.max = 1.0
+    for column in (2, threshold_col):
+        values = Reference(worksheet, min_col=column, min_row=header_row, max_row=last_row)
+        chart.series.append(Series(values, title_from_data=True))
+    chart.set_categories(
+        Reference(worksheet, min_col=1, min_row=header_row + 1, max_row=last_row)
+    )
+    chart.height = 9
+    chart.width = 20
+    worksheet.add_chart(chart, "L{}".format(header_row))
+    worksheet.column_dimensions["A"].width = 44
+    for column_index in range(2, threshold_col + 1):
+        worksheet.column_dimensions[get_column_letter(column_index)].width = 18
 
 
 def _write_table_sheet(worksheet, columns, rows, chart_title=None, profile=VIETNAM_PROFILE):

@@ -311,6 +311,69 @@ class VietnamXlsxBuilderTests(TestCase):
         self.assertEqual(monthly.cell(row=1, column=1).value, "Month")
         self.assertEqual(monthly.cell(row=2, column=2).value, 100.0)
 
+class BatterySohSheetTests(TestCase):
+    """A 'Battery SOH' sheet with the curve appears only when the cash flow
+    carries a battery_fade block."""
+
+    def _with_fade(self):
+        from proforma_vietnam.tests.test_audit_sheets import _esco_result, _fade_block
+        return _esco_result(battery_fade=_fade_block())
+
+    def test_sheet_present_only_with_a_fade_block(self):
+        plain = build_vietnam_esco_workbook(_cash_flow_result_with_derivation(), {})
+        self.assertNotIn("Battery SOH", plain.sheetnames)
+        cover = [str(c.value) for c in plain["Cover"]["B"]]
+        self.assertNotIn("Battery SOH", cover)
+
+        faded = build_vietnam_esco_workbook(self._with_fade(), {"bess_cycle_life_efc": 8000})
+        self.assertIn("Battery SOH", faded.sheetnames)
+        self.assertEqual(
+            faded.sheetnames.index("Battery SOH"),
+            faded.sheetnames.index("Technical Results") + 1,
+        )
+        sheet = faded["Battery SOH"]
+        text = [str(c.value) for row in sheet.iter_rows() for c in row if c.value is not None]
+        self.assertTrue(any("8,000" in t for t in text))
+        self.assertTrue(any("h = 1" in t or "hours-per-time-step" in t for t in text))
+        self.assertEqual(len(sheet._charts), 1)
+        cover = [str(c.value) for c in faded["Cover"]["B"]]
+        self.assertIn("Battery SOH", cover)
+        for value in text:
+            self.assertNotIn("\u2014", value)
+
+    def test_year_rows_and_loss_column(self):
+        result = self._with_fade()
+        faded = build_vietnam_esco_workbook(result, {"bess_cycle_life_efc": 8000})
+        sheet = faded["Battery SOH"]
+        header_row = next(
+            r for r in range(1, sheet.max_row + 1) if sheet.cell(row=r, column=1).value == "Year"
+        )
+        headers = [sheet.cell(row=header_row, column=c).value for c in range(1, 10)]
+        self.assertEqual(headers[1], "SOH end of year")
+        self.assertEqual(headers[-1], "Value lost to fade (USD)")
+        self.assertEqual(sheet.cell(row=header_row + 1, column=1).value, 0)
+        self.assertEqual(sheet.cell(row=header_row + 1, column=2).value, 1.0)
+        years = len(result["annual_cash_flows"])
+        self.assertEqual(sheet.cell(row=header_row + 1 + years, column=1).value, years)
+        self.assertAlmostEqual(
+            sheet.cell(row=header_row + 1 + years, column=9).value,
+            result["annual_cash_flows"][-1]["battery_fade_loss_usd"],
+        )
+        # end-of-life reference series for the chart
+        self.assertEqual(sheet.cell(row=header_row + 1, column=10).value, 0.8)
+
+    def test_key_results_block(self):
+        faded = build_vietnam_esco_workbook(self._with_fade(), {"bess_cycle_life_efc": 8000})
+        sheet = faded["Battery SOH"]
+        labels = {
+            str(sheet.cell(row=r, column=1).value): sheet.cell(row=r, column=2).value
+            for r in range(1, sheet.max_row + 1)
+        }
+        self.assertAlmostEqual(labels["SOH end of year 10"], 1.0 - 0.01 * 9)
+        self.assertEqual(labels["First year below 80 percent"], "Not within the 20 year horizon")
+        self.assertAlmostEqual(labels["Equivalent full cycles, year 1"], 300.0)
+
+
 def _cash_flow_result_with_derivation():
     from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
 

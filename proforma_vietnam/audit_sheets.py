@@ -2763,6 +2763,13 @@ def write_cover_sheet(worksheet, workbook, assumptions, derivation,
         ("Dispatch Profile", "8760-h dispatch incl. original PV generation; chart shows the peak-load week"),
         ("Load Duration", "Load and net-load duration curves"),
     ]
+    if (derivation or {}).get("battery_fade"):
+        guide.insert(
+            guide.index(("Technical Results",
+                         "System sizing, year-1 energy balance, bill comparison")) + 1,
+            ("Battery SOH",
+             "State of health replayed from the solved dispatch; drives the battery derate"),
+        )
     if is_dppa:
         guide.append(("Year 1 BAU vs DPPA", "Side-by-side year-1 buyer/seller position"))
         guide.append(("Monthly / Hourly Settlement",
