@@ -1,3 +1,164 @@
+# 2026-09-12 (second handoff, 09:00) - Replacement off, SOH curve, fade derate
+
+Branch `battery-soh-fade`, kept independent of `master` at the user's request:
+NOT merged, and the user pushed it to `origin/battery-soh-fade` themselves
+mid-session (they also checked out `master` at 08:26; I switched back). Spec:
+`docs/superpowers/specs/2026-09-12-battery-soh-fade-design.md`. Plan:
+`docs/superpowers/plans/2026-09-12-battery-soh-fade.md`. Docker stack up.
+
+## Rulings (user, 2026-09-12, after the first handoff)
+
+1. No scheduled battery replacement inside the 20 year horizon, both
+   countries. `technologies.storage.replacement` in case.json opts a case
+   back in (year, fraction of install or absolute prices); the raw REopt
+   replacement keys are refused by the builders.
+2. Project life stays 20 years; the PV inverter event (year 11, 10 percent of
+   solved PV capex) stays.
+3. Battery ageing is carried by a state-of-health curve computed from the
+   solved dispatch, and the battery's share of the savings is derated by it
+   every year (the user chose the derate over a display-only sheet).
+4. The REopt SOH recurrence is taken with the hours-per-time-step factor
+   removed (h = 1), so 15 minute and hourly solves age alike.
+5. Cycle life 8,000 equivalent full cycles to 80 percent SOH (LFP datasheet
+   convention); calendar fade keeps NREL's coefficients.
+6. Every workbook with a battery gets a "Battery SOH" sheet with the curve.
+7. All cases re-solved; memo, deck and artifact NOT reissued (stale, below).
+
+## What changed in the code (16 commits on the branch)
+
+- `proforma_vietnam/defaults/__init__.py`: `BESS_REPLACEMENT_ENABLED = False`
+  (year 10 / fraction 1.0 kept as the opt-in defaults), `BESS_CYCLE_LIFE_EFC`
+  8000, `BESS_END_OF_LIFE_SOH` 0.80, NREL calendar coefficients.
+  `proforma_thailand/defaults`: `bess_replace_cost_*` entries replaced by
+  `bess_replacement_enabled` and `bess_cycle_life_efc`, both asserted equal
+  to the policy at import.
+- `proforma_vietnam/case_builder.apply_replacement_policy(storage_config,
+  storage_payload)` (shared; Thailand imports it): disabled sends
+  `replace_cost 0` and no years; enabled prices the whole system in one year.
+  Record in assumptions: `bess_replacement_enabled`, `bess_cycle_life_efc`,
+  and when enabled `battery_replacement_year`, `bess_replace_cost_per_kw/kwh`.
+  `REPLACEMENT_RAW_KEYS` refused. `bess_cycle_life_efc` travels through
+  `VIETNAM_REPORT_QUERY_KEYS`, `views.py`, the sweep map and Thailand's
+  `PASSTHROUGH_OVERRIDE_KEYS`.
+- `proforma_vietnam/battery_soh.py` (new): REopt.jl v0.57.0 `add_degradation`
+  recurrence at h = 1, year-1 pattern repeated. Replicates REopt's own
+  `state_of_health` on the 2026-09-12 probe (hourly) to 5.0e-4 worst day over
+  7,300 days (fixture `tests/fixtures/soh_probe_bess_arbitrage_5mw.json`).
+- `proforma_vietnam/demand_charge.py` (new): year-1 demand charge from a
+  purchase series (coincident-peak periods, monthly demand rates); ties out
+  to REopt's BAU and optimized demand costs on Thailand case_6 and Vietnam
+  case_3 within 0.5 USD. PV-only counterfactual = max(load - PV, 0), no
+  optimiser needed. This closes the "storage share not separable" limit of
+  MODEL_AUDIT section 9 for the demand line.
+- `esco_pro_forma._battery_fade_inputs` + `cash_flow(battery_fade=...)`: the
+  battery's share of ESCO energy revenue, the retail repurchase, demand
+  savings, grid arbitrage and the DPPA generation-linked terms is multiplied
+  by the year-average SOH; the PV part keeps `(1 - deg)^y`. Direct ownership
+  adds the lost value to the optimized bill. Rows carry
+  `battery_soh_fraction` and `battery_fade_loss_usd`; derivation carries
+  `battery_fade`. Without a battery every path is untouched: the four
+  structures' audit formulas are frozen in `tests/fixtures/plain_formulas.json`
+  and asserted byte-identical, and the five PV-only workbooks gate at 0 diffs
+  against the pre-change baselines (one operand-order slip fixed to get there).
+- `audit_sheets.py`: SOH factor row (values), generation factor row (DPPA),
+  five `BESS_*` named inputs, every affected formula carries the terms so the
+  Excel tie-out still holds; Replacement Policy section states the switch and
+  the cycle life; Model Basis has a battery-ageing bullet.
+- `xlsx_builder.py`: "Battery SOH" sheet (method, key results, year table,
+  line chart with the 80 percent line) after Technical Results; Cover index.
+- Docs: CASE_JSON_INPUT_GUIDE, ESCO_CONTRACT_MODEL_DESIGN, MODEL_AUDIT s10.
+- Records: the nine storage `payload.json`/`assumptions.json` regenerated
+  (replace_cost 0, no years, the two new keys); the five PV-only records
+  verified unchanged against HEAD.
+
+Tests: Vietnam 596 (+45), Thailand 144 (+1), tariff 14, all green. Excel COM
+recalculation of the nine storage workbooks (`validate_workbook`, dedicated
+Excel instance): ALL CHECKS PASS, nine tie-outs each, zero REVIEW, so the
+SOH terms in the live formulas reproduce the engine. Gate TOTAL DIFFS 0 on
+all fourteen after re-baselining the nine storage cases.
+
+## Reconcile, old (workbooks committed at `ac68e5cb`, 100 percent year-10 replacement) against new
+
+Nine storage cases re-solved; the five PV-only cases rebuilt only and identical
+to the cent (gate 0 diffs against the pre-change baselines). The first six
+rows are Thailand rofu, the rest Vietnam.
+
+| case | PV kW old -> new | BESS kW / kWh old -> new | Capex old -> new | Equity IRR old -> new | Equity NPV old -> new | Min DSCR old -> new | SOH y10 / y20 | EFC/yr | Battery energy value y1 | Battery demand relief y1 | Lifetime fade loss |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| case_1 | 1,685 -> 1,685 | 0 / 0 -> 0 / 0 | 842,500 -> 842,500 | 66.4% -> 66.4% | 1,304,997 -> 1,304,997 | 2.86 -> 2.86 | no battery |  |  |  |  |
+| case_2 | 1,895 -> 1,895 | 0 / 0 -> 0 / 0 | 947,500 -> 947,500 | 64.5% -> 64.5% | 1,415,588 -> 1,415,588 | 2.79 -> 2.79 | no battery |  |  |  |  |
+| case_3 | 2,106 -> 2,106 | 0 / 0 -> 0 / 0 | 1,053,000 -> 1,053,000 | 62.2% -> 62.2% | 1,506,642 -> 1,506,642 | 2.72 -> 2.72 | no battery |  |  |  |  |
+| case_4 | 2,549 -> 2,549 | 0 / 0 -> 0 / 0 | 1,274,321 -> 1,274,321 | 56.1% -> 56.1% | 1,610,103 -> 1,610,103 | 2.51 -> 2.51 | no battery |  |  |  |  |
+| case_5 | 1,685 -> 1,685 | 222 / 367 -> 297 / 682 | 919,716 -> 974,448 | 64.2% -> 61.7% | 1,353,566 -> 1,381,928 | 2.21 -> 2.70 | 90.8% / 83.6% | 248 | 12,618 (net retail value of battery energy) | 13,210 | 67,714 |
+| case_6 | 2,847 -> 3,230 | 507 / 1,881 -> 815 / 4,047 | 1,756,407 -> 2,303,615 | 49.6% -> 42.8% | 1,855,912 -> 2,071,873 | 0.64 -> 2.05 | 91.1% / 83.7% | 261 | 108,315 (net retail value of battery energy) | 35,240 | 367,107 |
+| case_1 | 4,568 -> 5,701 | 1,452 / 5,679 -> 1,896 / 11,086 | 2,990,365 -> 4,218,573 | 16.5% -> 13.3% | 773,960 -> 585,319 | -0.92 -> 1.02 | 92.1% / 85.9% | 215 | 236,685 (inside the served series) | 0 | 604,588 |
+| case_2 | 5,448 -> 5,996 | 1,611 / 9,461 -> 2,011 / 12,331 | 3,879,459 -> 4,518,797 | 11.6% -> 12.1% | 262,548 -> 405,302 | -1.68 -> 0.97 | 92.1% / 85.8% | 221 | 309,908 (inside the served series) | 0 | 794,673 |
+| case_3 | 4,649 -> 6,071 | 1,258 / 7,822 -> 2,220 / 14,337 | 3,270,852 -> 4,812,252 | 8.7% -> 7.7% | -177,968 -> -470,729 | -1.74 -> 0.78 | 92.0% / 85.6% | 224 | 208,584 (inside the served series) | 131,445 | 930,135 |
+| case_4 | 3,243 -> 3,243 | 0 / 0 -> 0 / 0 | 1,556,758 -> 1,556,758 | 16.8% -> 16.8% | 440,925 -> 440,925 | 1.17 -> 1.17 | no battery |  |  |  |  |
+| case_5 | 5,448 -> 5,996 | 1,611 / 9,461 -> 2,011 / 12,331 | 3,879,459 -> 4,518,797 | 14.8% -> 15.1% | 759,543 -> 986,353 | -1.51 -> 1.07 | 92.1% / 85.8% | 221 | 309,908 (inside the served series) | 0 | 589,983 |
+| case_6 | 5,914 -> 5,914 | 592 / 1,184 -> 592 / 1,184 | 3,028,160 -> 3,028,160 | 25.7% -> 26.0% | 1,929,382 -> 1,982,816 | 1.38 -> 1.48 | 90.1% / 81.8% | 298 | 41,260 (inside the served series) | 0 | 80,956 |
+| bess_arbitrage_5mw | 0 -> 0 | 5,000 / 25,000 -> 5,000 / 25,000 | 3,400,000 -> 3,400,000 | 54.3% -> 53.9% | 3,436,606 -> 4,092,688 | -6.13 -> 2.40 | 90.2% / 81.9% | 297 | 913,007 (net retail value of battery energy) | 0 | 2,935,219 |
+| bess_arbitrage_5mw_mfg | 0 -> 0 | 5,000 / 25,000 -> 5,000 / 25,000 | 3,400,000 -> 3,400,000 | 18.1% -> 24.7% | 578,999 -> 1,455,082 | -7.29 -> 1.51 | 90.2% / 81.9% | 297 | 585,440 (net retail value of battery energy) | 0 | 1,882,126 |
+
+## Reading the numbers
+
+- Two things moved at once for every storage case: the year-10 replacement
+  left the objective, so the optimiser built bigger batteries (Vietnam
+  case_1 5,679 to 11,087 kWh; case_3 7,822 to 14,337; Thailand case_6 1,881
+  to 4,047 with PV now at the 3,230 kW roof cap), and the fade derate then
+  took value off those batteries every year. The optimiser does not see the
+  fade, so its sizing is ageing-blind; the pro forma corrects the cash flow,
+  not the size. A fade-aware size would be somewhere between the two runs.
+- SOH at year 20 lands between 81.8 and 85.9 percent in every case; none
+  reaches 80 percent inside the horizon. Year-1 EFC 215 to 298 a year, so
+  cycle fade dominates calendar fade everywhere; Thailand at h = 1 shows
+  83.7 percent (case_6) where the probe's h = 0.25 showed 95.9.
+- The year-10 DSCR cliff is gone (no replacement inside the debt term):
+  Vietnam minimum DSCR 0.78 to 2.40 across the storage cases, Thailand 2.05
+  and 2.70.
+- Vietnam case_3 (demand-charge tariff) is the loser: NPV -470,729. Its
+  battery carries 131k USD a year of demand relief, and that is exactly the
+  line the derate hits hardest.
+- Thailand storage outcome: still selected in both cases, larger than before
+  (297 / 682 kWh and 815 / 4,047 kWh), NPV up (1.42M and 2.16M) because the
+  full-price year-10 event is gone and the fade takes less than it did.
+
+## Deliverables: stale, deliberately not reissued
+
+`KEEN_THAILAND_MEMO.md` / `_VI.md`, the pptx (slides 8, 10) and the artifact
+still describe the 100 percent year-10 replacement regime, including the
+year-10 DSCR paragraph that no longer applies. Reissue is the user's call
+after reading the reconcile; the Vietnam narrative decks were already stale.
+
+## Housekeeping
+
+- The two old case_6 workbooks that were locked on 2026-09-11 were released
+  and deleted by this rebuild; nothing left to clean there.
+- The user's `vietnam_report_review*.xlsx` files untouched, now four changes
+  stale.
+- `baseline_workbooks/` regenerated locally for the nine storage cases after
+  this handoff was written; the five PV-only baselines were not touched.
+- Branch not merged, not pushed by me (the user pushed at 08:26; later
+  commits are local).
+
+## Follow-ups
+
+- Fade-aware sizing: the optimiser oversizes without a replacement or fade
+  cost. Options: a modest `replace_cost` in REopt as a sizing proxy (the
+  proforma would then need to drop the double count), or REopt's own
+  `model_degradation` for sizing only (rejected 2026-09-12 for the proforma;
+  it is defensible as a sizing signal). Needs a ruling.
+- Calendar fade calibration to LFP and 30 degree ambient (NREL lab
+  coefficients today).
+- ESCO structure with grid-charged storage beside PV: the battery's energy
+  value is not booked in this model (pre-existing), so nothing is derated
+  there; the Assumptions sheet says so. No current case is in that state.
+- DPPA structures: battery share on an energy basis (kWh), not value basis;
+  Vietnam case_5 and case_6 are grid-CfD, both PV-charged.
+- Replacement reserve item (2026-09-12 morning) is moot unless a case opts
+  into a replacement; keep the item, mark conditional.
+- Register item 19 (API query mapping) unchanged.
+
 # 2026-09-12 - Handoff: replacement policy sync, both branches, 20 years
 
 Executed overnight on the user's instruction to write the plan and implement
@@ -169,6 +330,9 @@ percentages), `Rofu_Thailand_Tariff_Structure_Internal.pptx` slides 8 and
 - A replacement reserve or a debt-sizing response to the year-10 event is a
   modelling gap now that the event sits inside the debt term (see above).
   Size: half a day, needs a ruling on the reserve convention first.
+  2026-09-12 second handoff: conditional. The default policy no longer schedules a
+  replacement (see the handoff above); this applies only to a case that
+  opts in through technologies.storage.replacement.
 - Gate still keys baselines by filename (item 8); tripped again this pass
   and handled by regenerating.
 
