@@ -73,6 +73,7 @@ CURATED_ASSUMPTION_KEYS = {
     "evn_capacity_escalation_rate", "esco_energy_discount_fraction",
     "demand_savings_esco_share", "grid_charging_enabled",
     "battery_replacement_year", "bess_replace_cost_per_kw", "bess_replace_cost_per_kwh",
+    "bess_replacement_enabled", "bess_cycle_life_efc",
     "pv_inverter_replacement_year", "pv_inverter_replacement_fraction_of_pv_capex",
     "annual_om_usd", "pv_capex_usd",
     "bess_capex_usd", "om_escalation_rate", "pv_degradation_rate",
@@ -389,12 +390,30 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
     entry("O&M escalation", get("om_escalation_rate") or 0.0, unit="per year",
           source="{defaults_file} / case.json financial.om_escalation_rate".format(defaults_file=profile.defaults_file),
           name="ESC_OM", fmt=FMT_PERCENT)
-    if assumptions.get("battery_replacement_year") or assumptions.get("pv_inverter_replacement_year"):
+    if (
+        assumptions.get("bess_replacement_enabled") is not None
+        or assumptions.get("battery_replacement_year")
+        or assumptions.get("pv_inverter_replacement_year")
+    ):
         section("Replacement Policy")
         policy_source = (
             "proforma_vietnam.defaults replacement policy unless case.json "
-            "technologies.storage overrides"
+            "technologies.storage.replacement opts in"
         )
+        if assumptions.get("bess_replacement_enabled") is False:
+            entry("Battery replacement",
+                  "Not scheduled inside the {} year horizon".format(
+                      d.get("project_years", DEFAULT_PROJECT_YEARS)),
+                  source="Client direction 2026-09-12: capacity fade is carried on the Battery "
+                         "SOH sheet and derates the battery's savings; REopt sent replace_cost "
+                         "0. Opt in per case with technologies.storage.replacement")
+        if assumptions.get("bess_cycle_life_efc") is not None:
+            entry("Battery cycle life (EFC to 80 percent)", assumptions["bess_cycle_life_efc"],
+                  unit="cycles",
+                  source="proforma_vietnam.defaults BESS_CYCLE_LIFE_EFC unless case.json "
+                         "technologies.storage.cycle_life_efc overrides (sets the SOH cycle "
+                         "fade: (1 - 0.80) / cycle life per kWh discharged)",
+                  name="BESS_CYCLE_LIFE", fmt="#,##0")
         if assumptions.get("battery_replacement_year"):
             entry("BESS replacement year (storage inverter and pack together)",
                   assumptions["battery_replacement_year"], unit="year",
@@ -742,6 +761,31 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
               profile.utility_label
           ),
           name="BASE_SERVED_RETAIL", fmt=FMT_AMOUNT)
+    fade = d.get("battery_fade")
+    if fade:
+        # Battery capacity fade (2026-09-12): the battery's share of each base,
+        # multiplied on the Pro Forma sheet by the year-average SOH factor.
+        entry("Year-1 battery energy revenue base", fade.get("energy_revenue_usd", 0.0),
+              unit="USD",
+              source="Battery-served kWh x TOU rate x ESCO discount ({})".format(
+                  fade.get("energy_attribution")),
+              name="BESS_ENERGY_REV", fmt=FMT_AMOUNT)
+        entry("Year-1 battery served-energy retail value",
+              fade.get("served_retail_value_usd", 0.0), unit="USD",
+              source="Battery-served kWh x {} TOU rate".format(profile.utility_label),
+              name="BESS_SERVED_RETAIL", fmt=FMT_AMOUNT)
+        entry("Year-1 battery net energy value outside served",
+              fade.get("unserved_energy_value_usd", 0.0), unit="USD",
+              source="Discharge at retail minus grid charging (direct ownership / "
+                     "battery-only cases)",
+              name="BESS_UNSERVED_VALUE", fmt=FMT_AMOUNT)
+        entry("Year-1 battery demand relief", fade.get("demand_savings_usd", 0.0), unit="USD",
+              source="PV-only counterfactual demand charge minus solved ({})".format(
+                  fade.get("demand_attribution")),
+              name="BESS_DEMAND_SAVINGS", fmt=FMT_AMOUNT)
+        entry("Battery share of matched energy", fade.get("matched_energy_share", 0.0),
+              unit="fraction", source="Battery-served kWh / project-served kWh",
+              name="BESS_MATCHED_SHARE", fmt=FMT_PERCENT)
     if is_dppa:
         dp = d.get("dppa_year_one_usd", {})
         entry("Year-1 C_DN (spot energy)", dp.get("c_dn"), unit="USD",
@@ -1109,6 +1153,37 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     r_fac_deg = w.line(
         "fac_deg", "PV degradation factor", "index",
         formula=lambda y, c: f"=(1-PV_DEGRADATION)^({year_ref(c)}-1)", fmt=FMT_FACTOR)
+    # Battery capacity fade (2026-09-12): a hardcoded year-average SOH factor
+    # (the curve is numeric, not closed-form) and, for the DPPA structures, the
+    # generation factor blending it with PV degradation on the battery share.
+    # Every formula below keeps its exact pre-fade text when there is no
+    # block, so workbooks without a battery are unchanged.
+    fade = d.get("battery_fade")
+    has_fade = bool(fade)
+    r_fac_gen = r_fac_deg
+    if has_fade:
+        r_fac_soh = w.line(
+            "fac_soh", "Battery SOH factor (year average)", "index",
+            y0=1.0, values=[1.0] + list(fade["soh_by_year"]), fill=INPUT_FILL, fmt=FMT_FACTOR)
+        if is_dppa or is_physical:
+            r_fac_gen = w.line(
+                "fac_gen", "Generation factor (PV degradation, battery SOH)", "index",
+                formula=lambda y, c: (
+                    f"=(1-BESS_MATCHED_SHARE)*{c}{r_fac_deg}"
+                    f"+BESS_MATCHED_SHARE*{c}{r_fac_soh}"),
+                fmt=FMT_FACTOR)
+
+    def repurchase(c):
+        # Retail value of served energy lost: PV degradation on the PV part,
+        # SOH on the battery part (plus the battery's net value outside served).
+        if not has_fade:
+            return f"BASE_SERVED_RETAIL*(1-{c}{r_fac_deg})"
+        return (f"(BASE_SERVED_RETAIL-BESS_SERVED_RETAIL)*(1-{c}{r_fac_deg})"
+                f"+(BESS_SERVED_RETAIL+BESS_UNSERVED_VALUE)*(1-{c}{r_fac_soh})")
+
+    def lost_demand(c):
+        return (f"+BESS_DEMAND_SAVINGS*(1-{c}{r_fac_soh})*{c}{r_fac_capacity}"
+                if has_fade else "")
     if is_dppa:
         r_fac_fee = w.line(
             "fac_fee", "DPPA fee / FMP escalation factor", "index",
@@ -1123,7 +1198,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     if is_dppa:
         r_fmp_rev = w.line(
             "fmp_rev", "Generator FMP market revenue", "USD",
-            formula=lambda y, c: f"=DPPA_FMP_REV_Y1*{c}{r_fac_fee}*{c}{r_fac_deg}")
+            formula=lambda y, c: f"=DPPA_FMP_REV_Y1*{c}{r_fac_fee}*{c}{r_fac_gen}")
         r_cfd_strike = w.line(
             "cfd_strike", "CfD strike leg (P_c × Q_cfd)", "USD",
             formula=lambda y, c: f"=DPPA_CFD_STRIKE_Y1*{c}{r_fac_strike}")
@@ -1143,7 +1218,7 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
             "energy_rev", "PPA energy revenue (matched × price)", "USD",
             formula=lambda y, c:
                 f"=PPA_MATCHED_KWH_Y1*PPA_PRICE*(1+PPA_ESC)^({year_ref(c)}-1)"
-                f"*{c}{r_fac_deg}")
+                f"*{c}{r_fac_gen}")
     elif is_direct:
         # Factory self-invest: the benefit is the FULL avoided EVN bill (energy +
         # demand — BAU/optimized are total bills), captured whole with no ESCO
@@ -1155,13 +1230,20 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
             "USD",
             formula=lambda y, c:
                 f"=BAU_BILL_Y1*{c}{r_fac_energy}"
+                f"-((OPT_BILL_Y1+{repurchase(c)})*{c}{r_fac_energy}{lost_demand(c)})"
+                if has_fade else
+                f"=BAU_BILL_Y1*{c}{r_fac_energy}"
                 f"-(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))*{c}{r_fac_energy}",
             bold=True)
     else:
         r_energy_rev = w.line(
             "energy_rev", "ESCO energy revenue (discount-to-EVN)", "USD",
             formula=lambda y, c: "=" + trunc(
-                c, f"BASE_ENERGY_REV*{c}{r_fac_energy}*{c}{r_fac_deg}"))
+                c,
+                f"((BASE_ENERGY_REV-BESS_ENERGY_REV)*{c}{r_fac_deg}"
+                f"+BESS_ENERGY_REV*{c}{r_fac_soh})*{c}{r_fac_energy}"
+                if has_fade else
+                f"BASE_ENERGY_REV*{c}{r_fac_energy}*{c}{r_fac_deg}"))
     if is_direct:
         # Bill savings already folds in demand + any grid arbitrage (BAU/optimized
         # are the total EVN bills), so there is no separate demand-share or
@@ -1183,7 +1265,11 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     else:
         r_dem_savings = w.line(
             "dem_savings", "Demand charge savings (total)", "USD",
-            formula=lambda y, c: f"=BASE_DEMAND_SAVINGS*{c}{r_fac_capacity}")
+            formula=lambda y, c: (
+                f"=((BASE_DEMAND_SAVINGS-BESS_DEMAND_SAVINGS)"
+                f"+BESS_DEMAND_SAVINGS*{c}{r_fac_soh})*{c}{r_fac_capacity}"
+                if has_fade else
+                f"=BASE_DEMAND_SAVINGS*{c}{r_fac_capacity}"))
         r_dem_rev = w.line(
             "dem_rev", "ESCO share of demand savings", "USD",
             formula=lambda y, c: "=" + trunc(c, f"{c}{r_dem_savings}*DEMAND_SHARE"))
@@ -1195,7 +1281,11 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
         else:
             r_arb_rev = w.line(
                 "arb_rev", "Grid arbitrage revenue", "USD",
-                formula=lambda y, c: "=" + trunc(c, f"BASE_GRID_ARB*{c}{r_fac_energy}"))
+                formula=lambda y, c: "=" + trunc(
+                    c,
+                    f"BASE_GRID_ARB*{c}{r_fac_soh}*{c}{r_fac_energy}"
+                    if has_fade else
+                    f"BASE_GRID_ARB*{c}{r_fac_energy}"))
             surplus = d.get("surplus_export")
             if surplus:
                 # Volume degrades with PV output (r_fac_deg); the price escalates
@@ -1562,24 +1652,24 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     if is_dppa:
         r_c_dn = w.line(
             "c_dn", "C_DN spot energy (Q_Khc × CFMP × K_pp)", "USD",
-            formula=lambda y, c: f"=DPPA_C_DN_Y1*{c}{r_fac_fee}*{c}{r_fac_deg}")
+            formula=lambda y, c: f"=DPPA_C_DN_Y1*{c}{r_fac_fee}*{c}{r_fac_gen}")
         r_c_dppa = w.line(
             "c_dppa", "C_DPPA system service fee", "USD",
-            formula=lambda y, c: f"=DPPA_C_DPPA_Y1*{c}{r_fac_fee}*{c}{r_fac_deg}")
+            formula=lambda y, c: f"=DPPA_C_DPPA_Y1*{c}{r_fac_fee}*{c}{r_fac_gen}")
         r_c_cl = w.line(
             "c_cl", "C_CL settlement adder", "USD",
-            formula=lambda y, c: f"=DPPA_C_CL_Y1*{c}{r_fac_fee}*{c}{r_fac_deg}")
+            formula=lambda y, c: f"=DPPA_C_CL_Y1*{c}{r_fac_fee}*{c}{r_fac_gen}")
         r_c_bl = w.line(
             "c_bl", "C_BL retail shortfall (incl. degradation repurchase)", "USD",
             formula=lambda y, c:
-                f"=(DPPA_C_BL_Y1+DPPA_MATCHED_RETAIL_Y1*(1-{c}{r_fac_deg}))"
+                f"=(DPPA_C_BL_Y1+DPPA_MATCHED_RETAIL_Y1*(1-{c}{r_fac_gen}))"
                 f"*{c}{r_fac_energy}")
         r_post = w.line(
             "post_cost", "Buyer cost with project", "USD",
             formula=lambda y, c:
                 f"={c}{r_c_dn}+{c}{r_c_dppa}+{c}{r_c_cl}+{c}{r_c_bl}"
                 f"+{c}{w.rows['cfd_net']}+OPT_DEMAND_Y1*{c}{r_fac_capacity}"
-                f"+{c}{r_dem_rev}",
+                f"+{c}{r_dem_rev}{lost_demand(c)}",
             bold=True)
     elif is_direct:
         # The factory IS the investor: it pays no ESCO fee, so its residual cost
@@ -1591,15 +1681,15 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
             "Buyer cost with project (residual {} bill)".format(profile.utility_label),
             "USD",
             formula=lambda y, c:
-                f"=(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))"
-                f"*{c}{r_fac_energy}",
+                f"=(OPT_BILL_Y1+{repurchase(c)})"
+                f"*{c}{r_fac_energy}{lost_demand(c)}",
             bold=True)
     else:
         r_post = w.line(
             "post_cost", "Buyer cost with project", "USD",
             formula=lambda y, c:
-                f"=(OPT_BILL_Y1+BASE_SERVED_RETAIL*(1-{c}{r_fac_deg}))"
-                f"*{c}{r_fac_energy}"
+                f"=(OPT_BILL_Y1+{repurchase(c)})"
+                f"*{c}{r_fac_energy}{lost_demand(c)}"
                 f"+{c}{r_energy_rev}+{c}{r_dem_rev}+{c}{r_arb_rev}",
             bold=True)
     r_savings = w.line(
@@ -2107,11 +2197,17 @@ def _replacement_bullet(assumptions, derivation):
         parts.append(
             "Battery replacement (storage inverter and pack together) is booked in year {} "
             "at the replacement unit prices on the Assumptions sheet ({} USD/kW, {} USD/kWh), "
-            "the shared replacement policy of both country branches.".format(
+            "a per-case opt-in under the shared policy of both country branches.".format(
                 assumptions["battery_replacement_year"],
                 _format_unit_price(assumptions.get("bess_replace_cost_per_kw")),
                 _format_unit_price(assumptions.get("bess_replace_cost_per_kwh")),
             )
+        )
+    elif assumptions.get("bess_replacement_enabled") is False:
+        parts.append(
+            "Battery: no scheduled replacement inside the horizon (client direction "
+            "2026-09-12); capacity fade is carried by the Battery SOH curve and derates the "
+            "battery's savings each year."
         )
     else:
         parts.append(
@@ -2129,6 +2225,30 @@ def _replacement_bullet(assumptions, derivation):
 
 def _format_unit_price(value):
     return "n/a" if value is None else "{:,.2f}".format(value)
+
+
+def _battery_fade_bullets(assumptions, derivation):
+    """Model Basis sentence for the state-of-health derate, from the record."""
+    fade = (derivation or {}).get("battery_fade")
+    if not fade:
+        return []
+    coefficients = (fade.get("soh") or {}).get("coefficients") or {}
+    cycle_life = (
+        coefficients.get("cycle_life_efc")
+        or (assumptions or {}).get("bess_cycle_life_efc")
+    )
+    cycles = "{:,.0f}".format(cycle_life) if cycle_life else "the configured"
+    return [
+        "Battery state of health: REopt.jl v0.57.0's daily fade recurrence (calendar fade on "
+        "the average stored energy, cycle fade on the energy discharged) replayed over the "
+        "horizon on the solved year-1 dispatch, with the hours-per-time-step factor removed "
+        "so 15 minute and hourly solves age alike. Cycle life {} EFC to 80 percent sets the "
+        "cycle coefficient. The battery's share of energy revenue, retail repurchase, demand "
+        "relief and grid arbitrage is multiplied by the year's average SOH; energy delivered "
+        "is assumed to scale with capacity (the battery treated as capacity-bound every day), "
+        "an upper bound on the loss. The optimiser does not see the curve. See the Battery "
+        "SOH sheet.".format(cycles)
+    ]
 
 
 def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_PROFILE):
@@ -2462,6 +2582,7 @@ def write_model_basis_sheet(worksheet, assumptions, derivation, profile=VIETNAM_
                 "repurchased from {} at retail (added to the buyer's residual bill)."
             ).format(profile.utility_label),
             _replacement_bullet(assumptions, derivation),
+            *_battery_fade_bullets(assumptions, derivation),
             *debt_bullets,
             cit_regime_text if is_direct else (
                 cit_regime_text + " The 4-year exemption and 9-year 50%-reduction periods count from the "

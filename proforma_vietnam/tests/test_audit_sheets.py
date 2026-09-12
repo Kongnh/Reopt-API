@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from unittest import TestCase
 
 from openpyxl import Workbook
@@ -35,7 +37,7 @@ def _esco_result(**overrides):
     return calculate_vietnam_esco_cash_flow(**inputs)
 
 
-def _dppa_result():
+def _dppa_result(**overrides):
     dppa_inputs = {
         "type": "grid_dppa_cfd",
         "fmp_series_vnd_per_kwh": [1500.0] * 24,
@@ -82,6 +84,7 @@ def _dppa_result():
         esco_energy_discount_fraction=0.9,
         dppa_settlement=settlement,
         exchange_rate_vnd_per_usd=25000,
+        **overrides
     ), dppa_inputs
 
 
@@ -94,7 +97,7 @@ def _esco_surplus_result():
     )
 
 
-def _physical_result():
+def _physical_result(**overrides):
     # ND57 Điều 25 private-wire DPPA with the surplus leg enabled, so the audit
     # sheet exercises both the live PPA revenue formula and the nested surplus
     # cells. matched kWh = 1000 kW × 8760 h to match the project-served basis.
@@ -108,6 +111,7 @@ def _physical_result():
         surplus_export_price_usd_per_kwh=0.04,
         surplus_price_escalation_rate=0.04,
         surplus_cap_fraction=0.5,
+        **overrides
     )
 
 
@@ -121,7 +125,7 @@ PHYSICAL_ASSUMPTIONS = {
 }
 
 
-def _direct_result():
+def _direct_result(**overrides):
     # Factory self-invest (DIRECT_OWNERSHIP) with the surplus leg enabled, so the
     # audit sheet exercises the live bill-savings formula, the shared surplus
     # cells, and the flat-CIT (profitable-host) row. The year-11 replacement
@@ -132,7 +136,7 @@ def _direct_result():
         build_direct_ownership_cash_flow_result,
     )
 
-    return build_direct_ownership_cash_flow_result()
+    return build_direct_ownership_cash_flow_result(**overrides)
 
 
 DIRECT_ASSUMPTIONS = {
@@ -1287,6 +1291,187 @@ class ReplacementPolicyRowsTests(TestCase):
 
         self.assertIn("Equipment replacement (engine schedule)", labels)
         self.assertNotIn("Battery replacement (engine schedule)", labels)
+
+
+def _fade_block(years=20, energy_revenue=100.0, served_retail=120.0, unserved=0.0,
+                demand=30.0, share=0.25):
+    """A battery_fade input the way esco_pro_forma assembles it."""
+    soh = [1.0 - 0.01 * i for i in range(years)]
+    return {
+        "soh_by_year": soh,
+        "energy_revenue_vnd": energy_revenue,
+        "served_retail_value_vnd": served_retail,
+        "unserved_energy_value_vnd": unserved,
+        "demand_savings_vnd": demand,
+        "matched_energy_share": share,
+        "energy_attribution": "inside the served series (PV-charged storage)",
+        "demand_attribution": "counterfactual",
+        "soh": {
+            "size_kwh": 100.0,
+            "project_years": years,
+            "years": [
+                {"year": i + 1, "soh_end": s, "soh_average": s, "usable_kwh_end": 100.0 * s,
+                 "efc_in_year": 300.0, "efc_cumulative": 300.0 * (i + 1),
+                 "calendar_fade_kwh": 0.5, "cycle_fade_kwh": 0.5}
+                for i, s in enumerate(soh)
+            ],
+            "soh_average_by_year": soh,
+            "first_year_below_end_of_life": None,
+            "coefficients": {"calendar_fade_coefficient": 1.16e-3, "calendar_fade_exponent": 0.428,
+                             "cycle_fade_coefficient": 2.5e-5, "cycle_life_efc": 8000,
+                             "end_of_life_soh": 0.8},
+            "year_one_daily_average_soc_kwh": 50.0,
+            "year_one_daily_discharge_kwh": 82.2,
+            "year_one_efc": 300.0,
+        },
+    }
+
+
+FADE_ASSUMPTIONS = dict(ESCO_ASSUMPTIONS, bess_replacement_enabled=False, bess_cycle_life_efc=8000,
+                        pv_inverter_replacement_year=11,
+                        pv_inverter_replacement_fraction_of_pv_capex=0.10)
+
+
+def _label_row(sheet, label):
+    return next(
+        row for row in range(1, sheet.max_row + 1)
+        if sheet.cell(row=row, column=1).value == label
+    )
+
+
+def _year2_formulas(workbook):
+    sheet = workbook[audit_sheets.PRO_FORMA_SHEET]
+    out = {}
+    for r in range(1, sheet.max_row + 1):
+        label = sheet.cell(row=r, column=1).value
+        value = sheet.cell(row=r, column=5).value
+        if label is not None and isinstance(value, str) and value.startswith("="):
+            out[str(label)] = value
+    return out
+
+
+class BatteryFadeAuditTests(TestCase):
+    """With a battery_fade block the live formulas carry the SOH terms; without
+    one every formula is byte-identical to the frozen pre-change text."""
+
+    FROZEN = json.loads(
+        (Path(__file__).parent / "fixtures" / "plain_formulas.json").read_text(encoding="utf-8")
+    )
+
+    def test_plain_formulas_are_unchanged_in_every_structure(self):
+        dppa_result, dppa_inputs = _dppa_result()
+        builds = {
+            "esco": build_vietnam_esco_workbook(_esco_result(), assumptions=ESCO_ASSUMPTIONS),
+            "dppa": build_vietnam_esco_workbook(
+                dppa_result, assumptions={**ESCO_ASSUMPTIONS, "dppa": dppa_inputs}),
+            "physical": build_vietnam_esco_workbook(_physical_result(), assumptions=PHYSICAL_ASSUMPTIONS),
+            "direct": build_vietnam_esco_workbook(_direct_result(), assumptions=DIRECT_ASSUMPTIONS),
+        }
+        for structure, workbook in builds.items():
+            self.assertEqual(_year2_formulas(workbook), self.FROZEN[structure], structure)
+            self.assertNotIn("BESS_ENERGY_REV", workbook.defined_names, structure)
+
+    def test_fade_rows_and_names_appear_with_the_block(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=_fade_block()), assumptions=FADE_ASSUMPTIONS)
+
+        formulas = _year2_formulas(workbook)
+        sheet = workbook[audit_sheets.PRO_FORMA_SHEET]
+        labels = [sheet.cell(row=r, column=1).value for r in range(1, sheet.max_row + 1)]
+        self.assertIn("Battery SOH factor (year average)", labels)
+        for name in ("BESS_ENERGY_REV", "BESS_SERVED_RETAIL", "BESS_UNSERVED_VALUE",
+                     "BESS_DEMAND_SAVINGS", "BESS_MATCHED_SHARE", "BESS_CYCLE_LIFE"):
+            self.assertIn(name, workbook.defined_names, name)
+        self.assertIn("BESS_ENERGY_REV", formulas["ESCO energy revenue (discount-to-EVN)"])
+        self.assertIn("BESS_DEMAND_SAVINGS", formulas["Demand charge savings (total)"])
+        self.assertIn("BESS_UNSERVED_VALUE", formulas["Buyer cost with project"])
+        self.assertIn("BESS_DEMAND_SAVINGS", formulas["Buyer cost with project"])
+        self.assertIn("Grid arbitrage revenue", formulas)
+
+    def test_soh_factor_row_carries_the_engine_values(self):
+        fade = _fade_block()
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=fade), assumptions=FADE_ASSUMPTIONS)
+
+        sheet = workbook[audit_sheets.PRO_FORMA_SHEET]
+        row = _label_row(sheet, "Battery SOH factor (year average)")
+        self.assertEqual(sheet.cell(row=row, column=3).value, 1.0)          # year 0
+        self.assertEqual(sheet.cell(row=row, column=4).value, fade["soh_by_year"][0])
+        self.assertEqual(sheet.cell(row=row, column=5).value, fade["soh_by_year"][1])
+
+    def test_dppa_and_physical_use_the_generation_factor(self):
+        dppa_result, dppa_inputs = _dppa_result(battery_fade=_fade_block(years=20))
+        workbook = build_vietnam_esco_workbook(
+            dppa_result, assumptions={**FADE_ASSUMPTIONS, "dppa": dppa_inputs})
+        formulas = _year2_formulas(workbook)
+        self.assertIn("Generation factor (PV degradation, battery SOH)", formulas)
+        gen_row = _label_row(workbook[audit_sheets.PRO_FORMA_SHEET],
+                            "Generation factor (PV degradation, battery SOH)")
+        self.assertIn("BESS_MATCHED_SHARE", formulas["Generation factor (PV degradation, battery SOH)"])
+        self.assertIn("E{}".format(gen_row), formulas["C_DN spot energy (Q_Khc × CFMP × K_pp)"])
+        self.assertIn("E{}".format(gen_row), formulas["C_BL retail shortfall (incl. degradation repurchase)"])
+        self.assertIn("BESS_DEMAND_SAVINGS", formulas["Buyer cost with project"])
+
+        physical = build_vietnam_esco_workbook(
+            _physical_result(battery_fade=_fade_block()), assumptions={**PHYSICAL_ASSUMPTIONS,
+                                                                       "bess_cycle_life_efc": 8000})
+        formulas = _year2_formulas(physical)
+        gen_row = _label_row(physical[audit_sheets.PRO_FORMA_SHEET],
+                            "Generation factor (PV degradation, battery SOH)")
+        self.assertIn("E{}".format(gen_row), formulas["PPA energy revenue (matched × price)"])
+
+    def test_direct_ownership_bill_savings_carry_the_terms(self):
+        workbook = build_vietnam_esco_workbook(
+            _direct_result(battery_fade=_fade_block(unserved=300.0)),
+            assumptions={**DIRECT_ASSUMPTIONS, "bess_replacement_enabled": False,
+                         "bess_cycle_life_efc": 8000})
+        formulas = _year2_formulas(workbook)
+        label = "Bill savings (avoided EVN bill: BAU − optimized)"
+        self.assertIn("BESS_UNSERVED_VALUE", formulas[label])
+        self.assertIn("BESS_DEMAND_SAVINGS", formulas[label])
+        self.assertIn("BESS_SERVED_RETAIL", formulas["Buyer cost with project (residual EVN bill)"])
+
+    def test_replacement_section_states_the_switch(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=_fade_block()), assumptions=FADE_ASSUMPTIONS)
+        text = "\n".join(str(c.value) for row in workbook["Assumptions"].iter_rows()
+                         for c in row if c.value is not None)
+        self.assertIn("Replacement Policy", text)
+        self.assertIn("Battery replacement", text)
+        self.assertIn("Not scheduled inside the 20 year horizon", text)
+        self.assertIn("Battery cycle life (EFC to 80 percent)", text)
+        self.assertNotIn("BESS replacement year (storage inverter and pack together)", text)
+        self.assertNotIn("Other Assumptions (assumptions.json echo)", text)
+
+        opted_in = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=_fade_block()),
+            assumptions={**FADE_ASSUMPTIONS, "bess_replacement_enabled": True,
+                         "battery_replacement_year": 10, "bess_replace_cost_per_kw": 80.0,
+                         "bess_replace_cost_per_kwh": 120.0})
+        text = "\n".join(str(c.value) for row in opted_in["Assumptions"].iter_rows()
+                         for c in row if c.value is not None)
+        self.assertIn("BESS replacement year (storage inverter and pack together)", text)
+        self.assertNotIn("Not scheduled inside", text)
+
+    def test_model_basis_describes_the_curve_and_the_switch(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=_fade_block()), assumptions=FADE_ASSUMPTIONS)
+        text = "\n".join(str(c.value) for row in workbook["Model Basis"].iter_rows()
+                         for c in row if c.value is not None)
+        self.assertIn("state of health", text.lower())
+        self.assertIn("8,000", text)
+        self.assertIn("no scheduled replacement", text)
+        self.assertNotIn("\u2014", text)
+
+    def test_no_em_dash_in_the_new_text(self):
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=_fade_block()), assumptions=FADE_ASSUMPTIONS)
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                for value in row:
+                    if isinstance(value, str) and ("SOH" in value or "cycle life" in value.lower()
+                                                   or "fade" in value.lower()):
+                        self.assertNotIn("\u2014", value)
 
 
 class CoverSheetTests(TestCase):
