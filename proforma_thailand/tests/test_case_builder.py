@@ -186,53 +186,69 @@ class PayloadDefaultInheritanceTests(TestCase):
         config["technologies"]["storage"] = {"max_kw": 500, "max_kwh": 1000}
         return config
 
-    def test_bess_replacement_follows_the_shared_policy(self):
-        # battery_replacement_year defaults to 10 while every replace_cost
-        # defaults to 0.0, so an omitted value would model a free replacement.
-        from proforma_vietnam.defaults import (
-            BESS_REPLACEMENT_YEAR, BESS_REPLACE_FRACTION_OF_INSTALL,
-        )
-        storage = build_thailand_case(self._storage_case())["payload"]["ElectricStorage"]
+    def test_default_storage_case_sends_zero_replacement_and_records_the_switch(self):
+        # Policy 2026-09-12: no scheduled replacement. REopt defaults every
+        # replace_cost to 0.0 anyway; sending it explicitly makes the payload
+        # read as a decision rather than an omission.
+        built = build_thailand_case(self._storage_case())
+        storage = built["payload"]["ElectricStorage"]
 
-        self.assertEqual(
-            storage["replace_cost_per_kw"],
-            storage["installed_cost_per_kw"] * BESS_REPLACE_FRACTION_OF_INSTALL,
-        )
-        self.assertEqual(
-            storage["replace_cost_per_kwh"],
-            storage["installed_cost_per_kwh"] * BESS_REPLACE_FRACTION_OF_INSTALL,
-        )
-        self.assertEqual(storage["replace_cost_per_kw"], 100.0)
-        self.assertEqual(storage["replace_cost_per_kwh"], 150.0)
-        self.assertEqual(storage["inverter_replacement_year"], BESS_REPLACEMENT_YEAR)
-        self.assertEqual(storage["battery_replacement_year"], BESS_REPLACEMENT_YEAR)
-
-    def test_replacement_is_recorded_in_assumptions(self):
-        a = build_thailand_case(self._storage_case())["assumptions"]
-
-        self.assertEqual(a["battery_replacement_year"], 10)
-        self.assertEqual(a["bess_replace_cost_per_kw"], 100.0)
-        self.assertEqual(a["bess_replace_cost_per_kwh"], 150.0)
+        self.assertEqual(storage["replace_cost_per_kw"], 0.0)
+        self.assertEqual(storage["replace_cost_per_kwh"], 0.0)
+        self.assertNotIn("battery_replacement_year", storage)
+        self.assertNotIn("inverter_replacement_year", storage)
+        a = built["assumptions"]
+        self.assertIs(a["bess_replacement_enabled"], False)
+        self.assertEqual(a["bess_cycle_life_efc"], 8000)
+        self.assertNotIn("battery_replacement_year", a)
+        self.assertNotIn("bess_replace_cost_per_kw", a)
         self.assertEqual(a["pv_inverter_replacement_year"], 11)
         self.assertEqual(a["pv_inverter_replacement_fraction_of_pv_capex"], 0.10)
         self.assertNotIn("inverter_replacement_year", a)
         self.assertNotIn("inverter_replacement_cost_usd", a)
 
-    def test_a_price_sensitivity_keeps_the_replacement_rule(self):
+    def test_opt_in_replacement_prices_from_the_thai_install_defaults(self):
+        config = self._storage_case()
+        config["technologies"]["storage"]["replacement"] = {"enabled": True}
+
+        built = build_thailand_case(config)
+        storage = built["payload"]["ElectricStorage"]
+
+        self.assertEqual(storage["replace_cost_per_kw"], 100.0)
+        self.assertEqual(storage["replace_cost_per_kwh"], 150.0)
+        self.assertEqual(storage["inverter_replacement_year"], 10)
+        self.assertEqual(storage["battery_replacement_year"], 10)
+        a = built["assumptions"]
+        self.assertIs(a["bess_replacement_enabled"], True)
+        self.assertEqual(a["battery_replacement_year"], 10)
+        self.assertEqual(a["bess_replace_cost_per_kw"], 100.0)
+        self.assertEqual(a["bess_replace_cost_per_kwh"], 150.0)
+
+    def test_a_price_sensitivity_keeps_the_opt_in_rule(self):
         config = self._storage_case()
         config["technologies"]["storage"]["installed_cost_per_kwh"] = 200.0
+        config["technologies"]["storage"]["replacement"] = {"enabled": True}
 
         storage = build_thailand_case(config)["payload"]["ElectricStorage"]
 
         self.assertEqual(storage["replace_cost_per_kwh"], 200.0)
 
-    def test_a_case_without_storage_records_no_bess_replacement(self):
+    def test_raw_replacement_keys_are_refused(self):
+        config = self._storage_case()
+        config["technologies"]["storage"]["replace_cost_per_kw"] = 70.0
+
+        with self.assertRaises(ValueError):
+            build_thailand_case(config)
+
+    def test_a_case_without_storage_records_no_battery_switch(self):
         a = build_thailand_case(
             _case_config(self.tmp, self.load_csv, self.off_peak)
         )["assumptions"]
 
         self.assertNotIn("battery_replacement_year", a)
         self.assertNotIn("bess_replace_cost_per_kw", a)
+        self.assertNotIn("bess_replacement_enabled", a)
+        self.assertNotIn("bess_cycle_life_efc", a)
         self.assertEqual(a["pv_inverter_replacement_year"], 11)
 
     def test_pv_om_cost_comes_from_the_thailand_defaults(self):
