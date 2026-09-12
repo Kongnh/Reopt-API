@@ -2,7 +2,13 @@
 
 Branch `battery-soh-fade`, kept independent of `master` at the user's request:
 NOT merged, and the user pushed it to `origin/battery-soh-fade` themselves
-mid-session (they also checked out `master` at 08:26; I switched back). Spec:
+mid-session (they also checked out `master` at 08:26; I switched back).
+Ruling 2026-09-12 (after this handoff): the split is PERMANENT. `master`
+carries the Rofu / Keen deliverables (100 percent year-10 replacement policy,
+the memo issued 12 September); `battery-soh-fade` is the internal research
+line (replacement off, SOH derate). The two run in parallel and are compared,
+never merged; a finding that should reach the deliverable is ported as its
+own change on master. Spec:
 `docs/superpowers/specs/2026-09-12-battery-soh-fade-design.md`. Plan:
 `docs/superpowers/plans/2026-09-12-battery-soh-fade.md`. Docker stack up.
 
