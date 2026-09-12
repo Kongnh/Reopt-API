@@ -344,10 +344,13 @@ def calculate_vietnam_esco_cash_flow(
                 base_energy_revenue_vnd * ppa_multiplier * generation_multiplier
             )
         else:
+            # Written so a zero battery part adds exactly 0.0 and the no-fade
+            # result is bit-identical to the pre-2026-09-12 expression.
             esco_energy_revenue_vnd = (
-                (base_energy_revenue_vnd - bess_energy_revenue_vnd) * degradation_multiplier
-                + bess_energy_revenue_vnd * soh_multiplier
-            ) * energy_multiplier
+                base_energy_revenue_vnd * energy_multiplier * degradation_multiplier
+                + bess_energy_revenue_vnd * energy_multiplier
+                * (soh_multiplier - degradation_multiplier)
+            )
         demand_charge_savings_vnd = (
             (base_demand_savings_vnd - bess_demand_savings_vnd)
             + bess_demand_savings_vnd * soh_multiplier
