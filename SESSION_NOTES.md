@@ -106,8 +106,9 @@ dispatch-realism haircut, 15 minute Vietnam demand-charge cases.
 
 ## Housekeeping
 
-- Research line: 3 commits tonight (probe + http.jl coercion + ignore;
-  probe fixes + summaries + note + MODEL_AUDIT item; this handoff). Not
+- Research line: 4 commits tonight (probe + http.jl coercion + ignore;
+  probe fixes + summaries + note + MODEL_AUDIT item + this handoff; log
+  ignore fix). Not
   pushed by me. Scratch: `run_probes*.sh`, `render_research_tables.py`,
   `baseline_master.py` in the session scratchpad.
 - `docs/superpowers/notes/2026-09-12-fade-aware-sizing-research.md` is the
