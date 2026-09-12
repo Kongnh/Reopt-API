@@ -64,6 +64,15 @@ def _results():
 
 class ThailandReportTests(TestCase):
 
+    def test_cash_flow_overrides_pass_the_cycle_life(self):
+        overrides = cash_flow_overrides_from_assumptions({"bess_cycle_life_efc": 6000})
+
+        self.assertEqual(overrides["bess_cycle_life_efc"], 6000)
+        self.assertNotIn(
+            "bess_replacement_enabled",
+            cash_flow_overrides_from_assumptions({"bess_replacement_enabled": False}),
+        )
+
     def test_overrides_map_thb_exchange_rate_onto_the_engine_key(self):
         overrides = cash_flow_overrides_from_assumptions(ASSUMPTIONS)
 

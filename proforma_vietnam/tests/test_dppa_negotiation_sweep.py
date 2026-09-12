@@ -162,6 +162,18 @@ class DppaNegotiationSweepTests(TestCase):
         self.assertIn("BAU", summary)
         self.assertIn("non-DPPA case_2", summary)
 
+    def test_cash_flow_overrides_pass_the_cycle_life(self):
+        from proforma_vietnam.run_dppa_negotiation_sweep import cash_flow_overrides_from_assumptions
+
+        overrides = cash_flow_overrides_from_assumptions({"bess_cycle_life_efc": 6000})
+
+        self.assertEqual(overrides["bess_cycle_life_efc"], 6000)
+        # The sheet-only flag never becomes a cash-flow keyword.
+        self.assertNotIn(
+            "bess_replacement_enabled",
+            cash_flow_overrides_from_assumptions({"bess_replacement_enabled": False}),
+        )
+
     def test_reconciliation_compares_required_metrics_with_tolerance(self):
         actual = _cash_flow()
         reference = _cash_flow()

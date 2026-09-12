@@ -36,6 +36,10 @@ VIETNAM_REPORT_QUERY_KEYS = [
     "pv_inverter_replacement_fraction_of_pv_capex",
     "demand_savings_esco_share",
     "grid_charging_enabled",
+    # Battery ageing (2026-09-12): the cycle life feeds the SOH curve; the
+    # replacement flag only labels the Assumptions sheet.
+    "bess_cycle_life_efc",
+    "bess_replacement_enabled",
 ]
 
 

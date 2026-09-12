@@ -216,6 +216,18 @@ class VietnamRunCaseTests(TestCase):
 
 class VietnamRunCaseUrlTests(TestCase):
 
+    def test_report_query_carries_the_battery_ageing_keys(self):
+        from proforma_vietnam.run_case import VIETNAM_REPORT_QUERY_KEYS, _vietnam_report_query_params
+
+        self.assertIn("bess_cycle_life_efc", VIETNAM_REPORT_QUERY_KEYS)
+        self.assertIn("bess_replacement_enabled", VIETNAM_REPORT_QUERY_KEYS)
+        query = _vietnam_report_query_params(
+            {"bess_cycle_life_efc": 8000, "bess_replacement_enabled": False}
+        )
+        # False is a value, not an absence: the flag must travel.
+        self.assertEqual(query["bess_replacement_enabled"], False)
+        self.assertEqual(query["bess_cycle_life_efc"], 8000)
+
     def test_api_base_accepts_base_or_job_suffixed_url(self):
         self.assertEqual(_api_base("http://localhost:8000/v3"), "http://localhost:8000/v3")
         self.assertEqual(_api_base("http://localhost:8000/v3/"), "http://localhost:8000/v3")

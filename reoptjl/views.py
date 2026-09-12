@@ -492,6 +492,7 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         "battery_replacement_year": "battery_replacement_year",
         "pv_inverter_replacement_year": "pv_inverter_replacement_year",
         "pv_inverter_replacement_fraction_of_pv_capex": "pv_inverter_replacement_fraction_of_pv_capex",
+        "bess_cycle_life_efc": "bess_cycle_life_efc",
         "demand_savings_esco_share": "esco_demand_savings_share",
     }
 
@@ -520,6 +521,14 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         )
         assumptions["grid_charging_enabled"] = value
         cash_flow_overrides["grid_charging_enabled"] = value
+
+    if "bess_replacement_enabled" in request.GET:
+        # Sheet label only: the replacement series is driven by the REopt
+        # inputs the case sent, so there is no cash-flow override to set.
+        assumptions["bess_replacement_enabled"] = _parse_boolean_query_param(
+            "bess_replacement_enabled",
+            request.GET["bess_replacement_enabled"],
+        )
 
     raw_dppa_config = request.GET.get("dppa_config") or request.POST.get("dppa_config")
     if raw_dppa_config is not None:
