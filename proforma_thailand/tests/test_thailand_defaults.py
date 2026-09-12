@@ -151,34 +151,20 @@ class CoupledDefaultsAreDerivedTests(TestCase):
         self.assertAlmostEqual(om, pv_capex * 0.015, places=9)
         self.assertAlmostEqual(om, 7.5, places=9)
 
-    def test_replacement_matches_the_shared_policy(self):
+    def test_replacement_flag_and_cycle_life_match_the_shared_policy(self):
         from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
-        from proforma_vietnam.defaults import BESS_REPLACE_FRACTION_OF_INSTALL
+        from proforma_vietnam.defaults import BESS_CYCLE_LIFE_EFC, BESS_REPLACEMENT_ENABLED
 
-        for install_key, replace_key in (
-            ("bess_installed_cost_per_kw", "bess_replace_cost_per_kw"),
-            ("bess_installed_cost_per_kwh", "bess_replace_cost_per_kwh"),
-        ):
-            install = value_of(FINANCIAL_DEFAULTS, install_key)
-            replace = value_of(FINANCIAL_DEFAULTS, replace_key)
-            self.assertAlmostEqual(
-                replace, install * BESS_REPLACE_FRACTION_OF_INSTALL, places=9
-            )
-        # The 2026-09-11 ruling: replacement at install cost, 100 / 150.
-        self.assertEqual(value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kw"), 100.0)
-        self.assertEqual(value_of(FINANCIAL_DEFAULTS, "bess_replace_cost_per_kwh"), 150.0)
+        # The 2026-09-12 ruling: no scheduled replacement; fade carried by SOH.
+        self.assertIs(value_of(FINANCIAL_DEFAULTS, "bess_replacement_enabled"), BESS_REPLACEMENT_ENABLED)
+        self.assertEqual(value_of(FINANCIAL_DEFAULTS, "bess_cycle_life_efc"), BESS_CYCLE_LIFE_EFC)
+        self.assertIn("2026-09-12", FINANCIAL_DEFAULTS["bess_replacement_enabled"]["source"])
 
-    def test_replacing_never_costs_more_than_buying_new(self):
-        from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
+    def test_replacement_prices_are_no_longer_defaults(self):
+        from proforma_thailand.defaults import FINANCIAL_DEFAULTS
 
-        for install_key, replace_key in (
-            ("bess_installed_cost_per_kw", "bess_replace_cost_per_kw"),
-            ("bess_installed_cost_per_kwh", "bess_replace_cost_per_kwh"),
-        ):
-            self.assertLessEqual(
-                value_of(FINANCIAL_DEFAULTS, replace_key),
-                value_of(FINANCIAL_DEFAULTS, install_key),
-            )
+        self.assertNotIn("bess_replace_cost_per_kw", FINANCIAL_DEFAULTS)
+        self.assertNotIn("bess_replace_cost_per_kwh", FINANCIAL_DEFAULTS)
 
     def test_schedule_and_horizon_match_the_shared_policy(self):
         from proforma_thailand.defaults import FINANCIAL_DEFAULTS, value_of
@@ -192,6 +178,13 @@ class CoupledDefaultsAreDerivedTests(TestCase):
         self.assertEqual(
             value_of(FINANCIAL_DEFAULTS, "pv_inverter_replacement_fraction_of_pv_capex"),
             policy.PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
+        )
+        self.assertIs(
+            value_of(FINANCIAL_DEFAULTS, "bess_replacement_enabled"),
+            policy.BESS_REPLACEMENT_ENABLED,
+        )
+        self.assertEqual(
+            value_of(FINANCIAL_DEFAULTS, "bess_cycle_life_efc"), policy.BESS_CYCLE_LIFE_EFC
         )
 
     def test_a_desynced_schedule_fails_at_import(self):
@@ -218,7 +211,7 @@ class CoupledDefaultsAreDerivedTests(TestCase):
         confirmed = {
             "pv_installed_cost_per_kw", "annual_om_per_kw",
             "bess_installed_cost_per_kw", "bess_installed_cost_per_kwh",
-            "bess_replace_cost_per_kw", "bess_replace_cost_per_kwh",
+            "bess_replacement_enabled", "bess_cycle_life_efc",
             "discount_rate",
         }
 

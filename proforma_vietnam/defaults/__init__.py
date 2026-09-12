@@ -19,16 +19,27 @@ FINANCIAL_DEFAULTS = _DEFAULTS["financial"]
 TAX_DEFAULTS = _DEFAULTS["tax"]
 SURPLUS_EXPORT_DEFAULTS = _DEFAULTS["surplus_export"]
 
-# Equipment replacement policy shared by every country branch (rulings of
-# 2026-09-11). A country's JSON carries its own prices and provenance, but its
-# horizon and replacement schedule must agree with these or its defaults
-# module refuses to import; that is what keeps the two branches from drifting.
+# Equipment replacement and battery ageing policy shared by every country
+# branch (rulings of 2026-09-11 and 2026-09-12). A country's JSON carries its
+# own prices and provenance, but its horizon and schedule must agree with
+# these or its defaults module refuses to import; that is what keeps the two
+# branches from drifting.
 PROJECT_YEARS = 20
-BESS_REPLACEMENT_YEAR = 10                       # storage inverter and pack together
-BESS_REPLACE_FRACTION_OF_INSTALL = 1.0           # replacement priced at install cost
+# 2026-09-12: no scheduled battery replacement inside the horizon. A case may
+# opt in through technologies.storage.replacement; the year and fraction below
+# are then the defaults it inherits (whole system, storage inverter and pack).
+BESS_REPLACEMENT_ENABLED = False
+BESS_REPLACEMENT_YEAR = 10
+BESS_REPLACE_FRACTION_OF_INSTALL = 1.0
 PV_INVERTER_REPLACEMENT_YEAR = 11
 PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX = 0.10
-
+# Battery ageing is carried by a state-of-health curve instead (battery_soh.py).
+# Cycle life in the style of an LFP datasheet: equivalent full cycles to end of
+# life. Calendar fade keeps the NREL coefficients REopt.jl v0.57.0 ships.
+BESS_CYCLE_LIFE_EFC = 8000
+BESS_END_OF_LIFE_SOH = 0.80
+BESS_CALENDAR_FADE_COEFFICIENT = 1.16e-3
+BESS_CALENDAR_FADE_EXPONENT = 0.428
 
 def _assert_policy_holds():
     if FINANCIAL_DEFAULTS["project_years"] != PROJECT_YEARS:

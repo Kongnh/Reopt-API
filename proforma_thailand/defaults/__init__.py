@@ -10,7 +10,8 @@ import json
 import os
 
 from proforma_vietnam.defaults import (
-    BESS_REPLACE_FRACTION_OF_INSTALL,
+    BESS_CYCLE_LIFE_EFC,
+    BESS_REPLACEMENT_ENABLED,
     PROJECT_YEARS,
     PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
     PV_INVERTER_REPLACEMENT_YEAR,
@@ -70,19 +71,19 @@ TAX_DEFAULTS = {key: entry["value"] for key, entry in TAX_DEFAULTS_RAW.items()}
 # The coupling each derived default must satisfy: (derived, base, fraction).
 # Kept as an assertion rather than a computation so the JSON stays the single
 # readable source of every number, while a price change that desyncs a coupled
-# value fails at import instead of silently shipping. The replacement fraction
-# is the shared policy's, so Thailand cannot drift from Vietnam on it.
+# value fails at import instead of silently shipping.
 _DERIVED_COUPLINGS = (
     ("annual_om_per_kw", "pv_installed_cost_per_kw", 0.015),
-    ("bess_replace_cost_per_kw", "bess_installed_cost_per_kw", BESS_REPLACE_FRACTION_OF_INSTALL),
-    ("bess_replace_cost_per_kwh", "bess_installed_cost_per_kwh", BESS_REPLACE_FRACTION_OF_INSTALL),
 )
 
-# Schedule and horizon entries that must equal the shared policy outright.
+# Schedule, horizon and ageing entries that must equal the shared policy
+# outright, so Thailand cannot drift from Vietnam on any of them.
 _POLICY_EQUALITIES = (
     ("project_years", PROJECT_YEARS),
     ("pv_inverter_replacement_year", PV_INVERTER_REPLACEMENT_YEAR),
     ("pv_inverter_replacement_fraction_of_pv_capex", PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX),
+    ("bess_replacement_enabled", BESS_REPLACEMENT_ENABLED),
+    ("bess_cycle_life_efc", BESS_CYCLE_LIFE_EFC),
 )
 
 

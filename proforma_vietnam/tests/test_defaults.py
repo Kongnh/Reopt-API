@@ -67,10 +67,20 @@ class ReplacementPolicyTests(TestCase):
         from proforma_vietnam import defaults
 
         self.assertEqual(defaults.PROJECT_YEARS, 20)
+        # 2026-09-12: replacement is an opt-in; the schedule survives for cases that opt in.
+        self.assertFalse(defaults.BESS_REPLACEMENT_ENABLED)
         self.assertEqual(defaults.BESS_REPLACEMENT_YEAR, 10)
         self.assertEqual(defaults.BESS_REPLACE_FRACTION_OF_INSTALL, 1.0)
         self.assertEqual(defaults.PV_INVERTER_REPLACEMENT_YEAR, 11)
         self.assertEqual(defaults.PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX, 0.10)
+
+    def test_battery_ageing_constants(self):
+        from proforma_vietnam import defaults
+
+        self.assertEqual(defaults.BESS_CYCLE_LIFE_EFC, 8000)
+        self.assertEqual(defaults.BESS_END_OF_LIFE_SOH, 0.80)
+        self.assertAlmostEqual(defaults.BESS_CALENDAR_FADE_COEFFICIENT, 1.16e-3)
+        self.assertAlmostEqual(defaults.BESS_CALENDAR_FADE_EXPONENT, 0.428)
 
     def test_vietnam_horizon_matches_the_policy(self):
         from proforma_vietnam.defaults import FINANCIAL_DEFAULTS, PROJECT_YEARS
