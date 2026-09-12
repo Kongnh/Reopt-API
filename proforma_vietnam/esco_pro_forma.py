@@ -1,8 +1,11 @@
-from proforma_vietnam.cash_flow import calculate_vietnam_esco_cash_flow
+from proforma_vietnam.battery_soh import DAYS_PER_YEAR, battery_state_of_health
+from proforma_vietnam.cash_flow import DEFAULT_PROJECT_YEARS, calculate_vietnam_esco_cash_flow
 from proforma_vietnam.defaults import (
+    BESS_CYCLE_LIFE_EFC,
     SURPLUS_EXPORT_DEFAULTS,
     surplus_export_price_vnd_per_kwh,
 )
+from proforma_vietnam.demand_charge import battery_demand_savings
 from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_NONE,
@@ -33,6 +36,7 @@ def calculate_esco_pro_forma_from_reopt_results(
     pv_inverter_fraction = cash_flow_overrides.pop(
         "pv_inverter_replacement_fraction_of_pv_capex", None
     )
+    bess_cycle_life_efc = cash_flow_overrides.pop("bess_cycle_life_efc", BESS_CYCLE_LIFE_EFC)
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
 
@@ -256,6 +260,32 @@ def calculate_esco_pro_forma_from_reopt_results(
         _apply_surplus_export(
             cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd
         )
+
+    # Battery capacity fade (2026-09-12): the state-of-health curve replayed
+    # from the solved dispatch and the year-1 battery quantities it derates.
+    # Absent when the solve has no battery, which leaves the cash flow as it was.
+    battery_fade = _battery_fade_inputs(
+        storage_outputs=storage_outputs,
+        utility_outputs=utility_outputs,
+        pv_outputs=pv_outputs,
+        load_series=_series(load_outputs.get("load_series_kw"))
+            or _series(load_inputs.get("loads_kw")),
+        tariff_inputs=tariff_inputs,
+        rates=cash_flow_inputs["evn_energy_rates_vnd_per_kwh"],
+        served_kwh=cash_flow_inputs["project_served_pv_kwh"],
+        storage_in_served=storage_inputs.get("can_grid_charge") is False,
+        direct_ownership_enabled=direct_ownership_enabled,
+        battery_only=pv_capacity_kw == 0,
+        esco_energy_discount_fraction=esco_energy_discount_fraction,
+        levelization_factor=_levelization_factor(pv_outputs),
+        time_steps_per_hour=cash_flow_inputs.get("time_steps_per_hour", 1),
+        project_years=cash_flow_inputs.get("project_years", DEFAULT_PROJECT_YEARS),
+        cycle_life_efc=bess_cycle_life_efc,
+        exchange_rate_vnd_per_usd=exchange_rate_vnd_per_usd,
+        reopt_money_values_currency=tariff_money_values_currency,
+    )
+    if battery_fade is not None:
+        cash_flow_inputs["battery_fade"] = battery_fade
 
     # The inputs above are normalized to USD; passing the FX rate through lets
     # the cash flow restate every _vnd key at the fixed contract rate instead
@@ -565,6 +595,98 @@ def _pv_inverter_replacement(pv_outputs, year, fraction):
     series = [0.0] * int(year)
     series[int(year) - 1] = cost
     return {"year": int(year), "fraction": fraction, "cost": cost, "series": series}
+
+
+def _battery_fade_inputs(*, storage_outputs, utility_outputs, pv_outputs, load_series,
+                         tariff_inputs, rates, served_kwh, storage_in_served,
+                         direct_ownership_enabled, battery_only, esco_energy_discount_fraction,
+                         levelization_factor, time_steps_per_hour, project_years,
+                         cycle_life_efc, exchange_rate_vnd_per_usd, reopt_money_values_currency):
+    """Year-1 battery quantities the cash flow derates by state of health.
+
+    Storage series are de-levelized like project_served_pv_kwh; grid charging
+    is a grid quantity and is left alone, as report_data does. Which quantity
+    carries the battery's energy follows the structure's own accounting:
+    inside the served series when the battery is PV-charged (ESCO revenue and
+    the retail repurchase), as a net value when the solve books the whole bill
+    delta (direct ownership, battery-only arbitrage), and not at all when an
+    ESCO case has grid-charged storage beside PV (that value is not booked
+    today either). ``rates`` are already in cash-flow currency; the demand
+    counterfactual is in REopt money and is converted here. None when the
+    solve has no battery or less than a year of storage series.
+    """
+    size_kwh = _value(storage_outputs, "size_kwh")
+    discharge_raw = _series(storage_outputs.get("storage_to_load_series_kw"))
+    soc = _series(storage_outputs.get("soc_series_fraction"))
+    needed = DAYS_PER_YEAR * 24 * time_steps_per_hour
+    if size_kwh <= 0 or len(discharge_raw) < needed or len(soc) < needed:
+        return None
+    discharge = [value / levelization_factor for value in discharge_raw]
+    soh = battery_state_of_health(
+        size_kwh=size_kwh,
+        soc_series_fraction=soc,
+        discharge_series_kw=discharge,
+        time_steps_per_hour=time_steps_per_hour,
+        project_years=project_years,
+        cycle_life_efc=cycle_life_efc,
+    )
+    if soh is None:
+        return None
+    discharge_value = sum(kw * rate for kw, rate in zip(discharge, rates)) / time_steps_per_hour
+    grid_to_storage = _series(utility_outputs.get("electric_to_storage_series_kw"))
+    charge_cost = sum(kw * rate for kw, rate in zip(grid_to_storage, rates)) / time_steps_per_hour
+    fade = {
+        "soh_by_year": soh["soh_average_by_year"],
+        "energy_revenue_vnd": 0.0,
+        "served_retail_value_vnd": 0.0,
+        "unserved_energy_value_vnd": 0.0,
+        "matched_energy_share": 0.0,
+        "energy_attribution": "",
+        "soh": {key: value for key, value in soh.items() if key != "soh_fraction_by_day"},
+    }
+    if storage_in_served:
+        fade["energy_revenue_vnd"] = discharge_value * esco_energy_discount_fraction
+        fade["served_retail_value_vnd"] = discharge_value
+        total_served = sum(served_kwh)
+        fade["matched_energy_share"] = sum(discharge) / total_served if total_served else 0.0
+        fade["energy_attribution"] = "inside the served series (PV-charged storage)"
+    elif direct_ownership_enabled or battery_only:
+        fade["unserved_energy_value_vnd"] = max(discharge_value - charge_cost, 0.0)
+        fade["energy_attribution"] = (
+            "net retail value of battery energy (discharge at retail minus grid charging)"
+        )
+    else:
+        fade["energy_attribution"] = (
+            "not booked: grid-charged storage beside PV under an ESCO structure "
+            "carries no attributed energy value in this model"
+        )
+    pv_available = _sum_series([
+        _sum_series([
+            _series(pv.get("electric_to_load_series_kw")),
+            _series(pv.get("electric_to_storage_series_kw")),
+            _series(pv.get("electric_curtailed_series_kw")),
+            _series(pv.get("electric_to_grid_series_kw")),
+        ])
+        for pv in pv_outputs
+    ]) or [0.0] * len(load_series)
+    optimized_purchase = _sum_series([
+        _series(utility_outputs.get("electric_to_load_series_kw")),
+        grid_to_storage,
+    ])
+    demand = None
+    if load_series and optimized_purchase:
+        demand = battery_demand_savings(
+            tariff_inputs, load_series, pv_available, optimized_purchase, time_steps_per_hour
+        )
+    if demand is None:
+        fade["demand_savings_vnd"] = 0.0
+        fade["demand_attribution"] = "none: unsupported tariff demand structure"
+    else:
+        fade["demand_savings_vnd"] = _money(
+            demand / levelization_factor, exchange_rate_vnd_per_usd, reopt_money_values_currency
+        )
+        fade["demand_attribution"] = "counterfactual"
+    return fade
 
 
 def _merge_replacement_costs(base, extra):

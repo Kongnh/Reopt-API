@@ -130,6 +130,7 @@ def calculate_vietnam_esco_cash_flow(
     contract_residual_value_usd=0.0,
     vat_rate_fraction=None,
     vat_refund_year=None,
+    battery_fade=None,
 ):
     if len(project_served_pv_kwh) != len(evn_energy_rates_vnd_per_kwh):
         raise ValueError("project_served_pv_kwh and evn_energy_rates_vnd_per_kwh must have the same length")
@@ -285,6 +286,38 @@ def calculate_vietnam_esco_cash_flow(
         ppa_price_escalation_rate = physical_dppa.get("ppa_price_escalation_rate", 0.0)
         base_energy_revenue_vnd = matched_kwh_year1 * ppa_price_usd_per_kwh
 
+    # Battery capacity fade (2026-09-12): the battery's share of every
+    # generation-linked base is multiplied by the year's average state of
+    # health instead of the PV degradation factor; None leaves every path as
+    # it was. Who bears the fade follows each structure's own PV-degradation
+    # mechanics (ESCO revenue falls, the offtaker repurchases at retail; the
+    # owner bears all of it under direct ownership).
+    fade = battery_fade or {}
+    soh_by_year = list(fade.get("soh_by_year") or [])
+    bess_energy_revenue_vnd = fade.get("energy_revenue_vnd") or 0.0
+    bess_served_retail_vnd = fade.get("served_retail_value_vnd") or 0.0
+    bess_unserved_value_vnd = fade.get("unserved_energy_value_vnd") or 0.0
+    bess_demand_savings_vnd = min(fade.get("demand_savings_vnd") or 0.0, base_demand_savings_vnd)
+    bess_matched_share = fade.get("matched_energy_share") or 0.0
+    if structure == DPPA:
+        # The generator's energy line is the settlement, not a discount on
+        # served kWh; the battery share rides on the generation multiplier.
+        bess_energy_revenue_vnd = 0.0
+
+    def _soh_multiplier(year_index):
+        if year_index < len(soh_by_year):
+            return soh_by_year[year_index]
+        return 1.0
+
+    def _served_repurchase(degradation_multiplier, soh_multiplier):
+        # Retail value of served energy lost to PV degradation and to battery
+        # fade; the battery's net value outside the served series (grid
+        # charged) is lost the same way.
+        return (
+            (base_served_retail_value_vnd - bess_served_retail_vnd) * (1 - degradation_multiplier)
+            + (bess_served_retail_vnd + bess_unserved_value_vnd) * (1 - soh_multiplier)
+        )
+
     preliminary_rows = []
     net_operating_revenue_by_year = []
 
@@ -292,26 +325,42 @@ def calculate_vietnam_esco_cash_flow(
         energy_multiplier = (1 + evn_energy_escalation_rate) ** year_index
         capacity_multiplier = (1 + evn_capacity_escalation_rate) ** year_index
         degradation_multiplier = (1 - pv_degradation_rate) ** year_index
+        soh_multiplier = _soh_multiplier(year_index)
+        generation_multiplier = (
+            (1 - bess_matched_share) * degradation_multiplier
+            + bess_matched_share * soh_multiplier
+        )
+        lost_demand_relief_vnd = (
+            bess_demand_savings_vnd * (1 - soh_multiplier) * capacity_multiplier
+        )
 
+        ppa_multiplier = 1.0
         if structure == PHYSICAL_DPPA:
             # PPA price escalates at its own negotiated rate (flat by default),
-            # not the EVN tariff escalation; volume degrades with PV output.
+            # not the EVN tariff escalation; volume degrades with PV output and
+            # the battery share of it with state of health.
             ppa_multiplier = (1 + ppa_price_escalation_rate) ** year_index
             esco_energy_revenue_vnd = (
-                base_energy_revenue_vnd * ppa_multiplier * degradation_multiplier
+                base_energy_revenue_vnd * ppa_multiplier * generation_multiplier
             )
         else:
             esco_energy_revenue_vnd = (
-                base_energy_revenue_vnd * energy_multiplier * degradation_multiplier
-            )
-        demand_charge_savings_vnd = base_demand_savings_vnd * capacity_multiplier
+                (base_energy_revenue_vnd - bess_energy_revenue_vnd) * degradation_multiplier
+                + bess_energy_revenue_vnd * soh_multiplier
+            ) * energy_multiplier
+        demand_charge_savings_vnd = (
+            (base_demand_savings_vnd - bess_demand_savings_vnd)
+            + bess_demand_savings_vnd * soh_multiplier
+        ) * capacity_multiplier
         esco_demand_revenue_vnd = demand_charge_savings_vnd * esco_demand_savings_share
-        esco_grid_arbitrage_revenue_vnd = base_grid_arbitrage_revenue_vnd * energy_multiplier
+        esco_grid_arbitrage_revenue_vnd = (
+            base_grid_arbitrage_revenue_vnd * soh_multiplier * energy_multiplier
+        )
         replacement_cost_vnd = _value_for_year(replacement_costs_by_year, year_index)
         annual_om_year_vnd = annual_om_vnd * (1 + om_escalation_rate) ** year_index
 
         dppa_year = _dppa_year_terms(
-            dppa_settlement, year_index, energy_multiplier, degradation_multiplier
+            dppa_settlement, year_index, energy_multiplier, generation_multiplier
         )
         if dppa_year is not None:
             esco_energy_revenue_vnd = dppa_year["generator_revenue_vnd"]
@@ -345,8 +394,8 @@ def calculate_vietnam_esco_cash_flow(
             bau_evn_bill_year_vnd = bau_evn_bill_vnd * energy_multiplier
             optimized_evn_bill_year_vnd = (
                 optimized_evn_bill_vnd
-                + base_served_retail_value_vnd * (1 - degradation_multiplier)
-            ) * energy_multiplier
+                + _served_repurchase(degradation_multiplier, soh_multiplier)
+            ) * energy_multiplier + lost_demand_relief_vnd
             bill_savings_vnd = bau_evn_bill_year_vnd - optimized_evn_bill_year_vnd
             esco_revenue_vnd = bill_savings_vnd + surplus_export_revenue_vnd
         else:
@@ -385,7 +434,7 @@ def calculate_vietnam_esco_cash_flow(
             # Presentation split: the developer's energy line is the PPA payment
             # (same value the ESCO branch keeps in esco_energy_revenue_vnd, which
             # still drives esco_revenue/offtaker cost), shown under its own key.
-            row["ppa_matched_kwh"] = matched_kwh_year1 * degradation_multiplier
+            row["ppa_matched_kwh"] = matched_kwh_year1 * generation_multiplier
             row["ppa_energy_revenue_vnd"] = esco_energy_revenue_vnd
         if structure == DIRECT_OWNERSHIP:
             # Presentation: the developer's single revenue line is the avoided
@@ -393,6 +442,25 @@ def calculate_vietnam_esco_cash_flow(
             row["bill_savings_revenue_vnd"] = bill_savings_vnd
         if dppa_year is not None:
             row.update(dppa_year)
+        if battery_fade is not None:
+            # Project-level value lost to fade this year (informational: the
+            # Battery SOH sheet shows it; it is already inside the lines above).
+            if structure == DPPA:
+                matched_retail_vnd = dppa_settlement["year_one"].get("matched_retail_value_vnd", 0.0)
+                energy_loss_vnd = (
+                    matched_retail_vnd * bess_matched_share * (1 - soh_multiplier) * energy_multiplier
+                )
+            elif structure == PHYSICAL_DPPA:
+                energy_loss_vnd = (
+                    base_energy_revenue_vnd * bess_matched_share * (1 - soh_multiplier) * ppa_multiplier
+                )
+            else:
+                energy_loss_vnd = (
+                    (bess_served_retail_vnd + bess_unserved_value_vnd)
+                    * (1 - soh_multiplier) * energy_multiplier
+                )
+            row["battery_soh_fraction"] = soh_multiplier
+            row["battery_fade_loss_vnd"] = energy_loss_vnd + lost_demand_relief_vnd
         preliminary_rows.append(row)
         net_operating_revenue_by_year.append(net_operating_revenue_vnd)
 
@@ -651,6 +719,10 @@ def calculate_vietnam_esco_cash_flow(
         energy_multiplier = (1 + evn_energy_escalation_rate) ** year_index
         capacity_multiplier = (1 + evn_capacity_escalation_rate) ** year_index
         degradation_multiplier = (1 - pv_degradation_rate) ** year_index
+        soh_multiplier = _soh_multiplier(year_index)
+        lost_demand_relief_vnd = (
+            bess_demand_savings_vnd * (1 - soh_multiplier) * capacity_multiplier
+        )
         debt_service_vnd = debt_schedule[year_index]["debt_service_vnd"]
         cash_available_for_debt_service_vnd = (
             row["esco_revenue_vnd"]
@@ -679,12 +751,14 @@ def calculate_vietnam_esco_cash_flow(
         if vat_enabled and year_index + 1 == vat_refund_year:
             vat_refund_vnd = vat_amount_vnd
             equity_cash_flow_vnd += vat_refund_vnd
-        # Energy lost to PV degradation is repurchased from EVN at retail,
-        # so the offtaker's residual bill grows as the system degrades.
+        # Energy lost to PV degradation (and, for the battery's share, to
+        # capacity fade) is repurchased from EVN at retail, so the offtaker's
+        # residual bill grows as the system degrades; the battery's demand
+        # relief fades with it.
         optimized_evn_bill_year_vnd = (
             optimized_evn_bill_vnd
-            + base_served_retail_value_vnd * (1 - degradation_multiplier)
-        ) * energy_multiplier
+            + _served_repurchase(degradation_multiplier, soh_multiplier)
+        ) * energy_multiplier + lost_demand_relief_vnd
         bau_evn_bill_year_vnd = bau_evn_bill_vnd * energy_multiplier
         if structure != DPPA:
             offtaker_post_project_cost_vnd = (
@@ -705,6 +779,7 @@ def calculate_vietnam_esco_cash_flow(
                 row["dppa_offtaker_cost_vnd"]
                 + optimized_demand_charge_year_vnd
                 + row["esco_demand_revenue_vnd"]
+                + lost_demand_relief_vnd
             )
         offtaker_savings_vnd = bau_evn_bill_year_vnd - offtaker_post_project_cost_vnd
 
@@ -863,6 +938,21 @@ def calculate_vietnam_esco_cash_flow(
     if preferential_rate is not None:
         derivation["cit"]["preferential_rate"] = preferential_rate
         derivation["cit"]["preferential_years"] = preferential_years
+    if battery_fade is not None:
+        # Gated on the block so runs without a battery carry no key and stay
+        # byte-for-byte unchanged. Money here is USD like the rest of the
+        # derivation (esco_pro_forma normalises before calling).
+        derivation["battery_fade"] = {
+            "energy_revenue_usd": bess_energy_revenue_vnd,
+            "served_retail_value_usd": bess_served_retail_vnd,
+            "unserved_energy_value_usd": bess_unserved_value_vnd,
+            "demand_savings_usd": bess_demand_savings_vnd,
+            "matched_energy_share": bess_matched_share,
+            "soh_by_year": soh_by_year,
+            "energy_attribution": fade.get("energy_attribution"),
+            "demand_attribution": fade.get("demand_attribution"),
+            "soh": fade.get("soh"),
+        }
     if debt_currency == "USD":
         # USD-denominated debt: the debt schedule / IDC / DSCR / tax deduction
         # all run in USD exactly as VND, so the base case is unchanged; the
@@ -1489,7 +1579,13 @@ def _value_for_year(values, year_index):
     return values[year_index] if year_index < len(values) else 0
 
 
-def _dppa_year_terms(dppa_settlement, year_index, energy_multiplier, degradation_multiplier):
+def _dppa_year_terms(dppa_settlement, year_index, energy_multiplier, generation_multiplier):
+    """One year of the grid-CfD settlement chain.
+
+    ``generation_multiplier`` is the PV degradation factor blended with the
+    battery's state of health on the battery's share of matched energy (it
+    equals the plain degradation factor when there is no battery).
+    """
     if dppa_settlement is None:
         return None
 
@@ -1500,19 +1596,19 @@ def _dppa_year_terms(dppa_settlement, year_index, energy_multiplier, degradation
 
     # Generation-linked terms shrink with PV degradation; the matched energy
     # lost to degradation is repurchased from EVN at retail inside C_BL.
-    c_dn_vnd = year_one["c_dn_vnd"] * fee_multiplier * degradation_multiplier
-    c_dppa_vnd = year_one["c_dppa_vnd"] * fee_multiplier * degradation_multiplier
-    c_cl_vnd = year_one["c_cl_vnd"] * fee_multiplier * degradation_multiplier
+    c_dn_vnd = year_one["c_dn_vnd"] * fee_multiplier * generation_multiplier
+    c_dppa_vnd = year_one["c_dppa_vnd"] * fee_multiplier * generation_multiplier
+    c_cl_vnd = year_one["c_cl_vnd"] * fee_multiplier * generation_multiplier
     matched_retail_value_vnd = year_one.get("matched_retail_value_vnd", 0.0)
     c_bl_vnd = (
         year_one["c_bl_vnd"]
-        + matched_retail_value_vnd * (1 - degradation_multiplier)
+        + matched_retail_value_vnd * (1 - generation_multiplier)
     ) * energy_multiplier
     cfd_strike_revenue_vnd = year_one["cfd_strike_revenue_vnd"] * cfd_multiplier
     cfd_fmp_offset_vnd = year_one["cfd_fmp_offset_vnd"] * fee_multiplier
     cfd_net_vnd = cfd_strike_revenue_vnd - cfd_fmp_offset_vnd
     generator_fmp_revenue_vnd = (
-        year_one["generator_fmp_revenue_vnd"] * fee_multiplier * degradation_multiplier
+        year_one["generator_fmp_revenue_vnd"] * fee_multiplier * generation_multiplier
     )
     generator_revenue_vnd = generator_fmp_revenue_vnd + cfd_net_vnd
     dppa_offtaker_cost_vnd = c_dn_vnd + c_dppa_vnd + c_cl_vnd + c_bl_vnd + cfd_net_vnd

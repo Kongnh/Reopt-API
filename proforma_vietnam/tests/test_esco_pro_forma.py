@@ -943,6 +943,181 @@ class PvInverterReplacementTests(TestCase):
         self.assertNotIn("pv_inverter_replacement", result["derivation"])
 
 
+class BatteryFadeInputsTests(TestCase):
+    """The battery quantities the cash flow derates by state of health, on a
+    full-year fake so the SOH engine has a year to replay."""
+
+    HOURS = 8760
+
+    def _results(self, can_grid_charge, pv_kw=100.0, demand=False):
+        hours = self.HOURS
+        results = {
+            "inputs": {
+                "ElectricTariff": {"tou_energy_rates_per_kwh": [0.1] * hours},
+                "ElectricStorage": {"can_grid_charge": can_grid_charge},
+                "Financial": {"owner_discount_rate_fraction": 0.11},
+            },
+            "outputs": {
+                "PV": {
+                    "size_kw": pv_kw,
+                    "installed_cost_per_kw": 1000,
+                    "electric_to_load_series_kw": [2.0 if pv_kw else 0.0] * hours,
+                    "electric_to_storage_series_kw": [1.0 if pv_kw else 0.0] * hours,
+                    "electric_curtailed_series_kw": [0.0] * hours,
+                },
+                "ElectricStorage": {
+                    "size_kw": 10.0,
+                    "size_kwh": 20.0,
+                    "initial_capital_cost": 10000,
+                    "soc_series_fraction": [0.5] * hours,
+                    "storage_to_load_series_kw": [1.0] * hours,
+                },
+                "ElectricUtility": {
+                    "electric_to_load_series_kw": [4.0] * hours,
+                    "electric_to_storage_series_kw": [1.2 if can_grid_charge else 0.0] * hours,
+                },
+                "ElectricLoad": {"load_series_kw": [10.0] * hours},
+                "ElectricTariff": {
+                    "year_one_bill_before_tax_bau": 50000,
+                    "year_one_bill_before_tax": 30000,
+                    "year_one_demand_cost_before_tax_bau": 8000,
+                    "year_one_demand_cost_before_tax": 3000,
+                },
+                "Financial": {"year_one_om_costs_before_tax": 1000},
+            },
+        }
+        if demand:
+            results["inputs"]["ElectricTariff"]["monthly_demand_rates"] = [1.0] * 12
+        return results
+
+    def test_pv_charged_storage_splits_served_value_and_share(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(can_grid_charge=False), esco_energy_discount_fraction=0.9,
+            project_years=2)
+
+        fade = result["derivation"]["battery_fade"]
+        # 8760 h x 1 kW x 0.1 USD/kWh through the battery; served = 2 + 1 kW.
+        self.assertAlmostEqual(fade["served_retail_value_usd"], 876.0)
+        self.assertAlmostEqual(fade["energy_revenue_usd"], 876.0 * 0.9)
+        self.assertEqual(fade["unserved_energy_value_usd"], 0.0)
+        self.assertAlmostEqual(fade["matched_energy_share"], 1.0 / 3.0)
+        self.assertEqual(len(fade["soh_by_year"]), 2)
+        self.assertLess(fade["soh_by_year"][1], fade["soh_by_year"][0])
+        self.assertIn("served series", fade["energy_attribution"])
+        self.assertEqual(fade["demand_attribution"], "counterfactual")
+        self.assertEqual(fade["demand_savings_usd"], 0.0)   # no demand structure: 0 either way
+        self.assertNotIn("soh_fraction_by_day", fade["soh"])
+        self.assertEqual(fade["soh"]["coefficients"]["cycle_life_efc"], 8000)
+
+    def test_grid_charged_storage_beside_pv_books_no_energy_derate_under_esco(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(can_grid_charge=True), esco_energy_discount_fraction=0.9,
+            project_years=2)
+
+        fade = result["derivation"]["battery_fade"]
+        self.assertEqual(fade["energy_revenue_usd"], 0.0)
+        self.assertEqual(fade["served_retail_value_usd"], 0.0)
+        self.assertEqual(fade["unserved_energy_value_usd"], 0.0)
+        self.assertEqual(fade["matched_energy_share"], 0.0)
+        self.assertIn("not booked", fade["energy_attribution"])
+
+    def test_battery_only_case_uses_the_net_arbitrage_value(self):
+        results = self._results(can_grid_charge=True, pv_kw=0.0)
+        results["outputs"]["ElectricUtility"]["electric_to_storage_series_kw"] = [0.4] * self.HOURS
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=2)
+
+        fade = result["derivation"]["battery_fade"]
+        # discharge 876 at retail minus grid charging 0.4 kW x 8760 x 0.1 = 350.4
+        self.assertAlmostEqual(fade["unserved_energy_value_usd"], 876.0 - 350.4)
+        self.assertEqual(fade["energy_revenue_usd"], 0.0)
+        self.assertIn("net retail value", fade["energy_attribution"])
+
+    def test_direct_ownership_with_grid_charging_books_the_net_value(self):
+        results = self._results(can_grid_charge=True)
+        results["outputs"]["ElectricUtility"]["electric_to_storage_series_kw"] = [0.4] * self.HOURS
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.0, project_years=2,
+            direct_ownership={"enabled": True})
+
+        fade = result["derivation"]["battery_fade"]
+        self.assertAlmostEqual(fade["unserved_energy_value_usd"], 876.0 - 350.4)
+        self.assertEqual(fade["served_retail_value_usd"], 0.0)
+
+    def test_net_energy_value_is_floored_at_zero(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            self._results(can_grid_charge=True, pv_kw=0.0), esco_energy_discount_fraction=0.9,
+            project_years=2)
+
+        # charging 1.2 kW costs more than the 1 kW discharged returns at a flat rate
+        self.assertEqual(result["derivation"]["battery_fade"]["unserved_energy_value_usd"], 0.0)
+
+    def test_demand_attribution_uses_the_counterfactual(self):
+        results = self._results(can_grid_charge=False, demand=True)
+        # load 10, PV available 3 (2 to load + 1 to storage): counterfactual
+        # purchase 7 every hour; the solved purchase is 4. Twelve months at 1/kW.
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=1)
+
+        fade = result["derivation"]["battery_fade"]
+        self.assertAlmostEqual(fade["demand_savings_usd"], 12 * (7.0 - 4.0))
+        self.assertEqual(fade["demand_attribution"], "counterfactual")
+
+    def test_unsupported_demand_structure_is_reported_not_guessed(self):
+        results = self._results(can_grid_charge=False)
+        results["inputs"]["ElectricTariff"]["urdb_label"] = "abc"
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=1)
+
+        fade = result["derivation"]["battery_fade"]
+        self.assertEqual(fade["demand_savings_usd"], 0.0)
+        self.assertIn("unsupported", fade["demand_attribution"])
+
+    def test_cycle_life_override_reaches_the_curve(self):
+        a = calculate_esco_pro_forma_from_reopt_results(
+            self._results(can_grid_charge=False), esco_energy_discount_fraction=0.9,
+            project_years=2)
+        b = calculate_esco_pro_forma_from_reopt_results(
+            self._results(can_grid_charge=False), esco_energy_discount_fraction=0.9,
+            project_years=2, bess_cycle_life_efc=2000)
+
+        self.assertLess(b["derivation"]["battery_fade"]["soh_by_year"][1],
+                        a["derivation"]["battery_fade"]["soh_by_year"][1])
+        self.assertEqual(b["derivation"]["battery_fade"]["soh"]["coefficients"]["cycle_life_efc"], 2000)
+
+    def test_levelized_storage_series_are_put_back_on_a_first_year_basis(self):
+        results = self._results(can_grid_charge=False)
+        # lambda = 0.5: REopt's series carry half the true first-year production
+        results["outputs"]["PV"]["year_one_energy_produced_kwh"] = 1000.0
+        results["outputs"]["PV"]["annual_energy_produced_kwh"] = 500.0
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=1)
+
+        fade = result["derivation"]["battery_fade"]
+        self.assertAlmostEqual(fade["served_retail_value_usd"], 876.0 / 0.5)
+        self.assertAlmostEqual(fade["matched_energy_share"], 1.0 / 3.0)
+
+    def test_no_battery_means_no_fade_block(self):
+        results = self._results(can_grid_charge=False)
+        results["outputs"]["ElectricStorage"] = {"size_kw": 0.0, "size_kwh": 0.0}
+
+        result = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=1)
+
+        self.assertNotIn("battery_fade", result["derivation"])
+
+    def test_a_short_storage_series_means_no_fade_block(self):
+        result = calculate_esco_pro_forma_from_reopt_results(
+            _fake_reopt_results(can_grid_charge=False), esco_energy_discount_fraction=0.9,
+            project_years=1)
+
+        self.assertNotIn("battery_fade", result["derivation"])
+
+
 def _fake_reopt_results(can_grid_charge):
     return {
         "inputs": {

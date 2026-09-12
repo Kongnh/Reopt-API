@@ -2595,6 +2595,118 @@ class BessDepreciationYearsTests(TestCase):
         )
 
 
+class BatteryFadeTests(TestCase):
+    """battery_fade multiplies the battery's share of every generation-linked
+    base by the year's state of health; None leaves every path untouched."""
+
+    def _fade(self, **overrides):
+        fade = {"soh_by_year": [1.0, 0.9, 0.8], "energy_revenue_vnd": 0.0,
+                "served_retail_value_vnd": 0.0, "unserved_energy_value_vnd": 0.0,
+                "demand_savings_vnd": 0.0, "matched_energy_share": 0.0,
+                "energy_attribution": "test", "demand_attribution": "test", "soh": {}}
+        fade.update(overrides)
+        return fade
+
+    def _run(self, fade=None, **kwargs):
+        base = dict(
+            project_served_pv_kwh=[1_000_000.0],
+            evn_energy_rates_vnd_per_kwh=[0.1],
+            bau_evn_bill_vnd=200_000.0,
+            optimized_evn_bill_vnd=150_000.0,
+            bau_demand_charge_vnd=60_000.0,
+            optimized_demand_charge_vnd=50_000.0,
+            pv_capex_vnd=1_000_000.0,
+            bess_capex_vnd=400_000.0,
+            annual_om_vnd=12_000.0,
+            esco_energy_discount_fraction=0.9,
+            project_years=3,
+            pv_degradation_rate=0.0,
+            evn_energy_escalation_rate=0.0,
+            evn_capacity_escalation_rate=0.0,
+        )
+        base.update(kwargs)
+        return calculate_vietnam_esco_cash_flow(battery_fade=fade, **base)
+
+    def test_none_is_inert_and_a_flat_curve_changes_nothing(self):
+        a = self._run(None)
+        b = self._run(self._fade(soh_by_year=[1.0, 1.0, 1.0], energy_revenue_vnd=1000.0,
+                                 served_retail_value_vnd=1200.0, demand_savings_vnd=200.0))
+
+        for x, y in zip(a["annual_cash_flows"], b["annual_cash_flows"]):
+            self.assertAlmostEqual(x["esco_revenue_vnd"], y["esco_revenue_vnd"])
+            self.assertAlmostEqual(x["offtaker_savings_vnd"], y["offtaker_savings_vnd"])
+            self.assertAlmostEqual(x["equity_cash_flow_vnd"], y["equity_cash_flow_vnd"])
+        self.assertNotIn("battery_soh_fraction", a["annual_cash_flows"][0])
+        self.assertNotIn("battery_fade", a["derivation"])
+        self.assertEqual(b["annual_cash_flows"][2]["battery_fade_loss_vnd"], 0.0)
+        self.assertEqual(b["annual_cash_flows"][2]["battery_soh_fraction"], 1.0)
+
+    def test_esco_energy_revenue_derates_only_the_battery_part(self):
+        base = self._run(None)["annual_cash_flows"]
+        rows = self._run(self._fade(energy_revenue_vnd=1000.0,
+                                    served_retail_value_vnd=1200.0))["annual_cash_flows"]
+
+        self.assertAlmostEqual(rows[0]["esco_energy_revenue_vnd"], base[0]["esco_energy_revenue_vnd"])
+        self.assertAlmostEqual(rows[1]["esco_energy_revenue_vnd"], base[1]["esco_energy_revenue_vnd"] - 100.0)
+        self.assertAlmostEqual(rows[2]["esco_energy_revenue_vnd"], base[2]["esco_energy_revenue_vnd"] - 200.0)
+        # the offtaker repurchases the lost battery energy at retail
+        self.assertAlmostEqual(rows[1]["optimized_evn_bill_vnd"], base[1]["optimized_evn_bill_vnd"] + 120.0)
+        self.assertAlmostEqual(rows[1]["battery_fade_loss_vnd"], 120.0)
+        self.assertAlmostEqual(rows[1]["battery_soh_fraction"], 0.9)
+        self.assertAlmostEqual(rows[1]["battery_fade_loss_usd"], 120.0)
+
+    def test_demand_and_arbitrage_parts_derate(self):
+        kwargs = dict(net_grid_arbitrage_value_vnd=500.0, grid_charging_enabled=True)
+        base = self._run(None, **kwargs)["annual_cash_flows"]
+        rows = self._run(self._fade(demand_savings_vnd=200.0, unserved_energy_value_vnd=500.0),
+                         **kwargs)["annual_cash_flows"]
+
+        self.assertAlmostEqual(rows[1]["demand_charge_savings_vnd"],
+                               base[1]["demand_charge_savings_vnd"] - 20.0)
+        self.assertAlmostEqual(rows[1]["esco_grid_arbitrage_revenue_vnd"],
+                               base[1]["esco_grid_arbitrage_revenue_vnd"] * 0.9)
+        # optimized bill: net battery energy value lost (50) plus demand relief lost (20)
+        self.assertAlmostEqual(rows[1]["optimized_evn_bill_vnd"],
+                               base[1]["optimized_evn_bill_vnd"] + 50.0 + 20.0)
+        self.assertAlmostEqual(rows[1]["battery_fade_loss_vnd"], 70.0)
+
+    def test_demand_part_is_capped_at_the_base(self):
+        rows = self._run(self._fade(demand_savings_vnd=10_000_000.0))["annual_cash_flows"]
+
+        # base demand savings 10,000; the cap keeps the row at 10,000 x SOH, never negative
+        self.assertAlmostEqual(rows[2]["demand_charge_savings_vnd"], 10_000.0 * 0.8)
+
+    def test_direct_ownership_bill_savings_carry_the_fade(self):
+        kwargs = dict(direct_ownership={"enabled": True}, esco_energy_discount_fraction=0.0)
+        base = self._run(None, **kwargs)["annual_cash_flows"]
+        rows = self._run(self._fade(unserved_energy_value_vnd=300.0, demand_savings_vnd=100.0),
+                         **kwargs)["annual_cash_flows"]
+
+        self.assertAlmostEqual(rows[1]["bill_savings_revenue_vnd"],
+                               base[1]["bill_savings_revenue_vnd"] - 40.0)
+        self.assertAlmostEqual(rows[1]["battery_fade_loss_vnd"], 40.0)
+        self.assertAlmostEqual(rows[1]["offtaker_savings_vnd"], base[1]["offtaker_savings_vnd"] - 40.0)
+
+    def test_escalation_applies_to_the_lost_value(self):
+        rows = self._run(self._fade(served_retail_value_vnd=1000.0, demand_savings_vnd=100.0),
+                         evn_energy_escalation_rate=0.1,
+                         evn_capacity_escalation_rate=0.2)["annual_cash_flows"]
+
+        # year 2: energy 1000 x 0.1 x 1.1, demand 100 x 0.1 x 1.2
+        self.assertAlmostEqual(rows[1]["battery_fade_loss_vnd"], 110.0 + 12.0)
+
+    def test_derivation_records_the_inputs(self):
+        result = self._run(self._fade(energy_revenue_vnd=1.0, matched_energy_share=0.25))
+
+        block = result["derivation"]["battery_fade"]
+        self.assertEqual(block["soh_by_year"], [1.0, 0.9, 0.8])
+        self.assertEqual(block["energy_revenue_usd"], 1.0)
+        self.assertEqual(block["matched_energy_share"], 0.25)
+        self.assertEqual(block["energy_attribution"], "test")
+        self.assertEqual(block["demand_attribution"], "test")
+        self.assertEqual(block["soh"], {})
+
+
 class CitStandardRateTests(TestCase):
     """The CIT rate must be injectable, not read from a Vietnam module global."""
 
