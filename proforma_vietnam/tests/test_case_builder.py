@@ -120,6 +120,11 @@ class VietnamCaseBuilderTests(TestCase):
         self.assertEqual(payload["Financial"], {
             "analysis_years": 20,
             "owner_discount_rate_fraction": 0.12,
+            "offtaker_discount_rate_fraction": 0.12,
+            "owner_tax_rate_fraction": 0.20,
+            "offtaker_tax_rate_fraction": 0.20,
+            "elec_cost_escalation_rate_fraction": FINANCIAL_DEFAULTS["evn_energy_escalation_rate"],
+            "om_cost_escalation_rate_fraction": FINANCIAL_DEFAULTS["om_escalation_rate"],
         })
         self.assertEqual(payload["PV"], {
             "max_kw": 1000.0,
@@ -127,6 +132,9 @@ class VietnamCaseBuilderTests(TestCase):
             "om_cost_per_kw": 150000,
             "degradation_fraction": 0.005,
             "production_factor_series": list(STUB_PV_SERIES),
+            "federal_itc_fraction": 0.0,
+            "macrs_option_years": 0,
+            "macrs_bonus_fraction": 0.0,
         })
         self.assertEqual(payload["ElectricStorage"], {
             "max_kw": 500.0,
@@ -140,6 +148,9 @@ class VietnamCaseBuilderTests(TestCase):
             "inverter_replacement_year": 10,
             "battery_replacement_year": 10,
             "can_grid_charge": True,
+            "total_itc_fraction": 0.0,
+            "macrs_option_years": 0,
+            "macrs_bonus_fraction": 0.0,
         })
         self.assertEqual(assumptions["owner_discount_rate_fraction"], 0.12)
         self.assertEqual(assumptions["debt_fraction"], 0.65)
@@ -1477,6 +1488,89 @@ class ReplacementSwitchInTheBuilderTests(TestCase):
         self.assertNotIn("battery_replacement_year", case["assumptions"])
         # The PV inverter policy is written regardless: it needs PV, not storage.
         self.assertEqual(case["assumptions"]["pv_inverter_replacement_year"], 11)
+
+
+class ObjectiveAlignmentTests(TestCase):
+    """The REopt objective prices what the pro forma books (2026-09-13).
+
+    REopt.jl defaults the Financial block and the PV / storage incentives to
+    US values: a 6.24 percent offtaker discount rate that also replaces the
+    owner rate when third_party_ownership is false, 26 percent tax, 1.66
+    percent electricity escalation, 2.5 percent O&M escalation, and a 30
+    percent ITC with 5-year MACRS bonus depreciation on both technologies.
+    None of that is booked by the pro forma, so the builder sends the pro
+    forma's own values and zero incentives, as the Thailand builder does.
+    """
+
+    def setUp(self):
+        patcher = patch(
+            "proforma_vietnam.case_builder.pvwatts_client.fetch_pv_series",
+            return_value={"production_factor": list(STUB_PV_SERIES), "poa_wm2": None},
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _case(self, financial=None, tariff=None, pv=None, storage=None):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+        tariff_block = {"year": 2025, "voltage_level": "22-110kV"}
+        tariff_block.update(tariff or {})
+        config = {
+            "site": {"latitude": 10.8231, "longitude": 106.6297},
+            "load_profile": {"year": 2025, "path": str(load_csv_path)},
+            "tariff": tariff_block,
+            "technologies": {
+                "pv": {"max_kw": 1000.0} if pv is None else pv,
+                "storage": {"max_kw": 500.0, "max_kwh": 2000.0} if storage is None else storage,
+            },
+            "esco_contract": {"esco_energy_discount_fraction": 0.9},
+        }
+        if financial is not None:
+            config["financial"] = financial
+        return build_vietnam_case(config)["payload"]
+
+    def test_financial_block_defaults_to_the_pro_forma_values(self):
+        payload = self._case()
+        self.assertEqual(payload["Financial"], {
+            "analysis_years": FINANCIAL_DEFAULTS["project_years"],
+            "owner_discount_rate_fraction": 0.10,
+            "offtaker_discount_rate_fraction": 0.10,
+            "owner_tax_rate_fraction": 0.20,
+            "offtaker_tax_rate_fraction": 0.20,
+            "elec_cost_escalation_rate_fraction": FINANCIAL_DEFAULTS["evn_energy_escalation_rate"],
+            "om_cost_escalation_rate_fraction": FINANCIAL_DEFAULTS["om_escalation_rate"],
+        })
+
+    def test_financial_block_follows_the_case(self):
+        payload = self._case(
+            financial={"owner_discount_rate_fraction": 0.12, "om_escalation_rate": 0.05},
+            tariff={"evn_energy_escalation_rate": 0.06},
+        )
+        fin = payload["Financial"]
+        self.assertEqual(fin["owner_discount_rate_fraction"], 0.12)
+        self.assertEqual(fin["offtaker_discount_rate_fraction"], 0.12)
+        self.assertEqual(fin["elec_cost_escalation_rate_fraction"], 0.06)
+        self.assertEqual(fin["om_cost_escalation_rate_fraction"], 0.05)
+
+    def test_incentives_are_zero_unless_the_case_says_otherwise(self):
+        payload = self._case()
+        for key in ("federal_itc_fraction", "macrs_bonus_fraction"):
+            self.assertEqual(payload["PV"][key], 0.0)
+        self.assertEqual(payload["PV"]["macrs_option_years"], 0)
+        for key in ("total_itc_fraction", "macrs_bonus_fraction"):
+            self.assertEqual(payload["ElectricStorage"][key], 0.0)
+        self.assertEqual(payload["ElectricStorage"]["macrs_option_years"], 0)
+
+        payload = self._case(
+            pv={"max_kw": 1000.0, "federal_itc_fraction": 0.1},
+            storage={"max_kw": 500.0, "max_kwh": 2000.0, "macrs_option_years": 7},
+        )
+        self.assertEqual(payload["PV"]["federal_itc_fraction"], 0.1)
+        self.assertEqual(payload["ElectricStorage"]["macrs_option_years"], 7)
+
+    def test_pv_only_case_still_zeroes_the_pv_incentives(self):
+        payload = self._case(storage={})
+        self.assertEqual(payload["PV"]["federal_itc_fraction"], 0.0)
+        self.assertEqual(payload["ElectricStorage"], {"can_grid_charge": False})
 
 
 def _write_load_csv(values):
