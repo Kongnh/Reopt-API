@@ -8870,6 +8870,8 @@
     0.0
   ],
   "bess_cycle_life_efc": 8000,
+  "battery_ageing_treatment": "derate",
+  "bess_augmentation_price_declination_rate": 0.03,
   "bess_replacement_enabled": false,
   "rate_vintage_year": 2025,
   "rate_vintage_source": "PEA Schedule 4.2 Large General Service TOU, 22-33 kV; verified against Rofu invoice 06/2568 (rate code 4224)"

@@ -1,3 +1,54 @@
+# 2026-09-13 (morning handoff) - The four recommendations implemented; both lines re-solved
+
+Ruling (user, 2026-09-13 08:00): implement recommendations 1 to 4 of
+`docs/superpowers/notes/2026-09-12-fade-aware-sizing-research.md`. Layout
+unchanged: `REopt_API` = `master` (deliverables), this worktree = research,
+Julia for research on 8082 (`docker start julia_api_soh`).
+
+## What landed
+
+- **master** (3 commits, 9329e147 / 9ef15b8b / 37aaaf7a): the Vietnam
+  builder sends the pro forma's Financial values and zero incentives; the
+  runner waits for the output sections (the Thailand `_is_complete` guard:
+  case_4's first re-solve came back "optimal" with no PV block); the eight
+  Vietnam cases re-solved, workbooks rebuilt, Excel tie-out ALL CHECKS PASS,
+  baselines regenerated, gate 0 on fourteen; MODEL_AUDIT section 10; handoff.
+- **this line**: the two master commits cherry-picked (5efc04cf, dfc7d3e2);
+  the ageing treatment (53e7fc66); the eight Vietnam cases re-solved with the
+  aligned objective; all fourteen assumptions regenerated (two new keys on
+  storage cases) and workbooks rebuilt; Excel tie-out ALL CHECKS PASS on the
+  nine storage workbooks and on the augment demonstration; baselines
+  regenerated, gate 0; Vietnam suite 634 + 4 probe tests, Thailand suite green.
+- Records of this line are on the aligned objective AND the SOH derate;
+  master's are on the aligned objective AND the year-10 replacement. The
+  two lines now differ only by the ageing policy, which is the comparison
+  the split exists for.
+
+## Reconcile on this line (old = 2026-09-12 solves at a6388781)
+
+| case | PV kW old / new | BESS kW / kWh old / new | capex USD old / new | equity NPV old / new | equity IRR old / new | min DSCR old / new |
+|---|---|---|---|---|---|---|
+| factory_a/case_1 | 5,701 / 3,520 | 1,896 / 11,087 to 1,031 / 4,079 | 4,218,573 / 2,261,868 | 585,319 / 1,111,148 | 13.3% / 22.2% | 1.02 / 1.37 |
+| factory_a/case_2 | 5,996 / 3,968 | 2,011 / 12,331 to 1,180 / 7,311 | 4,518,797 / 2,876,230 | 405,302 / 765,929 | 12.1% / 16.4% | 0.97 / 1.15 |
+| factory_a/case_3 | 6,071 / 2,188 | 2,220 / 14,337 to 579 / 3,088 | 4,812,252 / 1,467,206 | -470,729 / 389,852 | 7.7% / 16.2% | 0.78 / 1.12 |
+| factory_a/case_4 | 3,243 / 2,436 | 0 / 0 to 0 / 0 | 1,556,758 / 1,169,156 | 440,925 / 529,270 | 16.8% / 21.1% | 1.17 / 1.33 |
+| factory_a/case_5 | 5,996 / 3,968 | 2,011 / 12,331 to 1,180 / 7,311 | 4,518,797 / 2,876,230 | 986,353 / 920,389 | 15.1% / 17.5% | 1.07 / 1.16 |
+| factory_a/case_6 | 5,914 / 5,914 | 592 / 1,184 to 592 / 1,184 | 3,028,160 / 3,028,160 | 1,982,816 / 1,982,822 | 26.0% / 26.0% | 1.48 / 1.48 |
+| bess_arbitrage_5mw | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 4,092,688 / 4,092,688 | 53.9% / 53.9% | 2.40 / 2.40 |
+| bess_arbitrage_5mw_mfg | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 1,455,082 / 1,455,082 | 24.7% / 24.7% | 1.51 / 1.51 |
+
+## Follow-ups
+
+- case_5 (grid-CfD): the optimiser sizes on the retail bill, the pro forma
+  settles on the CfD; NPV fell with the smaller system. Run the probe's
+  grid on it (or size on the CfD price) before quoting it.
+- `augment` needs a vendor capacity-maintenance price to be more than a
+  scenario; the demonstration folder is the template.
+- Thailand case_6's levered optimum (1.25 to 1.5 x) is a financing effect;
+  the probe is the check, no code change made.
+- Vietnam narrative decks and the negotiation sweep outputs are stale on
+  both lines.
+
 # 2026-09-13 (overnight handoff) - Permanent worktree; fade-aware sizing research (A + D)
 
 Research line only. Ruling 2026-09-12 22:30 (user, before sleeping): the

@@ -1175,20 +1175,27 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     # Every formula below keeps its exact pre-fade text when there is no
     # block, so workbooks without a battery are unchanged.
     fade = d.get("battery_fade")
-    # Treatment (2026-09-13): the SOH terms enter the value formulas only
-    # under "derate"; under "augment" the curve is shown for information and
-    # the capacity top-up is an operating cost row below.
-    has_augment = bool(fade) and fade.get("treatment") == BATTERY_AGEING_AUGMENT
-    has_fade = bool(fade) and not has_augment
+    has_fade = bool(fade)
+    # Treatment (2026-09-13): the value formulas carry the battery terms
+    # whenever there is a block; under "augment" the factor they apply is 1.0
+    # (the capacity is kept), the physical curve is shown for information and
+    # the top-up is an operating cost row below. This mirrors the engine,
+    # whose battery share follows the SOH multiplier rather than PV degradation.
+    has_augment = has_fade and fade.get("treatment") == BATTERY_AGEING_AUGMENT
     r_fac_gen = r_fac_deg
-    if has_augment:
-        w.line(
-            "soh_info", "Battery SOH (year average; capacity kept by augmentation)", "index",
-            y0=1.0, values=[1.0] + list(fade["soh_by_year"]), fill=INPUT_FILL, fmt=FMT_FACTOR)
     if has_fade:
-        r_fac_soh = w.line(
-            "fac_soh", "Battery SOH factor (year average)", "index",
-            y0=1.0, values=[1.0] + list(fade["soh_by_year"]), fill=INPUT_FILL, fmt=FMT_FACTOR)
+        if has_augment:
+            w.line(
+                "soh_info", "Battery SOH (year average; capacity kept by augmentation)", "index",
+                y0=1.0, values=[1.0] + list(fade["soh_by_year"]), fill=INPUT_FILL, fmt=FMT_FACTOR)
+            r_fac_soh = w.line(
+                "fac_soh", "Battery SOH factor applied (1.0 under augmentation)", "index",
+                y0=1.0, values=[1.0] * (len(fade["soh_by_year"]) + 1), fill=INPUT_FILL,
+                fmt=FMT_FACTOR)
+        else:
+            r_fac_soh = w.line(
+                "fac_soh", "Battery SOH factor (year average)", "index",
+                y0=1.0, values=[1.0] + list(fade["soh_by_year"]), fill=INPUT_FILL, fmt=FMT_FACTOR)
         if is_dppa or is_physical:
             r_fac_gen = w.line(
                 "fac_gen", "Generation factor (PV degradation, battery SOH)", "index",

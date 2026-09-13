@@ -1399,7 +1399,7 @@ class BatteryFadeAuditTests(TestCase):
         self.assertEqual(sheet.cell(row=row, column=4).value, fade["soh_by_year"][0])
         self.assertEqual(sheet.cell(row=row, column=5).value, fade["soh_by_year"][1])
 
-    def test_augment_treatment_books_a_cost_row_and_drops_the_soh_terms(self):
+    def test_augment_treatment_books_a_cost_row_and_applies_a_unit_soh_factor(self):
         fade = _fade_block()
         fade.update(treatment="augment", augmentation_price_per_kwh_vnd=120.0,
                     augmentation_price_declination_rate=0.03,
@@ -1414,15 +1414,17 @@ class BatteryFadeAuditTests(TestCase):
         formulas = _year2_formulas(augment)
         sheet = augment[audit_sheets.PRO_FORMA_SHEET]
         labels = [sheet.cell(row=r, column=1).value for r in range(1, sheet.max_row + 1)]
-        # the physical curve is still shown, relabelled; no SOH term in the value lines
+        # the physical curve is shown for information; the factor the value
+        # lines apply is 1.0 in every year (the engine's multiplier under augment)
         self.assertIn("Battery SOH (year average; capacity kept by augmentation)", labels)
         self.assertNotIn("Battery SOH factor (year average)", labels)
-        for label in ("ESCO energy revenue (discount-to-EVN)", "Demand charge savings (total)",
-                      "Buyer cost with project", "Grid arbitrage revenue"):
-            for name in ("BESS_ENERGY_REV", "BESS_SERVED_RETAIL", "BESS_UNSERVED_VALUE",
-                         "BESS_DEMAND_SAVINGS", "BESS_MATCHED_SHARE"):
-                self.assertNotIn(name, formulas[label], label)
-        self.assertIn("BASE_SERVED_RETAIL*(1-", formulas["Buyer cost with project"])
+        factor = _label_row(sheet, "Battery SOH factor applied (1.0 under augmentation)")
+        self.assertEqual([sheet.cell(row=factor, column=c).value for c in (3, 4, 5, 23)],
+                         [1.0, 1.0, 1.0, 1.0])
+        info = _label_row(sheet, "Battery SOH (year average; capacity kept by augmentation)")
+        self.assertEqual(sheet.cell(row=info, column=5).value, fade["soh_by_year"][1])
+        self.assertIn("BESS_SERVED_RETAIL", formulas["Buyer cost with project"])
+        self.assertIn("E{}".format(factor), formulas["Buyer cost with project"])
         # the augmentation is a values row in operating costs, inside EBITDA
         row = _label_row(sheet, "Battery augmentation (capacity maintenance)")
         self.assertIn(sheet.cell(row=row, column=3).value, (None, 0.0))   # year 0

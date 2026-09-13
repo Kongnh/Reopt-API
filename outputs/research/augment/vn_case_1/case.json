@@ -1,0 +1,66 @@
+{
+  "_guide": {
+    "description": "Research scenario (2026-09-13): Vietnam case_1 re-read with technologies.storage.ageing_treatment = augment. Same REopt solve as outputs/vietnam_case/factory_a/case_1 (results.json copied, gitignored here); only the pro forma treatment differs.",
+    "reproduce_offline": "copy outputs/vietnam_case/factory_a/case_1/results.json here, then python -m proforma_vietnam.run_case --case outputs/research/augment/vn_case_1/case.json --dry-run && python -m proforma_vietnam.rebuild_report --case-dir outputs/research/augment/vn_case_1"
+  },
+  "case": {
+    "name": "Factory A Vietnam ESCO E2E (ageing treatment: augment)"
+  },
+  "site": {
+    "latitude": 10.8231,
+    "longitude": 106.6297
+  },
+  "load_profile": {
+    "year": 2025,
+    "path": "Sample Load Profile/Emivest_clean.csv"
+  },
+  "tariff": {
+    "year": 2025,
+    "voltage_level": "22-110kV",
+    "currency": "usd",
+    "exchange_rate_vnd_per_usd": 26300,
+    "tou_schedule": "current",
+    "two_component_pilot_enabled": false,
+    "evn_energy_escalation_rate": 0.04,
+    "evn_capacity_escalation_rate": 0.04
+  },
+  "financial": {
+    "owner_discount_rate_fraction": 0.1,
+    "debt_fraction": 0.7,
+    "debt_interest_rate_fraction": 0.085,
+    "debt_term_years": 10
+  },
+  "technologies": {
+    "pv": {
+      "min_kw": 0,
+      "max_kw": 10000,
+      "installed_cost_per_kw": 480,
+      "om_cost_per_kw": 6,
+      "degradation_fraction": 0.005,
+      "pvwatts": {
+        "tilt": 10,
+        "azimuth": 180,
+        "array_type": 1,
+        "module_type": 0,
+        "losses": 14,
+        "dc_ac_ratio": 1.2
+      }
+    },
+    "storage": {
+      "min_kw": 0,
+      "max_kw": 5000,
+      "min_kwh": 0,
+      "max_kwh": 20000,
+      "installed_cost_per_kw": 80,
+      "installed_cost_per_kwh": 120,
+      "installed_cost_constant": 0,
+      "om_cost_fraction_of_installed_cost": 0.01,
+      "ageing_treatment": "augment"
+    }
+  },
+  "esco_contract": {
+    "esco_energy_discount_fraction": 0.9,
+    "demand_savings_esco_share": 0.8,
+    "grid_charging_enabled": false
+  }
+}

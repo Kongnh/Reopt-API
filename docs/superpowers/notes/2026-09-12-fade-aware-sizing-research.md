@@ -368,3 +368,38 @@ Fields changed for the aligned objective: Financial.owner_discount_rate_fraction
   upper bound with REopt's perfect foresight.
 - Coefficients: cycle life 8,000 EFC to 80 percent (LFP datasheet), NREL
   calendar fade at laboratory conditions; no 30 degree calibration yet.
+
+## Implementation status (2026-09-13, user ruling: all four)
+
+1. Objective alignment: `proforma_vietnam/case_builder.py` on `master`
+   (9329e147), cherry-picked here (5efc04cf); the eight Vietnam cases
+   re-solved on both lines. This line's reconcile (old = 2026-09-12 solves):
+
+| case | PV kW old / new | BESS kW / kWh old / new | capex USD old / new | equity NPV old / new | equity IRR old / new | min DSCR old / new |
+|---|---|---|---|---|---|---|
+| factory_a/case_1 | 5,701 / 3,520 | 1,896 / 11,087 to 1,031 / 4,079 | 4,218,573 / 2,261,868 | 585,319 / 1,111,148 | 13.3% / 22.2% | 1.02 / 1.37 |
+| factory_a/case_2 | 5,996 / 3,968 | 2,011 / 12,331 to 1,180 / 7,311 | 4,518,797 / 2,876,230 | 405,302 / 765,929 | 12.1% / 16.4% | 0.97 / 1.15 |
+| factory_a/case_3 | 6,071 / 2,188 | 2,220 / 14,337 to 579 / 3,088 | 4,812,252 / 1,467,206 | -470,729 / 389,852 | 7.7% / 16.2% | 0.78 / 1.12 |
+| factory_a/case_4 | 3,243 / 2,436 | 0 / 0 to 0 / 0 | 1,556,758 / 1,169,156 | 440,925 / 529,270 | 16.8% / 21.1% | 1.17 / 1.33 |
+| factory_a/case_5 | 5,996 / 3,968 | 2,011 / 12,331 to 1,180 / 7,311 | 4,518,797 / 2,876,230 | 986,353 / 920,389 | 15.1% / 17.5% | 1.07 / 1.16 |
+| factory_a/case_6 | 5,914 / 5,914 | 592 / 1,184 to 592 / 1,184 | 3,028,160 / 3,028,160 | 1,982,816 / 1,982,822 | 26.0% / 26.0% | 1.48 / 1.48 |
+| bess_arbitrage_5mw | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 4,092,688 / 4,092,688 | 53.9% / 53.9% | 2.40 / 2.40 |
+| bess_arbitrage_5mw_mfg | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 1,455,082 / 1,455,082 | 24.7% / 24.7% | 1.51 / 1.51 |
+
+   case_5 (grid-CfD DPPA) is the one ESCO case whose NPV falls: the
+   optimiser still sizes on the retail bill while the pro forma settles at
+   the CfD strike and FMP, so a smaller retail-optimal system earns less on
+   the CfD; the grid check (recommendation 4) is the tool for that case.
+2. Sizing standard documented (input guide, contract model design); the
+   resting-SOC rule recorded as an EMS specification.
+3. `technologies.storage.ageing_treatment: derate | augment` implemented
+   (53e7fc66): cash flow, audit sheet (unit SOH factor plus an augmentation
+   row inside EBITDA under augment), Battery SOH sheet with both figures,
+   query plumbing, docs. Demonstration: `outputs/research/augment/vn_case_1`
+   (aligned case_1 re-read with augment; Excel tie-out ALL CHECKS PASS):
+   NPV 1,111,148 (derate) to 1,164,799 (augment), equity IRR 22.2 to 22.4
+   percent, minimum DSCR 1.37 to 1.35 (the top-up is a cost from year 1
+   while the derate's loss starts small), augmentation 59,724 USD nominal
+   over the horizon against 370,995 USD of derate-basis loss.
+4. `fade_sizing_probe` kept as the sizing check, unit tests on its pure
+   pieces (`test_fade_sizing_probe.py`), runbook in the input guide.
