@@ -9,6 +9,7 @@ from proforma_vietnam.defaults import (
     PV_INVERTER_REPLACEMENT_FRACTION_OF_PV_CAPEX,
     PV_INVERTER_REPLACEMENT_YEAR,
     SURPLUS_EXPORT_DEFAULTS,
+    TAX_DEFAULTS,
     dppa_regulatory_for_year,
 )
 from proforma_vietnam.dppa_settlement import (
@@ -42,6 +43,24 @@ DEFAULT_GRID_CHARGING_ENABLED = False
 # avg ~26,244). The value lives in vietnam_defaults.json's financial block so it
 # can be revised without touching code.
 DEFAULT_EXCHANGE_RATE_VND_PER_USD = FINANCIAL_DEFAULTS["exchange_rate_vnd_per_usd"]
+# The cash flow's own default (cash_flow.py) when a case sets no rate.
+DEFAULT_OWNER_DISCOUNT_RATE = 0.10
+
+# REopt.jl fills the incentive fields with US defaults (30 percent ITC,
+# 5-year MACRS with 100 percent bonus) that the pro forma never books; the
+# builder sends zero unless case.json says otherwise. Found 2026-09-13: with
+# the defaults on, the optimiser bought PV and batteries at 51 percent of
+# their price and sized 2.7 to 4.6 times too much battery.
+PV_INCENTIVE_ZEROES = {
+    "federal_itc_fraction": 0.0,
+    "macrs_option_years": 0,
+    "macrs_bonus_fraction": 0.0,
+}
+STORAGE_INCENTIVE_ZEROES = {
+    "total_itc_fraction": 0.0,
+    "macrs_option_years": 0,
+    "macrs_bonus_fraction": 0.0,
+}
 
 DPPA_VOLTAGE_ELIGIBLE_GRID_CFD = {"110kv_and_above", "22_to_110kv"}
 DEFAULT_FMP_SERIES_PATH = "DPPA DOC/fmp_cfmp_vn.json"
@@ -96,6 +115,9 @@ PV_PAYLOAD_KEYS = [
     "om_cost_per_kw",
     "degradation_fraction",
     "production_factor_series",
+    "federal_itc_fraction",
+    "macrs_option_years",
+    "macrs_bonus_fraction",
 ]
 STORAGE_PAYLOAD_KEYS = [
     "min_kw",
@@ -115,6 +137,9 @@ STORAGE_PAYLOAD_KEYS = [
     "can_grid_charge",
     "soc_min_fraction",
     "soc_init_fraction",
+    "total_itc_fraction",
+    "macrs_option_years",
+    "macrs_bonus_fraction",
 ]
 
 
@@ -163,7 +188,7 @@ def build_vietnam_case(case_config):
             "loads_kw": loads_kw,
         },
         "ElectricTariff": tariff,
-        "Financial": _financial_inputs(financial),
+        "Financial": _financial_inputs(financial, tariff_config),
         "PV": pv_inputs,
         "ElectricStorage": _storage_inputs(
             technologies.get("storage", {}),
@@ -248,13 +273,33 @@ def _build_tariff(tariff_config):
     )
 
 
-def _financial_inputs(financial):
+def _financial_inputs(financial, tariff_config):
+    """REopt's Financial block, aligned with what the pro forma books.
+
+    REopt.jl defaults the offtaker discount rate to 6.24 percent and, with
+    third_party_ownership false, overrides the owner rate with it, so a case's
+    owner rate never reached the objective; it also defaults 26 percent tax,
+    1.66 percent electricity escalation and 2.5 percent O&M escalation. The
+    pro forma discounts at the owner rate, taxes at the CIT standard rate and
+    escalates at the EVN and O&M rates of the case, so the objective now
+    carries those (same treatment as proforma_thailand/case_builder.py).
+    """
     inputs = {
         "analysis_years": financial.get("analysis_years", DEFAULT_ANALYSIS_YEARS),
     }
     for key in FINANCIAL_PAYLOAD_KEYS:
         if key in financial:
             inputs[key] = financial[key]
+    owner_rate = inputs.setdefault("owner_discount_rate_fraction", DEFAULT_OWNER_DISCOUNT_RATE)
+    inputs["offtaker_discount_rate_fraction"] = owner_rate
+    inputs["owner_tax_rate_fraction"] = TAX_DEFAULTS["cit_standard_rate"]
+    inputs["offtaker_tax_rate_fraction"] = TAX_DEFAULTS["cit_standard_rate"]
+    inputs["elec_cost_escalation_rate_fraction"] = tariff_config.get(
+        "evn_energy_escalation_rate", FINANCIAL_DEFAULTS["evn_energy_escalation_rate"]
+    )
+    inputs["om_cost_escalation_rate_fraction"] = financial.get(
+        "om_escalation_rate", FINANCIAL_DEFAULTS["om_escalation_rate"]
+    )
     return inputs
 
 
@@ -267,6 +312,8 @@ def _pv_inputs(pv_config, site):
     PVWatts fetch, so no irradiance is available).
     """
     pv = _allowlisted(pv_config, PV_PAYLOAD_KEYS)
+    for key, value in PV_INCENTIVE_ZEROES.items():
+        pv.setdefault(key, value)
     if "production_factor_series" in pv:
         return pv, None
     pv_series = pvwatts_client.fetch_pv_series(
@@ -281,6 +328,9 @@ def _pv_inputs(pv_config, site):
 def _storage_inputs(storage_config, esco_contract, dppa_inputs):
     storage = _allowlisted(storage_config, STORAGE_PAYLOAD_KEYS)
     _apply_replacement_policy(storage)
+    if any(storage.get(key) for key in ("max_kw", "max_kwh", "min_kw", "min_kwh")):
+        for key, value in STORAGE_INCENTIVE_ZEROES.items():
+            storage.setdefault(key, value)
     if dppa_inputs is not None and dppa_inputs["type"] != DPPA_TYPE_NONE:
         # Co-located BESS only under DPPA: charges from PV, not from the grid.
         storage["can_grid_charge"] = False
