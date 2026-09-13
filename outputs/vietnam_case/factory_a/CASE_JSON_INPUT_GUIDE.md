@@ -102,7 +102,7 @@ Expected outputs (written into the same folder as `--case`):
 | Field | Example | Meaning |
 | --- | ---: | --- |
 | `financial.analysis_years` | omit | REopt analysis period in years. Omit to use the shared replacement policy horizon (20 years, `proforma_vietnam.defaults.PROJECT_YEARS`), which is also the pro forma horizon; set only for a horizon sensitivity. |
-| `financial.owner_discount_rate_fraction` | `0.1` | Generation owner or ESCO discount rate. `0.1` means 10%. Used by REopt and the Vietnam NPV calculation. |
+| `financial.owner_discount_rate_fraction` | `0.1` | Generation owner or ESCO discount rate. `0.1` means 10%. Used by REopt and the Vietnam NPV calculation. Since 2026-09-13 the builder also sends it as REopt's `offtaker_discount_rate_fraction` (REopt otherwise replaces the owner rate with its 6.24 percent default when `third_party_ownership` is false), the CIT standard rate as both REopt tax rates, `tariff.evn_energy_escalation_rate` as `elec_cost_escalation_rate_fraction`, `financial.om_escalation_rate` as `om_cost_escalation_rate_fraction`, and zero ITC / MACRS on PV and storage (`federal_itc_fraction`, `total_itc_fraction`, `macrs_option_years`, `macrs_bonus_fraction`; an explicit value under `technologies.pv` / `technologies.storage` still wins). REopt's US defaults had been sizing the Vietnam cases at half price. |
 | `financial.debt_fraction` | `0.7` | Share of total project capex funded by debt in the Vietnam ESCO cash flow. `0.7` means 70% debt and 30% equity. |
 | `financial.debt_interest_rate_fraction` | `0.085` | Annual debt interest rate. `0.085` means 8.5%. |
 | `financial.debt_term_years` | `10` | Debt repayment term in years. |

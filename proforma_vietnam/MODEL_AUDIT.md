@@ -490,3 +490,45 @@ brief), tariff (`reoptjl/test/test_thailand_tariff.py`) 14/14. No pinned test
 in any of the three suites changed state, consistent with Task 4 Step 10's
 finding that neither suite covers `calculate_esco_pro_forma_from_reopt_results`
 with an absolute-value assertion on this path.
+
+## 10. 2026-09-13 sizing objective: US incentive defaults removed from the Vietnam solve
+
+Found by the fade-aware sizing probe on the research line
+(`battery-soh-fade`, note `docs/superpowers/notes/2026-09-12-fade-aware-sizing-research.md`
+there). The Vietnam builder sent no incentive or tax fields, so REopt
+optimised with its US defaults: 30 percent ITC and 5-year MACRS with 100
+percent bonus on PV and storage, 26 percent tax, 1.66 percent electricity
+escalation, 2.5 percent O&M escalation, and a 6.24 percent offtaker discount
+rate that, with `third_party_ownership` false, also replaced the owner rate
+the case sent. REopt's own echo showed `initial_capital_costs_after_incentives`
+at 51 percent of `initial_capital_costs`. The pro forma books none of this,
+so the optimiser bought PV and batteries at half price and discounted at 6.24
+percent. The Thailand builder had zeroed all of it since 2026-09-05 (its "C2
+critical"); the Vietnam builder now does the same: owner rate as both
+discount rates, CIT standard rate as both tax rates, the case's EVN energy
+escalation and O&M escalation, zero ITC / MACRS on both technologies (an
+explicit case.json value for an incentive key still wins).
+
+Effect on the kept cases (old = 2026-09-12 solves, new = 2026-09-13; both
+scored by this line's pro forma with the 100 percent year-10 replacement):
+
+| case | PV kW old / new | BESS kW / kWh old / new | capex USD old / new | equity NPV old / new | equity IRR old / new | min DSCR old / new |
+|---|---|---|---|---|---|---|
+| factory_a/case_1 | 4,568 / 3,006 | 1,452 / 5,679 to 461 / 1,825 | 2,990,365 / 1,698,557 | 773,960 / 993,689 | 16.5% / 25.0% | -0.92 / 0.50 |
+| factory_a/case_2 | 5,448 / 2,829 | 1,611 / 9,461 to 306 / 1,451 | 3,879,459 / 1,556,569 | 262,548 / 559,066 | 11.6% / 18.9% | -1.68 / 0.44 |
+| factory_a/case_3 | 4,649 / 1,804 | 1,258 / 7,822 to 412 / 1,457 | 3,270,852 / 1,073,495 | -177,968 / 308,612 | 8.7% / 16.9% | -1.74 / -0.22 |
+| factory_a/case_4 | 3,243 / 2,436 | 0 / 0 to 0 / 0 | 1,556,758 / 1,169,156 | 440,925 / 529,270 | 16.8% / 21.1% | 1.17 / 1.33 |
+| factory_a/case_5 | 5,448 / 2,829 | 1,611 / 9,461 to 306 / 1,451 | 3,879,459 / 1,556,569 | 759,543 / 1,137,682 | 14.8% / 28.4% | -1.51 / 0.91 |
+| factory_a/case_6 | 5,914 / 5,914 | 592 / 1,184 to 592 / 1,184 | 3,028,160 / 3,028,160 | 1,929,382 / 1,929,343 | 25.7% / 25.7% | 1.38 / 1.38 |
+| bess_arbitrage_5mw | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 3,436,606 / 3,436,606 | 54.3% / 54.3% | -6.13 / -6.13 |
+| bess_arbitrage_5mw_mfg | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 578,999 / 578,999 | 18.1% / 18.1% | -7.29 / -7.29 |
+
+The ESCO cases lose 45 to 60 percent of their PV and 70 to 85 percent of
+their battery and gain 200,000 to 490,000 USD of equity NPV; case_3 turns
+positive. The pinned cases (case_6, the two arbitrage cases) keep their
+sizes and, with the incentives never reaching the pro forma, their numbers.
+The Vietnam runner also gained the Thailand runner's completeness guard
+(`_is_complete`): `process_results` saves the status before the output
+sections, and case_4's first re-solve was written from inside that window.
+Memo, decks and the negotiation sweep outputs that quote the old Vietnam
+sizes are stale until reissued.

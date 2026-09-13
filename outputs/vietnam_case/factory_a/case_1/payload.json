@@ -17541,7 +17541,12 @@
   },
   "Financial": {
     "analysis_years": 20,
-    "owner_discount_rate_fraction": 0.1
+    "owner_discount_rate_fraction": 0.1,
+    "offtaker_discount_rate_fraction": 0.1,
+    "owner_tax_rate_fraction": 0.2,
+    "offtaker_tax_rate_fraction": 0.2,
+    "elec_cost_escalation_rate_fraction": 0.04,
+    "om_cost_escalation_rate_fraction": 0.03
   },
   "PV": {
     "min_kw": 0,
@@ -17549,6 +17554,9 @@
     "installed_cost_per_kw": 480,
     "om_cost_per_kw": 6,
     "degradation_fraction": 0.005,
+    "federal_itc_fraction": 0.0,
+    "macrs_option_years": 0,
+    "macrs_bonus_fraction": 0.0,
     "production_factor_series": [
       0.0,
       0.0,
@@ -26325,6 +26333,9 @@
     "replace_cost_per_kwh": 120.0,
     "inverter_replacement_year": 10,
     "battery_replacement_year": 10,
+    "total_itc_fraction": 0.0,
+    "macrs_option_years": 0,
+    "macrs_bonus_fraction": 0.0,
     "can_grid_charge": false
   }
 }

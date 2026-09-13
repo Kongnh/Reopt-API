@@ -1,3 +1,64 @@
+# 2026-09-13 - Handoff: Vietnam objective aligned with the pro forma (port from the research line)
+
+Ruling (user, 2026-09-13 morning): implement the four recommendations of the
+research line's sizing note; this one is the only change that belongs on
+`master`. Layout since 2026-09-12: this tree is `master` (the Rofu / Keen
+deliverable line, 100 percent year-10 replacement); the research line
+`battery-soh-fade` lives in the worktree `../REopt_API-soh` with its own Julia
+server on port 8082. Never merged; findings are ported as their own change.
+
+## What changed
+
+- `proforma_vietnam/case_builder.py`: REopt.jl had been filling the fields
+  the Vietnam builder left out with US defaults (30 percent ITC, 5-year MACRS
+  with 100 percent bonus on PV and storage, 26 percent tax, 1.66 / 2.5
+  percent escalations, and a 6.24 percent offtaker discount rate that also
+  replaced the owner rate the case sent). The builder now sends the owner
+  rate as both discount rates, the CIT standard rate as both tax rates, the
+  case's EVN energy escalation and O&M escalation, and zero incentives on
+  both technologies, as the Thailand builder has since 2026-09-05. Tests:
+  `ObjectiveAlignmentTests`. MODEL_AUDIT section 10; the input guide's
+  `financial.owner_discount_rate_fraction` row.
+- `proforma_vietnam/run_case.py`: the Thailand runner's `_is_complete` guard
+  (`process_results` saves the status before the output sections; case_4's
+  first re-solve was written from inside that window with no PV block and a
+  zero-size workbook, re-fetched by uuid and rebuilt).
+- The eight Vietnam cases re-solved through Django (8000), workbooks rebuilt
+  by `run_case`, superseded workbooks removed, Excel COM tie-out ALL CHECKS
+  PASS on all eight, baselines regenerated for the eight, gate 0 on all
+  fourteen (the six Thailand cases untouched).
+
+## Reconcile (old = 2026-09-12 solves at ac68e5cb, new = aligned; both scored here)
+
+| case | PV kW old / new | BESS kW / kWh old / new | capex USD old / new | equity NPV old / new | equity IRR old / new | min DSCR old / new |
+|---|---|---|---|---|---|---|
+| factory_a/case_1 | 4,568 / 3,006 | 1,452 / 5,679 to 461 / 1,825 | 2,990,365 / 1,698,557 | 773,960 / 993,689 | 16.5% / 25.0% | -0.92 / 0.50 |
+| factory_a/case_2 | 5,448 / 2,829 | 1,611 / 9,461 to 306 / 1,451 | 3,879,459 / 1,556,569 | 262,548 / 559,066 | 11.6% / 18.9% | -1.68 / 0.44 |
+| factory_a/case_3 | 4,649 / 1,804 | 1,258 / 7,822 to 412 / 1,457 | 3,270,852 / 1,073,495 | -177,968 / 308,612 | 8.7% / 16.9% | -1.74 / -0.22 |
+| factory_a/case_4 | 3,243 / 2,436 | 0 / 0 to 0 / 0 | 1,556,758 / 1,169,156 | 440,925 / 529,270 | 16.8% / 21.1% | 1.17 / 1.33 |
+| factory_a/case_5 | 5,448 / 2,829 | 1,611 / 9,461 to 306 / 1,451 | 3,879,459 / 1,556,569 | 759,543 / 1,137,682 | 14.8% / 28.4% | -1.51 / 0.91 |
+| factory_a/case_6 | 5,914 / 5,914 | 592 / 1,184 to 592 / 1,184 | 3,028,160 / 3,028,160 | 1,929,382 / 1,929,343 | 25.7% / 25.7% | 1.38 / 1.38 |
+| bess_arbitrage_5mw | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 3,436,606 / 3,436,606 | 54.3% / 54.3% | -6.13 / -6.13 |
+| bess_arbitrage_5mw_mfg | 0 / 0 | 5,000 / 25,000 to 5,000 / 25,000 | 3,400,000 / 3,400,000 | 578,999 / 578,999 | 18.1% / 18.1% | -7.29 / -7.29 |
+
+The ESCO cases lose 45 to 60 percent of their PV and 70 to 85 percent of
+their battery and gain 200,000 to 490,000 USD of equity NPV; case_3 turns
+positive. Pinned cases (case_6, the two arbitrage cases) unchanged. The
+year-10 DSCR cliff of this line's replacement policy is still there.
+
+## Stale
+
+`KEEN_THAILAND_MEMO` is Thailand-only and unaffected. The Vietnam narrative
+decks, `dppa_negotiation` sweep outputs and any memo quoting the old Vietnam
+sizes are stale; reissue is the user's call.
+
+## Housekeeping
+
+- Stray untracked file `outputs/thailand_case/rofu_thailand/case_5/
+  thailand_report_f27e1bf5-...xlsx` (the research line's workbook Excel held
+  open when the tree switched): close Excel, delete.
+- Not pushed by me.
+
 # 2026-09-12 - Handoff: replacement policy sync, both branches, 20 years
 
 Executed overnight on the user's instruction to write the plan and implement
