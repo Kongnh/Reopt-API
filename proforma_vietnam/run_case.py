@@ -120,10 +120,23 @@ def _poll_results(api_base, run_uuid, poll_seconds, max_polls):
     results_url = _results_url(api_base, run_uuid)
     for _ in range(max_polls):
         body = _get_results_body(results_url)
-        if body.get("status") not in POLLING_STATUSES:
+        if body.get("status") not in POLLING_STATUSES and _is_complete(body):
             return body
         time.sleep(poll_seconds)
     raise TimeoutError(f"Timed out waiting for REopt results for {run_uuid}.")
+
+
+def _is_complete(body):
+    """True when the results document is actually finished being written.
+
+    process_results saves the status before the output sections, so a poll
+    inside that window sees "optimal" with only Financial and ElectricTariff
+    (case_4 on 2026-09-13 was written that way and its workbook carried a
+    zero-size PV). Same guard as proforma_thailand.run_case._is_complete.
+    """
+    if body.get("status") != "optimal":
+        return True
+    return bool(body.get("outputs", {}).get("ElectricLoad"))
 
 
 def _get_results_body(url):

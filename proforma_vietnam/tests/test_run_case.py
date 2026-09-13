@@ -267,6 +267,27 @@ class VietnamRunCasePollTests(TestCase):
 
         self.assertEqual(body, error_body)
 
+    def test_poll_waits_for_the_outputs_after_status_turns_optimal(self):
+        # process_results saves status before the output sections; a poll in
+        # that window sees "optimal" with only Financial and ElectricTariff.
+        partial = {"status": "optimal", "outputs": {"Financial": {}, "ElectricTariff": {}}}
+        complete = {"status": "optimal", "outputs": {"Financial": {}, "ElectricTariff": {},
+                                                     "ElectricLoad": {"load_series_kw": [1.0]}}}
+        bodies = iter([partial, partial, complete])
+
+        with patch("proforma_vietnam.run_case._get_results_body", side_effect=lambda url: next(bodies)):
+            body = _poll_results("http://localhost:8000/v3", "run-uuid", 0, 5)
+
+        self.assertIs(body, complete)
+
+    def test_poll_returns_a_non_optimal_terminal_status_without_outputs(self):
+        infeasible = {"status": "infeasible", "outputs": {}}
+
+        with patch("proforma_vietnam.run_case._get_results_body", return_value=infeasible):
+            body = _poll_results("http://localhost:8000/v3", "run-uuid", 0, 1)
+
+        self.assertIs(body, infeasible)
+
     def test_poll_raises_for_unexpected_http_error_codes(self):
         error = HTTPError(
             url="http://localhost:8000/v3/job/run-uuid/results",
