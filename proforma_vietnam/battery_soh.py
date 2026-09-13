@@ -121,3 +121,23 @@ def battery_state_of_health(*, size_kwh, soc_series_fraction, discharge_series_k
         "year_one_daily_discharge_kwh": sum(discharged_kwh) / DAYS_PER_YEAR,
         "year_one_efc": efc_per_year,
     }
+
+
+def augmentation_cost_by_year(soh_fraction_by_day, size_kwh, price_per_kwh,
+                              price_declination_rate, project_years):
+    """Nominal yearly cost of keeping the capacity at nominal by topping it up.
+
+    Each day's lost capacity (SOH[d-1] - SOH[d], in kWh) is bought at the
+    installed price declining at ``price_declination_rate`` a year, REopt's
+    own augmentation price path (``installed_cost_per_kwh_declination_rate``,
+    ``(1 - r) ** (day / 365)``); the amounts are undiscounted and booked in
+    the year the fade happens, so the cash flow discounts them like any other
+    operating cost. The day index runs from 2 as in REopt's recurrence.
+    """
+    costs = [0.0] * project_years
+    days = min(len(soh_fraction_by_day), project_years * DAYS_PER_YEAR)
+    for day in range(2, days + 1):
+        lost_kwh = (soh_fraction_by_day[day - 2] - soh_fraction_by_day[day - 1]) * size_kwh
+        price = price_per_kwh * (1.0 - price_declination_rate) ** ((day - 1) / DAYS_PER_YEAR)
+        costs[(day - 1) // DAYS_PER_YEAR] += price * lost_kwh
+    return costs

@@ -200,6 +200,8 @@ class PayloadDefaultInheritanceTests(TestCase):
         a = built["assumptions"]
         self.assertIs(a["bess_replacement_enabled"], False)
         self.assertEqual(a["bess_cycle_life_efc"], 8000)
+        self.assertEqual(a["battery_ageing_treatment"], "derate")
+        self.assertEqual(a["bess_augmentation_price_declination_rate"], 0.03)
         self.assertNotIn("battery_replacement_year", a)
         self.assertNotIn("bess_replace_cost_per_kw", a)
         self.assertEqual(a["pv_inverter_replacement_year"], 11)

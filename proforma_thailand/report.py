@@ -56,6 +56,9 @@ PASSTHROUGH_OVERRIDE_KEYS = (
     "pv_inverter_replacement_fraction_of_pv_capex",
     # Battery cycle life for the SOH curve (2026-09-12).
     "bess_cycle_life_efc",
+    # Ageing treatment (2026-09-13): derate | augment, and the top-up price path.
+    "battery_ageing_treatment",
+    "bess_augmentation_price_declination_rate",
 )
 
 

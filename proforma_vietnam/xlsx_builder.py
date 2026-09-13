@@ -8,6 +8,7 @@ from openpyxl.utils import get_column_letter
 from proforma_vietnam import audit_sheets
 from proforma_vietnam import proforma_schema as schema
 from proforma_vietnam.country_profile import VIETNAM_PROFILE
+from proforma_vietnam.defaults import BATTERY_AGEING_AUGMENT
 from proforma_vietnam.dppa_settlement import DPPA_TYPE_GRID_CFD
 
 # Proforma line-item columns (Cash Flow, Tax, Debt, DPPA Annual) and the
@@ -192,7 +193,8 @@ SOH_COLUMNS = [
     ("Cumulative EFC", "efc_cumulative"),
     ("Calendar fade (kWh)", "calendar_fade_kwh"),
     ("Cycle fade (kWh)", "cycle_fade_kwh"),
-    ("Value lost to fade (USD)", "fade_loss_usd"),
+    ("Value lost to fade if derated (USD)", "fade_loss_usd"),
+    ("Augmentation cost if augmented (USD)", "augmentation_cost_usd"),
 ]
 
 BUYER_ANNUAL_COLUMNS = [
@@ -993,6 +995,14 @@ def _write_battery_soh_sheet(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
     first_below = soh.get("first_year_below_end_of_life")
     cycle_life = coefficients.get("cycle_life_efc")
     by_year = {entry["year"]: entry for entry in years}
+    # Treatment (2026-09-13): both figures are shown either way; the sheet
+    # says which one the cash flow books.
+    augment = fade.get("treatment") == BATTERY_AGEING_AUGMENT
+    augmentation_by_year = {
+        year + 1: value
+        for year, value in enumerate(fade.get("augmentation_cost_by_year_usd") or [])
+    }
+    declination = fade.get("augmentation_price_declination_rate") or 0.0
 
     row = 1
     title = worksheet.cell(row=row, column=1, value="Battery state of health")
@@ -1014,11 +1024,21 @@ def _write_battery_soh_sheet(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
             coefficients.get("calendar_fade_coefficient", 0.0),
             coefficients.get("calendar_fade_exponent", 0.0),
         ),
-        "Use: the year-average SOH multiplies the battery's share of the savings on the "
-        "Pro Forma (Audit) sheet (row 'Battery SOH factor'). Energy delivered is assumed to "
-        "scale with capacity, the battery treated as capacity-bound every day: an upper bound "
-        "on the loss. The optimiser does not see this curve; no battery replacement is "
-        "scheduled unless the case opts in.",
+        (
+            "Use: the capacity is kept at nominal by buying the kWh lost each day at the "
+            "installed price declining {:.1%} a year (REopt's own degradation price path); "
+            "the yearly total is the operating cost row 'Battery augmentation' on the Pro "
+            "Forma (Audit) sheet and no savings are derated. The value the derate would "
+            "have removed is shown for comparison. The optimiser does not see this curve; "
+            "no battery replacement is scheduled unless the case opts in.".format(declination)
+            if augment else
+            "Use: the year-average SOH multiplies the battery's share of the savings on the "
+            "Pro Forma (Audit) sheet (row 'Battery SOH factor'). Energy delivered is assumed to "
+            "scale with capacity, the battery treated as capacity-bound every day: an upper bound "
+            "on the loss. The cost of keeping the capacity by augmentation instead is shown for "
+            "comparison. The optimiser does not see this curve; no battery replacement is "
+            "scheduled unless the case opts in."
+        ),
         "Energy attribution: {}. Demand attribution: {}.".format(
             fade.get("energy_attribution"), fade.get("demand_attribution")
         ),
@@ -1055,7 +1075,24 @@ def _write_battery_soh_sheet(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
         soh.get("year_one_daily_discharge_kwh"), FORMAT_AMOUNT,
     )
     result_line(
-        "Value lost to fade over the horizon (USD)", sum(loss_by_year.values()), FORMAT_AMOUNT
+        "Ageing treatment",
+        "augment: capacity kept at nominal, the daily top-up booked as an operating cost"
+        if augment else
+        "derate: the battery's savings are multiplied by the year-average SOH",
+    )
+    result_line(
+        "Value lost to fade over the horizon, {} (USD)".format(
+            "avoided by augmentation" if augment else "booked"),
+        sum(loss_by_year.values()), FORMAT_AMOUNT,
+    )
+    result_line(
+        "Augmentation cost over the horizon, {} (USD)".format("booked" if augment else "not booked"),
+        sum(augmentation_by_year.values()), FORMAT_AMOUNT,
+    )
+    result_line(
+        "Augmentation price (USD/kWh, year 1; declining {:.1f} percent a year)".format(
+            declination * 100),
+        fade.get("augmentation_price_per_kwh_usd"), FORMAT_AMOUNT,
     )
     row += 1
 
@@ -1072,10 +1109,11 @@ def _write_battery_soh_sheet(worksheet, cash_flow_result, profile=VIETNAM_PROFIL
     table = [{
         "year": 0, "soh_end": 1.0, "soh_average": 1.0, "usable_kwh_end": soh.get("size_kwh"),
         "efc_in_year": 0.0, "efc_cumulative": 0.0, "calendar_fade_kwh": 0.0,
-        "cycle_fade_kwh": 0.0, "fade_loss_usd": 0.0,
+        "cycle_fade_kwh": 0.0, "fade_loss_usd": 0.0, "augmentation_cost_usd": 0.0,
     }]
     for entry in years:
-        table.append({**entry, "fade_loss_usd": loss_by_year.get(entry["year"], 0.0)})
+        table.append({**entry, "fade_loss_usd": loss_by_year.get(entry["year"], 0.0),
+                      "augmentation_cost_usd": augmentation_by_year.get(entry["year"], 0.0)})
     for entry in table:
         for column_index, (_header, key) in enumerate(SOH_COLUMNS, start=1):
             cell = worksheet.cell(row=row, column=column_index, value=entry.get(key))

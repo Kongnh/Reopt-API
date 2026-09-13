@@ -2707,6 +2707,67 @@ class BatteryFadeTests(TestCase):
         self.assertEqual(block["soh"], {})
 
 
+class BatteryAugmentTreatmentTests(BatteryFadeTests):
+    """treatment "augment": the battery's savings are not derated; the yearly
+    augmentation cost is an operating cost line instead (2026-09-13)."""
+
+    def _augment(self, **overrides):
+        fade = self._fade(treatment="augment",
+                          augmentation_cost_by_year_vnd=[30.0, 25.0, 20.0],
+                          augmentation_price_per_kwh_vnd=120.0,
+                          augmentation_price_declination_rate=0.03)
+        fade.update(overrides)
+        return fade
+
+    def test_savings_are_not_derated_and_the_augmentation_is_booked(self):
+        base = self._run(None)["annual_cash_flows"]
+        rows = self._run(self._augment(energy_revenue_vnd=1000.0, served_retail_value_vnd=1200.0,
+                                       demand_savings_vnd=200.0))["annual_cash_flows"]
+
+        for year in range(3):
+            self.assertAlmostEqual(rows[year]["esco_energy_revenue_vnd"], base[year]["esco_energy_revenue_vnd"])
+            self.assertAlmostEqual(rows[year]["demand_charge_savings_vnd"], base[year]["demand_charge_savings_vnd"])
+            self.assertAlmostEqual(rows[year]["optimized_evn_bill_vnd"], base[year]["optimized_evn_bill_vnd"])
+            self.assertAlmostEqual(rows[year]["offtaker_savings_vnd"], base[year]["offtaker_savings_vnd"])
+        self.assertEqual([r["battery_augmentation_cost_vnd"] for r in rows], [30.0, 25.0, 20.0])
+        self.assertEqual([r["battery_augmentation_cost_usd"] for r in rows], [30.0, 25.0, 20.0])
+        # CFADS carries the augmentation like O&M
+        for year in range(3):
+            self.assertAlmostEqual(
+                rows[year]["cash_available_for_debt_service_usd"],
+                rows[year]["esco_revenue_usd"] - rows[year]["annual_om_usd"]
+                - rows[year]["replacement_cost_usd"] - rows[year]["battery_augmentation_cost_usd"]
+                - rows[year]["cit_usd"])
+        # the physical curve and the derate-basis loss stay visible
+        self.assertAlmostEqual(rows[1]["battery_soh_fraction"], 0.9)
+        self.assertAlmostEqual(rows[1]["battery_fade_loss_vnd"], 120.0 + 20.0)
+
+    def test_augmentation_replaces_the_derate_in_the_operating_margin(self):
+        derate = self._run(self._fade(energy_revenue_vnd=1000.0, served_retail_value_vnd=1200.0))
+        augment = self._run(self._augment(energy_revenue_vnd=1000.0, served_retail_value_vnd=1200.0))
+        # year 2: the derate took 100 off the ESCO's energy revenue (1000 x 0.1);
+        # augment keeps it and books 25 of augmentation instead.
+        d, a = derate["annual_cash_flows"][1], augment["annual_cash_flows"][1]
+        self.assertAlmostEqual(
+            (a["esco_revenue_vnd"] - a["battery_augmentation_cost_vnd"]) - d["esco_revenue_vnd"],
+            100.0 - 25.0)
+
+    def test_derate_rows_carry_no_augmentation_line(self):
+        rows = self._run(self._fade(served_retail_value_vnd=1200.0))["annual_cash_flows"]
+        self.assertNotIn("battery_augmentation_cost_vnd", rows[0])
+
+    def test_derivation_records_the_treatment(self):
+        block = self._run(self._augment())["derivation"]["battery_fade"]
+        self.assertEqual(block["treatment"], "augment")
+        self.assertEqual(block["augmentation_cost_by_year_usd"], [30.0, 25.0, 20.0])
+        self.assertEqual(block["augmentation_price_per_kwh_usd"], 120.0)
+        self.assertEqual(block["augmentation_price_declination_rate"], 0.03)
+        derate = self._run(self._fade(augmentation_cost_by_year_vnd=[1.0, 1.0, 1.0]))
+        self.assertEqual(derate["derivation"]["battery_fade"]["treatment"], "derate")
+        self.assertEqual(derate["derivation"]["battery_fade"]["augmentation_cost_by_year_usd"], [1.0, 1.0, 1.0])
+        self.assertNotIn("battery_augmentation_cost_vnd", derate["annual_cash_flows"][0])
+
+
 class CitStandardRateTests(TestCase):
     """The CIT rate must be injectable, not read from a Vietnam module global."""
 

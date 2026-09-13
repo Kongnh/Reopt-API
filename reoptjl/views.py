@@ -493,6 +493,7 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         "pv_inverter_replacement_year": "pv_inverter_replacement_year",
         "pv_inverter_replacement_fraction_of_pv_capex": "pv_inverter_replacement_fraction_of_pv_capex",
         "bess_cycle_life_efc": "bess_cycle_life_efc",
+        "bess_augmentation_price_declination_rate": "bess_augmentation_price_declination_rate",
         "demand_savings_esco_share": "esco_demand_savings_share",
     }
 
@@ -521,6 +522,14 @@ def _vietnam_proforma_overrides(request, esco_energy_discount_fraction):
         )
         assumptions["grid_charging_enabled"] = value
         cash_flow_overrides["grid_charging_enabled"] = value
+
+    if "battery_ageing_treatment" in request.GET:
+        # derate | augment (2026-09-13); the pro forma validates the value.
+        treatment = request.GET["battery_ageing_treatment"]
+        if treatment not in ("derate", "augment"):
+            raise ValueError("battery_ageing_treatment must be derate or augment.")
+        assumptions["battery_ageing_treatment"] = treatment
+        cash_flow_overrides["battery_ageing_treatment"] = treatment
 
     if "bess_replacement_enabled" in request.GET:
         # Sheet label only: the replacement series is driven by the REopt

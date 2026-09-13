@@ -1429,6 +1429,31 @@ class ReplacementSwitchInTheBuilderTests(TestCase):
             apply_replacement_policy(
                 self._storage({"cycle_life_efc": 0}), {"installed_cost_per_kw": 80, "max_kwh": 1})
 
+    def test_ageing_treatment_defaults_to_derate_and_is_recorded(self):
+        from proforma_vietnam.case_builder import apply_replacement_policy
+        record = apply_replacement_policy(self._storage(), {"installed_cost_per_kw": 80, "max_kwh": 1})
+        self.assertEqual(record["battery_ageing_treatment"], "derate")
+        self.assertEqual(record["bess_augmentation_price_declination_rate"], 0.03)
+        record = apply_replacement_policy(
+            self._storage({"ageing_treatment": "augment", "augmentation_price_declination_rate": 0.05}),
+            {"installed_cost_per_kw": 80, "max_kwh": 1})
+        self.assertEqual(record["battery_ageing_treatment"], "augment")
+        self.assertEqual(record["bess_augmentation_price_declination_rate"], 0.05)
+        with self.assertRaises(ValueError):
+            apply_replacement_policy(
+                self._storage({"ageing_treatment": "replace"}), {"installed_cost_per_kw": 80, "max_kwh": 1})
+        with self.assertRaises(ValueError):
+            apply_replacement_policy(
+                self._storage({"augmentation_price_declination_rate": 1.5}),
+                {"installed_cost_per_kw": 80, "max_kwh": 1})
+
+    def test_built_case_records_the_ageing_treatment_in_assumptions(self):
+        case = self._case(storage=self._storage({"ageing_treatment": "augment"}))
+        self.assertEqual(case["assumptions"]["battery_ageing_treatment"], "augment")
+        self.assertEqual(case["assumptions"]["bess_augmentation_price_declination_rate"], 0.03)
+        pv_only = self._case(storage=None)
+        self.assertNotIn("battery_ageing_treatment", pv_only["assumptions"])
+
     def test_no_storage_means_no_record(self):
         from proforma_vietnam.case_builder import apply_replacement_policy
         payload = {}

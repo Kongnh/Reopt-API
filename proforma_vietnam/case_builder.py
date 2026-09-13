@@ -3,6 +3,9 @@ from pathlib import Path
 
 from proforma_vietnam import pvwatts_client
 from proforma_vietnam.defaults import (
+    BATTERY_AGEING_TREATMENT,
+    BATTERY_AGEING_TREATMENTS,
+    BESS_AUGMENTATION_PRICE_DECLINATION_RATE,
     BESS_CYCLE_LIFE_EFC,
     BESS_REPLACEMENT_ENABLED,
     BESS_REPLACEMENT_YEAR,
@@ -362,8 +365,9 @@ def apply_replacement_policy(storage_config, storage_payload):
     system, storage inverter and pack, is then replaced in that one year at a
     fraction of the install price actually being sent. Returns the record the
     workbook reads (bess_replacement_enabled and, when enabled, the year and
-    unit prices; the cycle life either way). Empty, and the payload untouched,
-    when the case sends no storage system at all.
+    unit prices; the cycle life, the ageing treatment and the augmentation
+    price declination either way). Empty, and the payload untouched, when the
+    case sends no storage system at all.
     """
     if not any(storage_payload.get(key) for key in ("max_kw", "max_kwh", "min_kw", "min_kwh")):
         return {}
@@ -378,6 +382,25 @@ def apply_replacement_policy(storage_config, storage_payload):
     if isinstance(cycle_life, bool) or not isinstance(cycle_life, (int, float)) or cycle_life <= 0:
         raise ValueError("technologies.storage.cycle_life_efc must be a positive number.")
     record = {"bess_cycle_life_efc": cycle_life}
+    # How the pro forma carries the fade (2026-09-13): derate the battery's
+    # savings by SOH, or keep the capacity by booking the daily top-up.
+    treatment = storage_config.get("ageing_treatment", BATTERY_AGEING_TREATMENT)
+    if treatment not in BATTERY_AGEING_TREATMENTS:
+        raise ValueError(
+            "technologies.storage.ageing_treatment must be one of {}.".format(
+                ", ".join(BATTERY_AGEING_TREATMENTS)
+            )
+        )
+    declination = storage_config.get(
+        "augmentation_price_declination_rate", BESS_AUGMENTATION_PRICE_DECLINATION_RATE
+    )
+    if (isinstance(declination, bool) or not isinstance(declination, (int, float))
+            or not 0 <= declination < 1):
+        raise ValueError(
+            "technologies.storage.augmentation_price_declination_rate must be a fraction in [0, 1)."
+        )
+    record["battery_ageing_treatment"] = treatment
+    record["bess_augmentation_price_declination_rate"] = declination
     replacement = storage_config.get("replacement") or {}
     enabled = bool(replacement.get("enabled", BESS_REPLACEMENT_ENABLED))
     record["bess_replacement_enabled"] = enabled

@@ -1399,6 +1399,62 @@ class BatteryFadeAuditTests(TestCase):
         self.assertEqual(sheet.cell(row=row, column=4).value, fade["soh_by_year"][0])
         self.assertEqual(sheet.cell(row=row, column=5).value, fade["soh_by_year"][1])
 
+    def test_augment_treatment_books_a_cost_row_and_drops_the_soh_terms(self):
+        fade = _fade_block()
+        fade.update(treatment="augment", augmentation_price_per_kwh_vnd=120.0,
+                    augmentation_price_declination_rate=0.03,
+                    augmentation_cost_by_year_vnd=[30.0 - i for i in range(20)])
+        derate = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=_fade_block()), assumptions=FADE_ASSUMPTIONS)
+        augment = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=fade),
+            assumptions={**FADE_ASSUMPTIONS, "battery_ageing_treatment": "augment",
+                         "bess_augmentation_price_declination_rate": 0.03})
+
+        formulas = _year2_formulas(augment)
+        sheet = augment[audit_sheets.PRO_FORMA_SHEET]
+        labels = [sheet.cell(row=r, column=1).value for r in range(1, sheet.max_row + 1)]
+        # the physical curve is still shown, relabelled; no SOH term in the value lines
+        self.assertIn("Battery SOH (year average; capacity kept by augmentation)", labels)
+        self.assertNotIn("Battery SOH factor (year average)", labels)
+        for label in ("ESCO energy revenue (discount-to-EVN)", "Demand charge savings (total)",
+                      "Buyer cost with project", "Grid arbitrage revenue"):
+            for name in ("BESS_ENERGY_REV", "BESS_SERVED_RETAIL", "BESS_UNSERVED_VALUE",
+                         "BESS_DEMAND_SAVINGS", "BESS_MATCHED_SHARE"):
+                self.assertNotIn(name, formulas[label], label)
+        self.assertIn("BASE_SERVED_RETAIL*(1-", formulas["Buyer cost with project"])
+        # the augmentation is a values row in operating costs, inside EBITDA
+        row = _label_row(sheet, "Battery augmentation (capacity maintenance)")
+        self.assertIn(sheet.cell(row=row, column=3).value, (None, 0.0))   # year 0
+        self.assertEqual(sheet.cell(row=row, column=4).value, 30.0)
+        self.assertEqual(sheet.cell(row=row, column=5).value, 29.0)
+        ebitda = _label_row(sheet, "EBITDA")
+        self.assertIn("-E{}".format(row), sheet.cell(row=ebitda, column=5).value)
+        derate_ebitda = derate[audit_sheets.PRO_FORMA_SHEET]
+        self.assertNotIn("augmentation", str(_year2_formulas(derate).get("EBITDA")).lower())
+        self.assertNotIn("Battery augmentation (capacity maintenance)",
+                         [derate_ebitda.cell(row=r, column=1).value
+                          for r in range(1, derate_ebitda.max_row + 1)])
+
+    def test_augment_treatment_is_stated_on_the_assumptions_sheet(self):
+        fade = _fade_block()
+        fade.update(treatment="augment", augmentation_price_per_kwh_vnd=120.0,
+                    augmentation_price_declination_rate=0.03,
+                    augmentation_cost_by_year_vnd=[1.0] * 20)
+        workbook = build_vietnam_esco_workbook(
+            _esco_result(battery_fade=fade),
+            assumptions={**FADE_ASSUMPTIONS, "battery_ageing_treatment": "augment",
+                         "bess_augmentation_price_declination_rate": 0.03})
+        sheet = workbook["Assumptions"]
+        row = _find_row(sheet, "Battery ageing treatment")
+        self.assertEqual(sheet.cell(row=row, column=3).value, "augment")
+        row = _find_row(sheet, "Augmentation price declination")
+        self.assertEqual(sheet.cell(row=row, column=3).value, 0.03)
+        basis = workbook["Model Basis"]
+        text = " ".join(str(basis.cell(row=r, column=c).value or "")
+                        for r in range(1, basis.max_row + 1) for c in (1, 2, 3))
+        self.assertIn("augmentation", text.lower())
+
     def test_dppa_and_physical_use_the_generation_factor(self):
         dppa_result, dppa_inputs = _dppa_result(battery_fade=_fade_block(years=20))
         workbook = build_vietnam_esco_workbook(

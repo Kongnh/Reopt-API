@@ -1101,6 +1101,41 @@ class BatteryFadeInputsTests(TestCase):
         self.assertAlmostEqual(fade["served_retail_value_usd"], 876.0 / 0.5)
         self.assertAlmostEqual(fade["matched_energy_share"], 1.0 / 3.0)
 
+    def test_augment_treatment_books_the_augmentation_and_does_not_derate(self):
+        results = self._results(can_grid_charge=False)
+        results["inputs"]["ElectricStorage"]["installed_cost_per_kwh"] = 150.0
+        derate = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=2)
+        augment = calculate_esco_pro_forma_from_reopt_results(
+            results, esco_energy_discount_fraction=0.9, project_years=2,
+            battery_ageing_treatment="augment",
+            bess_augmentation_price_declination_rate=0.05)
+
+        fade = augment["derivation"]["battery_fade"]
+        self.assertEqual(fade["treatment"], "augment")
+        self.assertEqual(fade["augmentation_price_per_kwh_usd"], 150.0)
+        self.assertEqual(fade["augmentation_price_declination_rate"], 0.05)
+        self.assertEqual(len(fade["augmentation_cost_by_year_usd"]), 2)
+        self.assertGreater(fade["augmentation_cost_by_year_usd"][0], 0.0)
+        rows = augment["annual_cash_flows"]
+        self.assertAlmostEqual(rows[0]["battery_augmentation_cost_usd"],
+                               fade["augmentation_cost_by_year_usd"][0])
+        # savings are not derated in year 2
+        self.assertAlmostEqual(rows[1]["esco_energy_revenue_usd"],
+                               derate["annual_cash_flows"][1]["esco_energy_revenue_usd"]
+                               + derate["annual_cash_flows"][1]["battery_fade_loss_usd"] * 0.9)
+        # the derate run carries the figure for information and no row
+        d_fade = derate["derivation"]["battery_fade"]
+        self.assertEqual(d_fade["treatment"], "derate")
+        self.assertGreater(d_fade["augmentation_cost_by_year_usd"][0], 0.0)
+        self.assertNotIn("battery_augmentation_cost_usd", derate["annual_cash_flows"][0])
+
+    def test_unknown_treatment_is_refused(self):
+        with self.assertRaises(ValueError):
+            calculate_esco_pro_forma_from_reopt_results(
+                self._results(can_grid_charge=False), esco_energy_discount_fraction=0.9,
+                project_years=2, battery_ageing_treatment="replace")
+
     def test_no_battery_means_no_fade_block(self):
         results = self._results(can_grid_charge=False)
         results["outputs"]["ElectricStorage"] = {"size_kw": 0.0, "size_kwh": 0.0}

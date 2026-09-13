@@ -40,6 +40,9 @@ VIETNAM_REPORT_QUERY_KEYS = [
     # replacement flag only labels the Assumptions sheet.
     "bess_cycle_life_efc",
     "bess_replacement_enabled",
+    # Ageing treatment (2026-09-13): derate | augment, and the top-up price path.
+    "battery_ageing_treatment",
+    "bess_augmentation_price_declination_rate",
 ]
 
 

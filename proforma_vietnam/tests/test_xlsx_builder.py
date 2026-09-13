@@ -348,9 +348,10 @@ class BatterySohSheetTests(TestCase):
         header_row = next(
             r for r in range(1, sheet.max_row + 1) if sheet.cell(row=r, column=1).value == "Year"
         )
-        headers = [sheet.cell(row=header_row, column=c).value for c in range(1, 10)]
+        headers = [sheet.cell(row=header_row, column=c).value for c in range(1, 11)]
         self.assertEqual(headers[1], "SOH end of year")
-        self.assertEqual(headers[-1], "Value lost to fade (USD)")
+        self.assertEqual(headers[8], "Value lost to fade if derated (USD)")
+        self.assertEqual(headers[9], "Augmentation cost if augmented (USD)")
         self.assertEqual(sheet.cell(row=header_row + 1, column=1).value, 0)
         self.assertEqual(sheet.cell(row=header_row + 1, column=2).value, 1.0)
         years = len(result["annual_cash_flows"])
@@ -360,7 +361,37 @@ class BatterySohSheetTests(TestCase):
             result["annual_cash_flows"][-1]["battery_fade_loss_usd"],
         )
         # end-of-life reference series for the chart
-        self.assertEqual(sheet.cell(row=header_row + 1, column=10).value, 0.8)
+        self.assertEqual(sheet.cell(row=header_row + 1, column=11).value, 0.8)
+
+    def test_treatment_is_stated_and_both_figures_are_shown(self):
+        from proforma_vietnam.tests.test_audit_sheets import _esco_result, _fade_block
+        derate_fade = _fade_block()
+        derate_fade.update(treatment="derate", augmentation_cost_by_year_vnd=[5.0] * 20,
+                           augmentation_price_per_kwh_vnd=120.0,
+                           augmentation_price_declination_rate=0.03)
+        augment_fade = dict(derate_fade, treatment="augment")
+        derate = build_vietnam_esco_workbook(_esco_result(battery_fade=derate_fade),
+                                             {"bess_cycle_life_efc": 8000})["Battery SOH"]
+        augment = build_vietnam_esco_workbook(_esco_result(battery_fade=augment_fade),
+                                              {"bess_cycle_life_efc": 8000})["Battery SOH"]
+
+        def labels(sheet):
+            return {str(sheet.cell(row=r, column=1).value): sheet.cell(row=r, column=2).value
+                    for r in range(1, sheet.max_row + 1)}
+
+        d, a = labels(derate), labels(augment)
+        self.assertEqual(d["Ageing treatment"], "derate: the battery's savings are multiplied by the year-average SOH")
+        self.assertEqual(a["Ageing treatment"], "augment: capacity kept at nominal, the daily top-up booked as an operating cost")
+        self.assertAlmostEqual(d["Augmentation cost over the horizon, not booked (USD)"], 100.0)
+        self.assertAlmostEqual(a["Augmentation cost over the horizon, booked (USD)"], 100.0)
+        self.assertIn("Value lost to fade over the horizon, booked (USD)", d)
+        self.assertIn("Value lost to fade over the horizon, avoided by augmentation (USD)", a)
+        self.assertAlmostEqual(d["Augmentation price (USD/kWh, year 1; declining 3.0 percent a year)"], 120.0)
+        header_row = next(
+            r for r in range(1, augment.max_row + 1) if augment.cell(row=r, column=1).value == "Year"
+        )
+        self.assertEqual(augment.cell(row=header_row + 2, column=10).value, 5.0)
+        self.assertEqual(augment.cell(row=header_row + 1, column=10).value, 0.0)
 
     def test_key_results_block(self):
         faded = build_vietnam_esco_workbook(self._with_fade(), {"bess_cycle_life_efc": 8000})

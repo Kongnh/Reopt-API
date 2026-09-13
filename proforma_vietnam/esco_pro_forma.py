@@ -1,6 +1,13 @@
-from proforma_vietnam.battery_soh import DAYS_PER_YEAR, battery_state_of_health
+from proforma_vietnam.battery_soh import (
+    DAYS_PER_YEAR,
+    augmentation_cost_by_year,
+    battery_state_of_health,
+)
 from proforma_vietnam.cash_flow import DEFAULT_PROJECT_YEARS, calculate_vietnam_esco_cash_flow
 from proforma_vietnam.defaults import (
+    BATTERY_AGEING_TREATMENT,
+    BATTERY_AGEING_TREATMENTS,
+    BESS_AUGMENTATION_PRICE_DECLINATION_RATE,
     BESS_CYCLE_LIFE_EFC,
     SURPLUS_EXPORT_DEFAULTS,
     surplus_export_price_vnd_per_kwh,
@@ -37,6 +44,16 @@ def calculate_esco_pro_forma_from_reopt_results(
         "pv_inverter_replacement_fraction_of_pv_capex", None
     )
     bess_cycle_life_efc = cash_flow_overrides.pop("bess_cycle_life_efc", BESS_CYCLE_LIFE_EFC)
+    battery_ageing_treatment = cash_flow_overrides.pop(
+        "battery_ageing_treatment", BATTERY_AGEING_TREATMENT
+    )
+    if battery_ageing_treatment not in BATTERY_AGEING_TREATMENTS:
+        raise ValueError(
+            "battery_ageing_treatment must be one of {}.".format(", ".join(BATTERY_AGEING_TREATMENTS))
+        )
+    augmentation_price_declination_rate = cash_flow_overrides.pop(
+        "bess_augmentation_price_declination_rate", BESS_AUGMENTATION_PRICE_DECLINATION_RATE
+    )
     inputs = reopt_results.get("inputs", {})
     outputs = reopt_results.get("outputs", {})
 
@@ -265,6 +282,7 @@ def calculate_esco_pro_forma_from_reopt_results(
     # from the solved dispatch and the year-1 battery quantities it derates.
     # Absent when the solve has no battery, which leaves the cash flow as it was.
     battery_fade = _battery_fade_inputs(
+        storage_inputs=storage_inputs,
         storage_outputs=storage_outputs,
         utility_outputs=utility_outputs,
         pv_outputs=pv_outputs,
@@ -281,6 +299,8 @@ def calculate_esco_pro_forma_from_reopt_results(
         time_steps_per_hour=cash_flow_inputs.get("time_steps_per_hour", 1),
         project_years=cash_flow_inputs.get("project_years", DEFAULT_PROJECT_YEARS),
         cycle_life_efc=bess_cycle_life_efc,
+        ageing_treatment=battery_ageing_treatment,
+        augmentation_price_declination_rate=augmentation_price_declination_rate,
         exchange_rate_vnd_per_usd=exchange_rate_vnd_per_usd,
         reopt_money_values_currency=tariff_money_values_currency,
     )
@@ -597,11 +617,12 @@ def _pv_inverter_replacement(pv_outputs, year, fraction):
     return {"year": int(year), "fraction": fraction, "cost": cost, "series": series}
 
 
-def _battery_fade_inputs(*, storage_outputs, utility_outputs, pv_outputs, load_series,
-                         tariff_inputs, rates, served_kwh, storage_in_served,
+def _battery_fade_inputs(*, storage_inputs, storage_outputs, utility_outputs, pv_outputs,
+                         load_series, tariff_inputs, rates, served_kwh, storage_in_served,
                          direct_ownership_enabled, battery_only, esco_energy_discount_fraction,
                          levelization_factor, time_steps_per_hour, project_years,
-                         cycle_life_efc, exchange_rate_vnd_per_usd, reopt_money_values_currency):
+                         cycle_life_efc, ageing_treatment, augmentation_price_declination_rate,
+                         exchange_rate_vnd_per_usd, reopt_money_values_currency):
     """Year-1 battery quantities the cash flow derates by state of health.
 
     Storage series are de-levelized like project_served_pv_kwh; grid charging
@@ -635,8 +656,22 @@ def _battery_fade_inputs(*, storage_outputs, utility_outputs, pv_outputs, load_s
     discharge_value = sum(kw * rate for kw, rate in zip(discharge, rates)) / time_steps_per_hour
     grid_to_storage = _series(utility_outputs.get("electric_to_storage_series_kw"))
     charge_cost = sum(kw * rate for kw, rate in zip(grid_to_storage, rates)) / time_steps_per_hour
+    # Augmentation price path (2026-09-13): the installed USD/kWh declining a
+    # fixed rate a year, REopt's own; the series is booked under "augment"
+    # and reported under "derate".
+    augmentation_price = _money(
+        _value(storage_inputs, "installed_cost_per_kwh"),
+        exchange_rate_vnd_per_usd, reopt_money_values_currency,
+    )
     fade = {
         "soh_by_year": soh["soh_average_by_year"],
+        "treatment": ageing_treatment,
+        "augmentation_price_per_kwh_vnd": augmentation_price,
+        "augmentation_price_declination_rate": augmentation_price_declination_rate,
+        "augmentation_cost_by_year_vnd": augmentation_cost_by_year(
+            soh["soh_fraction_by_day"], size_kwh, augmentation_price,
+            augmentation_price_declination_rate, project_years,
+        ),
         "energy_revenue_vnd": 0.0,
         "served_retail_value_vnd": 0.0,
         "unserved_energy_value_vnd": 0.0,

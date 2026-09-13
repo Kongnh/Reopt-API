@@ -505,6 +505,27 @@ period (all opt-out by overriding the relevant input):
 - **Vietnam CIT**: 4-year exemption + 9-year 50 percent reduction counted
   from the first profitable year (no later than year 4, Circular 78/2014
   Art. 18), with 5-year tax-loss carryforward (Art. 9).
+- **Battery ageing treatment (2026-09-13)**: `technologies.storage.ageing_treatment`
+  selects how the curve reaches the cash flow. `derate` is the state-of-health bullet above.
+  `augment` keeps the capacity at nominal: `battery_soh.augmentation_cost_by_year`
+  prices each day's lost kWh at the installed USD/kWh sent to REopt declining
+  `bess_augmentation_price_declination_rate` a year (0.03; REopt's own
+  degradation price path) and the yearly total is the row
+  `battery_augmentation_cost_*`, subtracted in net operating revenue and CFADS
+  and deductible; no savings are derated, the physical SOH stays on the rows
+  as `battery_soh_fraction` and `battery_fade_loss_*` becomes the value the
+  augmentation avoids. The audit sheet carries the SOH terms only under
+  derate and an augmentation values row inside EBITDA under augment; the
+  Battery SOH sheet shows both figures either way. The probe of 2026-09-12
+  found augmentation at 25 to 38 percent of the derate's present worth on
+  the kept cases; `derate` stays the default until a vendor
+  capacity-maintenance price is in hand.
+- **Sizing standard (2026-09-13)**: the ageing-blind REopt solve with the
+  objective aligned to the pro forma (zero ITC / MACRS, owner rate as both
+  discount rates, CIT as both tax rates, EVN and O&M escalations) sizes the
+  battery; on the derated NPV that size sits on the flat top of the curve on
+  every case probed, so `model_degradation` is a consistency check, not a
+  sizing input. `tools/fade_sizing_probe.py` is the check for a new project.
 
 ### Cash-Flow Attribution
 

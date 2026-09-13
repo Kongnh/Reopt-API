@@ -7,7 +7,11 @@ from the run's CountryProfile (see proforma_vietnam/country_profile.py), and
 every emitted assumptions block carries an explicit ``local_currency_code``.
 """
 
-from proforma_vietnam.defaults import FINANCIAL_DEFAULTS
+from proforma_vietnam.defaults import (
+    BATTERY_AGEING_AUGMENT,
+    BATTERY_AGEING_DERATE,
+    FINANCIAL_DEFAULTS,
+)
 from proforma_vietnam.structures import (
     DIRECT_OWNERSHIP,
     DPPA,
@@ -303,11 +307,21 @@ def calculate_vietnam_esco_cash_flow(
         # The generator's energy line is the settlement, not a discount on
         # served kWh; the battery share rides on the generation multiplier.
         bess_energy_revenue_vnd = 0.0
+    # Treatment (2026-09-13): under "derate" the year's SOH multiplies the
+    # battery's savings; under "augment" the capacity is kept at nominal by
+    # booking the daily top-up as an operating cost, so the multiplier is 1
+    # and the physical curve is reported only.
+    ageing_treatment = fade.get("treatment") or BATTERY_AGEING_DERATE
+    augment = ageing_treatment == BATTERY_AGEING_AUGMENT
+    augmentation_by_year = list(fade.get("augmentation_cost_by_year_vnd") or [])
 
-    def _soh_multiplier(year_index):
+    def _soh_physical(year_index):
         if year_index < len(soh_by_year):
             return soh_by_year[year_index]
         return 1.0
+
+    def _soh_multiplier(year_index):
+        return 1.0 if augment else _soh_physical(year_index)
 
     def _served_repurchase(degradation_multiplier, soh_multiplier):
         # Retail value of served energy lost to PV degradation and to battery
@@ -361,6 +375,9 @@ def calculate_vietnam_esco_cash_flow(
         )
         replacement_cost_vnd = _value_for_year(replacement_costs_by_year, year_index)
         annual_om_year_vnd = annual_om_vnd * (1 + om_escalation_rate) ** year_index
+        augmentation_cost_vnd = (
+            _value_for_year(augmentation_by_year, year_index) if augment else 0.0
+        )
 
         dppa_year = _dppa_year_terms(
             dppa_settlement, year_index, energy_multiplier, generation_multiplier
@@ -417,6 +434,7 @@ def calculate_vietnam_esco_cash_flow(
             esco_revenue_vnd
             - annual_om_year_vnd
             - replacement_cost_vnd
+            - augmentation_cost_vnd
         )
 
         row = {
@@ -430,6 +448,8 @@ def calculate_vietnam_esco_cash_flow(
             "annual_om_vnd": annual_om_year_vnd,
             "replacement_cost_vnd": replacement_cost_vnd,
         }
+        if augment:
+            row["battery_augmentation_cost_vnd"] = augmentation_cost_vnd
         if surplus_enabled:
             row["surplus_export_kwh"] = surplus_export_kwh
             row["surplus_export_revenue_vnd"] = surplus_export_revenue_vnd
@@ -446,24 +466,29 @@ def calculate_vietnam_esco_cash_flow(
         if dppa_year is not None:
             row.update(dppa_year)
         if battery_fade is not None:
-            # Project-level value lost to fade this year (informational: the
-            # Battery SOH sheet shows it; it is already inside the lines above).
+            # Project-level value lost to fade this year on the derate basis
+            # (informational: the Battery SOH sheet shows it; under derate it
+            # is already inside the lines above, under augment it is what the
+            # augmentation avoids).
+            soh_physical = _soh_physical(year_index)
             if structure == DPPA:
                 matched_retail_vnd = dppa_settlement["year_one"].get("matched_retail_value_vnd", 0.0)
                 energy_loss_vnd = (
-                    matched_retail_vnd * bess_matched_share * (1 - soh_multiplier) * energy_multiplier
+                    matched_retail_vnd * bess_matched_share * (1 - soh_physical) * energy_multiplier
                 )
             elif structure == PHYSICAL_DPPA:
                 energy_loss_vnd = (
-                    base_energy_revenue_vnd * bess_matched_share * (1 - soh_multiplier) * ppa_multiplier
+                    base_energy_revenue_vnd * bess_matched_share * (1 - soh_physical) * ppa_multiplier
                 )
             else:
                 energy_loss_vnd = (
                     (bess_served_retail_vnd + bess_unserved_value_vnd)
-                    * (1 - soh_multiplier) * energy_multiplier
+                    * (1 - soh_physical) * energy_multiplier
                 )
-            row["battery_soh_fraction"] = soh_multiplier
-            row["battery_fade_loss_vnd"] = energy_loss_vnd + lost_demand_relief_vnd
+            row["battery_soh_fraction"] = soh_physical
+            row["battery_fade_loss_vnd"] = energy_loss_vnd + (
+                bess_demand_savings_vnd * (1 - soh_physical) * capacity_multiplier
+            )
         preliminary_rows.append(row)
         net_operating_revenue_by_year.append(net_operating_revenue_vnd)
 
@@ -731,6 +756,7 @@ def calculate_vietnam_esco_cash_flow(
             row["esco_revenue_vnd"]
             - row["annual_om_vnd"]
             - row["replacement_cost_vnd"]
+            - row.get("battery_augmentation_cost_vnd", 0.0)
             - cit_by_year[year_index]
         )
         equity_cash_flow_vnd = cash_available_for_debt_service_vnd - debt_service_vnd
@@ -955,6 +981,10 @@ def calculate_vietnam_esco_cash_flow(
             "energy_attribution": fade.get("energy_attribution"),
             "demand_attribution": fade.get("demand_attribution"),
             "soh": fade.get("soh"),
+            "treatment": ageing_treatment,
+            "augmentation_cost_by_year_usd": augmentation_by_year,
+            "augmentation_price_per_kwh_usd": fade.get("augmentation_price_per_kwh_vnd"),
+            "augmentation_price_declination_rate": fade.get("augmentation_price_declination_rate"),
         }
     if debt_currency == "USD":
         # USD-denominated debt: the debt schedule / IDC / DSCR / tax deduction

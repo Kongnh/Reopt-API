@@ -3,6 +3,7 @@ from pathlib import Path
 from unittest import TestCase
 
 from proforma_vietnam.battery_soh import (
+    augmentation_cost_by_year,
     battery_state_of_health,
     cycle_fade_coefficient_from_life,
 )
@@ -125,3 +126,26 @@ class RecurrencePropertyTests(TestCase):
             battery_state_of_health(
                 size_kwh=10, soc_series_fraction=[0.5] * 24, discharge_series_kw=[1.0] * 24,
                 time_steps_per_hour=1, project_years=1)
+
+
+class AugmentationCostTests(TestCase):
+    """Nominal cost of topping the capacity up, year by year, REopt's price path."""
+
+    def test_zero_fade_costs_nothing(self):
+        cost = augmentation_cost_by_year([1.0] * (2 * 365), 1000.0, 120.0, 0.03, 2)
+        self.assertEqual(cost, [0.0, 0.0])
+
+    def test_constant_daily_fade_is_priced_at_the_declining_installed_price(self):
+        days = 2 * 365
+        soh = [1.0 - 0.0001 * d for d in range(days)]   # 0.1 kWh a day on 1,000 kWh
+        cost = augmentation_cost_by_year(soh, 1000.0, 120.0, 0.03, 2)
+        # Day d (1-based, from 2) loses 0.1 kWh priced at 120 * 0.97 ** ((d - 1) / 365).
+        expected_year_1 = sum(0.1 * 120.0 * 0.97 ** ((d - 1) / 365) for d in range(2, 366))
+        expected_year_2 = sum(0.1 * 120.0 * 0.97 ** ((d - 1) / 365) for d in range(366, days + 1))
+        self.assertAlmostEqual(cost[0], expected_year_1, places=6)
+        self.assertAlmostEqual(cost[1], expected_year_2, places=6)
+        self.assertLess(cost[1], cost[0])
+
+    def test_series_length_follows_project_years(self):
+        cost = augmentation_cost_by_year([1.0] * (3 * 365), 500.0, 150.0, 0.0, 3)
+        self.assertEqual(len(cost), 3)

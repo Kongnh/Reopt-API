@@ -40,6 +40,16 @@ BESS_CYCLE_LIFE_EFC = 8000
 BESS_END_OF_LIFE_SOH = 0.80
 BESS_CALENDAR_FADE_COEFFICIENT = 1.16e-3
 BESS_CALENDAR_FADE_EXPONENT = 0.428
+# How the pro forma carries the fade (2026-09-13): "derate" multiplies the
+# battery's savings by the year-average SOH; "augment" keeps the capacity by
+# booking the daily top-up at the installed USD/kWh, declining at this rate
+# a year (REopt's degradation model prices it the same way; its default is
+# 5 percent, 3 is the conservative LFP price path used here).
+BATTERY_AGEING_DERATE = "derate"
+BATTERY_AGEING_AUGMENT = "augment"
+BATTERY_AGEING_TREATMENTS = (BATTERY_AGEING_DERATE, BATTERY_AGEING_AUGMENT)
+BATTERY_AGEING_TREATMENT = BATTERY_AGEING_DERATE
+BESS_AUGMENTATION_PRICE_DECLINATION_RATE = 0.03
 
 def _assert_policy_holds():
     if FINANCIAL_DEFAULTS["project_years"] != PROJECT_YEARS:

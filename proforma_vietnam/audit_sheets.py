@@ -34,6 +34,7 @@ from openpyxl.workbook.defined_name import DefinedName
 
 from proforma_vietnam.cash_flow import DEFAULT_PROJECT_YEARS, calculate_fx_sensitivity
 from proforma_vietnam.country_profile import VIETNAM_PROFILE
+from proforma_vietnam.defaults import BATTERY_AGEING_AUGMENT
 from proforma_vietnam.dppa_settlement import (
     DPPA_TYPE_GRID_CFD,
     DPPA_TYPE_PHYSICAL_PRIVATE_WIRE,
@@ -414,6 +415,21 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
                          "technologies.storage.cycle_life_efc overrides (sets the SOH cycle "
                          "fade: (1 - 0.80) / cycle life per kWh discharged)",
                   name="BESS_CYCLE_LIFE", fmt="#,##0")
+        if assumptions.get("battery_ageing_treatment") is not None:
+            treatment = assumptions["battery_ageing_treatment"]
+            entry("Battery ageing treatment", treatment,
+                  source="case.json technologies.storage.ageing_treatment (2026-09-13): "
+                         "derate multiplies the battery's savings by the year's SOH; augment "
+                         "keeps the capacity at nominal and books the daily top-up as an "
+                         "operating cost (Pro Forma row 'Battery augmentation')")
+            entry("Augmentation price declination",
+                  assumptions.get("bess_augmentation_price_declination_rate"),
+                  unit="per year",
+                  source="proforma_vietnam.defaults BESS_AUGMENTATION_PRICE_DECLINATION_RATE "
+                         "unless technologies.storage.augmentation_price_declination_rate; "
+                         "the top-up is priced at the installed USD/kWh sent to REopt times "
+                         "(1 - rate)^(day/365), REopt's own degradation price path",
+                  fmt=FMT_PERCENT)
         if assumptions.get("battery_replacement_year"):
             entry("BESS replacement year (storage inverter and pack together)",
                   assumptions["battery_replacement_year"], unit="year",
@@ -1159,8 +1175,16 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     # Every formula below keeps its exact pre-fade text when there is no
     # block, so workbooks without a battery are unchanged.
     fade = d.get("battery_fade")
-    has_fade = bool(fade)
+    # Treatment (2026-09-13): the SOH terms enter the value formulas only
+    # under "derate"; under "augment" the curve is shown for information and
+    # the capacity top-up is an operating cost row below.
+    has_augment = bool(fade) and fade.get("treatment") == BATTERY_AGEING_AUGMENT
+    has_fade = bool(fade) and not has_augment
     r_fac_gen = r_fac_deg
+    if has_augment:
+        w.line(
+            "soh_info", "Battery SOH (year average; capacity kept by augmentation)", "index",
+            y0=1.0, values=[1.0] + list(fade["soh_by_year"]), fill=INPUT_FILL, fmt=FMT_FACTOR)
     if has_fade:
         r_fac_soh = w.line(
             "fac_soh", "Battery SOH factor (year average)", "index",
@@ -1323,9 +1347,18 @@ def write_pro_forma_audit_sheet(worksheet, cash_flow_result, assumptions,
     r_repl = w.line(
         "repl", "Equipment replacement (engine schedule)", "USD",
         values=replacement_by_year[:years + 1], fill=INPUT_FILL)
-    r_ebitda = w.line(
-        "ebitda", "EBITDA", "USD",
-        formula=lambda y, c: f"={c}{r_revenue}-{c}{r_om}-{c}{r_repl}", bold=True)
+    if has_augment:
+        augmentation = [0.0] + list(fade.get("augmentation_cost_by_year_usd") or []) + [0.0] * years
+        r_aug = w.line(
+            "aug", "Battery augmentation (capacity maintenance)", "USD",
+            values=augmentation[:years + 1], fill=INPUT_FILL)
+        r_ebitda = w.line(
+            "ebitda", "EBITDA", "USD",
+            formula=lambda y, c: f"={c}{r_revenue}-{c}{r_om}-{c}{r_repl}-{c}{r_aug}", bold=True)
+    else:
+        r_ebitda = w.line(
+            "ebitda", "EBITDA", "USD",
+            formula=lambda y, c: f"={c}{r_revenue}-{c}{r_om}-{c}{r_repl}", bold=True)
     w.skip()
 
     # --- debt ---------------------------------------------------------------
@@ -2238,16 +2271,30 @@ def _battery_fade_bullets(assumptions, derivation):
         or (assumptions or {}).get("bess_cycle_life_efc")
     )
     cycles = "{:,.0f}".format(cycle_life) if cycle_life else "the configured"
-    return [
+    curve = (
         "Battery state of health: REopt.jl v0.57.0's daily fade recurrence (calendar fade on "
         "the average stored energy, cycle fade on the energy discharged) replayed over the "
         "horizon on the solved year-1 dispatch, with the hours-per-time-step factor removed "
         "so 15 minute and hourly solves age alike. Cycle life {} EFC to 80 percent sets the "
-        "cycle coefficient. The battery's share of energy revenue, retail repurchase, demand "
-        "relief and grid arbitrage is multiplied by the year's average SOH; energy delivered "
-        "is assumed to scale with capacity (the battery treated as capacity-bound every day), "
-        "an upper bound on the loss. The optimiser does not see the curve. See the Battery "
-        "SOH sheet.".format(cycles)
+        "cycle coefficient. ".format(cycles)
+    )
+    if fade.get("treatment") == BATTERY_AGEING_AUGMENT:
+        rate = fade.get("augmentation_price_declination_rate") or 0.0
+        return [
+            curve + "Treatment: augmentation. The capacity is kept at nominal by buying the "
+            "kWh lost each day at the installed USD/kWh sent to REopt, declining {:.0%} a "
+            "year (REopt's own degradation price path); the yearly total is the operating "
+            "cost row 'Battery augmentation', expensed and deductible, and no savings are "
+            "derated. The value the derate would have removed is shown on the Battery SOH "
+            "sheet for comparison. The optimiser does not see the curve.".format(rate)
+        ]
+    return [
+        curve + "Treatment: derate. The battery's share of energy revenue, retail "
+        "repurchase, demand relief and grid arbitrage is multiplied by the year's average "
+        "SOH; energy delivered is assumed to scale with capacity (the battery treated as "
+        "capacity-bound every day), an upper bound on the loss. The cost of keeping the "
+        "capacity by augmentation instead is shown on the Battery SOH sheet for comparison. "
+        "The optimiser does not see the curve. See the Battery SOH sheet."
     ]
 
 
