@@ -49,6 +49,14 @@ Julia for research on 8082 (`docker start julia_api_soh`).
 - Vietnam narrative decks and the negotiation sweep outputs are stale on
   both lines.
 
+## 2026-09-15 close
+
+The Rofu feasibility deck (`Rofu_Thailand_Solar_Storage_Feasibility.pptx` and
+the PDF handout, with `deck_source/`) was built on `master` from the memo and
+the six Thailand case records there; nothing on this line changed. Both
+branches were pushed to `origin` at the close of the session. The open items
+above stand.
+
 # 2026-09-13 (overnight handoff) - Permanent worktree; fade-aware sizing research (A + D)
 
 Research line only. Ruling 2026-09-12 22:30 (user, before sleeping): the
