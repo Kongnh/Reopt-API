@@ -1,3 +1,57 @@
+# 2026-09-15 - Handoff: Rofu feasibility deck; both lines pushed; session closed
+
+Ruling (user, 2026-09-15): build the Rofu feasibility presentation from the
+`master` results, push both branches, write the handoff and close the session.
+Deck rulings: English; audience Rofu management with Keen as the partner
+supplying the price quotations (no "Keen ruled" narrative); recommendation
+= storage selected, size follows the roof, case 5 base and case 6 upside;
+about 14 slides plus two appendices; neutral third-person tone, no second
+person, no sales language; style from the tariff structure briefing without
+copying its layouts; condensed for presentation and handout.
+
+## What landed (master, ca50d5f5)
+
+- `outputs/thailand_case/rofu_thailand/Rofu_Thailand_Solar_Storage_Feasibility.pptx`
+  (17 slides: cover, summary, scope and method, facility, load against the
+  tariff clock, PEA tariff, assumptions x2, six cases, results table, NPV and
+  IRR chart, what storage buys with the case 6 average-day dispatch, year-10
+  replacement against the loan with the DSCR chart, capital cost and export,
+  recommendation and next steps, Appendix A provisional inputs, Appendix B
+  technical basis) and the PDF handout beside it.
+- `deck_source/`: `extract_data.py` (reads the six case records; mirrors
+  `proforma_thailand.report`'s override block so its numbers equal the
+  workbooks and the memo to the dollar), `build_deck.js` (pptxgenjs),
+  `deck_data.json`, README. Design assets (logo, KEEN cover image) live in
+  the gitignored `tmp/keen_design`; the builder needs them and a scratch
+  `npm install pptxgenjs`. Validation: package check passed; every slide
+  rendered through LibreOffice and inspected; no em dash, no second person.
+- Numbers are the memo's six-case table. Two disclosures: grid offset uses
+  the memo's grid-to-load basis (the workbooks' `grid_offset_fraction` nets
+  grid-to-storage and reads 48.9 percent for case 6 against the memo's
+  50.4); the year-10 battery replacement is quoted from the pro forma row
+  (332,891 USD for case 6) where the memo says 378,411 USD. The memo's
+  coverage figures (109,516 against 171,027, DSCR 0.64) reconcile to the
+  row; the memo's replacement figure does not, and should be corrected if
+  the memo is reissued.
+- Curtailment percentages use the memo's basis (levelised annual production).
+
+## Pushed
+
+`master` and `battery-soh-fade` pushed to `origin` (github.com/Kongnh/Reopt-API)
+at the end of this session; see the git log for the two heads.
+
+## State at close
+
+- Main tree `REopt_API` = `master`; worktree `REopt_API-soh` =
+  `battery-soh-fade`; research Julia server `julia_api_soh` on 8082
+  (`docker start julia_api_soh` after a reboot); both trees clean.
+- Vietnam records on both lines carry the aligned REopt objective (2026-09-13);
+  the Vietnam narrative decks and sweep outputs are stale on both lines.
+- The stray case_5 workbook in the master tree is gone (Excel released it).
+- Open items unchanged from 2026-09-13: case_5 (grid-CfD) sizing on the
+  research line, vendor price for the augment treatment, Thailand's levered
+  optimum as a probe check, memo replacement-figure discrepancy above.
+
 # 2026-09-13 - Handoff: Vietnam objective aligned with the pro forma (port from the research line)
 
 Ruling (user, 2026-09-13 morning): implement the four recommendations of the
