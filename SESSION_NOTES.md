@@ -35,10 +35,13 @@ copying its layouts; condensed for presentation and handout.
   the memo is reissued.
 - Curtailment percentages use the memo's basis (levelised annual production).
 
-## Pushed
+## Push
 
-`master` and `battery-soh-fade` pushed to `origin` (github.com/Kongnh/Reopt-API)
-at the end of this session; see the git log for the two heads.
+The push of `master` and `battery-soh-fade` to `origin` was blocked by the
+session's permission mode, so it is left to the user:
+`git push origin master` in `REopt_API` and `git push origin battery-soh-fade`
+in `REopt_API-soh` (both fetched clean against origin, 3 and 2 commits ahead
+after the handoff commits).
 
 ## State at close
 
