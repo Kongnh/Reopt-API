@@ -1,3 +1,78 @@
+# 2026-09-15 (afternoon) - Handoff: Rofu measured-roof cases (v2), deck and narrative
+
+Ruling (user, 2026-09-15): re-run the Rofu Thailand cases on the roof as
+measured from satellite imagery (seven buildings, 16,319.27 m2; roof F
+3,329.30 m2), four cases (PV only and PV with storage, on roof F and on all
+roofs) plus the existing case 6 (no roof limit with storage), every other
+input unchanged; rebuild the deck and the Vietnamese narrative with the
+roof parameters (area, usable share, power density) on the slides. Batched
+answers: keep 65 percent usable x 0.20 kWp/m2 (memo conversion); new folder
+`rofu_thailand_v2` with case_1..4 new and case_5 = the case 6 record copied;
+same audience and tone as the first deck (Rofu management, Keen named as the
+quotation source, English, third person); recommendation framed as two
+phases, roof F first and the other roofs after a condition review.
+
+Roof condition as supplied: roof F (main building at the front) was replaced
+one to two years ago after unrepairable leaks; the other roofs are older, no
+replacement planned, condition and suitability to be reviewed.
+
+## What landed (master, 30bf03f2)
+
+- `outputs/thailand_case/rofu_thailand_v2/case_1..5/`: case.json, payload,
+  results, summary, assumptions, workbook. Cases 1 to 4 solved on master's
+  Docker stack (all optimal; `_is_complete` refetched the partial results
+  twice on case 1 before the full record landed); each workbook recalculated
+  in LibreOffice: 9/9 audit checks PASS, 15 placeholders. Case 5 is
+  `rofu_thailand/case_6` byte for byte.
+- Results (USD): 1 roof F 432.8 kWp, capex 216,400, year-1 savings 77,247,
+  NPV 389,829, IRR 75.5 percent, curtailment 1.4 percent; 2 roof F with
+  storage: optimiser adds 33 kW / 50 kWh, NPV +4,264 (token); 3 all roofs
+  2,121.5 kWp, capex 1,060,750, savings 325,965, NPV 1,512,301, IRR 62.0,
+  curtailment 13.2 percent; 4 all roofs with 303 kW / 634 kWh, capex
+  1,186,094, savings 356,680, NPV 1,612,795, IRR 60.3, curtailment 9.0
+  percent, DSCR year 10 1.85; 5 unchanged (2,847 kWp, 507 kW / 1,881 kWh,
+  NPV 1,855,912, DSCR year 10 0.64).
+- `Rofu_Thailand_Solar_Storage_Feasibility_v2.pptx` + `.pdf` (18 slides:
+  the first edition's structure plus a roof measurement slide with the
+  satellite picture and per-roof table; five-case results; storage slide on
+  case 4; DSCR for cases 1, 4, 5; phased recommendation). `deck_source/`
+  (extract_data.py, build_deck.js, deck_data.json, README). Validation:
+  package check passed, every slide rendered and inspected, no em dash, no
+  second person. The satellite picture is committed under `rofu_thailand/`.
+- `Rofu_Thailand_Solar_Storage_Feasibility_v2_NARRATIVE_VI.md`: numbers
+  table, per-slide script, expected questions, six items to settle with the
+  team (usable share and density, phase 2 = case 4 less case 1 not a
+  modelled sequence, scope of the roof review, memo not updated, metered vs
+  billed monthly MWh, Keen named as the quotation source).
+
+## Disclosures
+
+- Grid offset on the deck's results table is the memo's grid-to-load basis
+  (`grid_offset_to_load` in deck_data.json); the workbooks' figure nets
+  grid-to-storage (case 4: 39.5 vs 38.3 percent).
+- Storage MWh on the storage slide are levelised annual averages from the
+  REopt series (case 5 reads 511 MWh here where the first deck said 529 on a
+  year-1 basis); the first deck is unchanged.
+- The first deck's "96 percent capacity after 20 years" degradation bullet
+  was dropped from v2 (not reproducible from the master records).
+- Phase 2 figures are case 4 less case 1; a phased build has not been
+  modelled as a sequence (two EPC mobilisations, second array timing).
+- `KEEN_THAILAND_MEMO.md` is not updated: its roof section is superseded by
+  the measurement, and its case 6 replacement figure (378,411 vs the pro
+  forma's 332,891) is still open.
+
+## Housekeeping
+
+- Push left to the user: `master` is ahead of origin by five commits
+  (cec8d7af..30bf03f2); `battery-soh-fade` in `REopt_API-soh` by two.
+- Docker stack was restarted this session (`docker compose up -d`); the
+  research server `julia_api_soh` was not started.
+- Scratch: `tmp/presentations/rofu_feasibility/v2/` (builder, render,
+  roof.jpeg); node_modules and pylib are shared with the first edition's
+  folder one level up.
+- Open items unchanged: case_5 (grid-CfD) sizing on the research line,
+  vendor price for the augment treatment, Thailand levered optimum probe.
+
 # 2026-09-15 - Handoff: Rofu feasibility deck; both lines pushed; session closed
 
 Ruling (user, 2026-09-15): build the Rofu feasibility presentation from the
