@@ -75,6 +75,24 @@ class RebuildReportTests(TestCase):
         self.assertIn("Storage Technology (case.json)", labels)
 
 
+    def test_saved_analysis_years_sets_the_pro_forma_horizon(self):
+        case_dir = RebuildReportPreparedOnTests()._case_dir()
+        assumptions_path = case_dir / "assumptions.json"
+        assumptions = json.loads(assumptions_path.read_text(encoding="utf-8"))
+        assumptions["analysis_years"] = 25
+        assumptions_path.write_text(json.dumps(assumptions), encoding="utf-8")
+
+        workbook = load_workbook(rebuild_report(case_dir, prepared_on="2026-01-01"))
+
+        sheet = workbook["Assumptions"]
+        period = next(
+            row for row in sheet.iter_rows(values_only=True)
+            if "Analysis period" in row
+        )
+        self.assertIn(25, period)
+        self.assertNotIn(20, period)
+
+
 class RebuildReportPreparedOnTests(TestCase):
 
     def _case_dir(self):

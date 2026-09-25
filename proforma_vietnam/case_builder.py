@@ -89,6 +89,7 @@ FINANCIAL_PAYLOAD_KEYS = [
     "owner_discount_rate_fraction",
 ]
 FINANCIAL_ASSUMPTION_KEYS = [
+    "analysis_years",
     "owner_discount_rate_fraction",
     "debt_fraction",
     "debt_interest_rate_fraction",
@@ -214,8 +215,39 @@ def build_vietnam_case(case_config):
     # the report builder without entering the REopt payload.
     if poa_irradiance_series is not None:
         assumptions["pv_poa_irradiance_series"] = poa_irradiance_series
+    if "analysis_years" in financial:
+        _validate_analysis_years(assumptions)
 
     return {"payload": payload, "assumptions": assumptions}
+
+
+def _validate_analysis_years(assumptions):
+    """Reject a horizon that the cash flow would silently truncate.
+
+    analysis_years is both REopt's levelization horizon and the pro forma's
+    project_years. A loan or a booked replacement past its end would drop out
+    of the cash flow without an error, so both must fit inside it.
+    """
+    years = assumptions["analysis_years"]
+    if isinstance(years, bool) or not isinstance(years, int) or years < 1:
+        raise ValueError(
+            f"financial.analysis_years must be a positive integer, got {years!r}."
+        )
+    debt_term_years = assumptions.get(
+        "debt_term_years", FINANCIAL_DEFAULTS["debt_term_years"]
+    )
+    if years < debt_term_years:
+        raise ValueError(
+            f"financial.analysis_years ({years}) must be >= debt_term_years "
+            f"({debt_term_years}); the loan would outlive the horizon."
+        )
+    for key in ("battery_replacement_year", "pv_inverter_replacement_year"):
+        replacement_year = assumptions.get(key)
+        if replacement_year and years < replacement_year:
+            raise ValueError(
+                f"financial.analysis_years ({years}) must be >= {key} "
+                f"({replacement_year}); the replacement would fall outside the horizon."
+            )
 
 
 def _read_load_values(path):

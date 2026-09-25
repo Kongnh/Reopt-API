@@ -151,6 +151,7 @@ def run_factory_a_negotiation_sweep(
 
 def cash_flow_overrides_from_assumptions(assumptions):
     mapping = {
+        "analysis_years": "project_years",
         "owner_discount_rate_fraction": "owner_discount_rate_fraction",
         "debt_fraction": "debt_fraction",
         "debt_interest_rate_fraction": "debt_interest_rate_fraction",

@@ -460,6 +460,98 @@ class VietnamCaseBuilderTests(TestCase):
         # will derive bess_capex from REopt outputs at report time.
         self.assertNotIn("bess_capex_usd", assumptions)
 
+    def test_analysis_years_reaches_the_cash_flow_horizon(self):
+        # financial.analysis_years set the REopt payload horizon but never the
+        # pro forma's: the assumptions record dropped it, so the cash flow ran
+        # the 20-year default while REopt levelized over the case's horizon.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                "financial": {"analysis_years": 25},
+            }
+        )
+
+        self.assertEqual(case["payload"]["Financial"]["analysis_years"], 25)
+        self.assertEqual(case["assumptions"]["analysis_years"], 25)
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertEqual(overrides["project_years"], 25)
+
+    def test_omitting_analysis_years_leaves_the_record_and_overrides_unchanged(self):
+        # Saved cases carry no analysis_years; they must keep the default
+        # horizon without a new assumptions key (baseline workbooks unchanged).
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        case = build_vietnam_case(
+            {
+                "site": {"latitude": 10.8231, "longitude": 106.6297},
+                "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                "esco_contract": {"esco_energy_discount_fraction": 0.9},
+            }
+        )
+
+        self.assertNotIn("analysis_years", case["assumptions"])
+        overrides = cash_flow_overrides_from_assumptions(case["assumptions"])
+        self.assertNotIn("project_years", overrides)
+
+    def test_rejects_analysis_years_that_are_not_a_positive_integer(self):
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        for bad in (25.5, "25", True, 0):
+            with self.subTest(analysis_years=bad):
+                with self.assertRaises(ValueError) as context:
+                    build_vietnam_case(
+                        {
+                            "site": {"latitude": 10.8231, "longitude": 106.6297},
+                            "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                            "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                            "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                            "financial": {"analysis_years": bad},
+                        }
+                    )
+                self.assertIn("analysis_years", str(context.exception))
+
+    def test_rejects_analysis_years_shorter_than_the_debt_term(self):
+        # A loan that outlives the horizon leaves an unpaid balance the cash
+        # flow never books.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "financial": {"analysis_years": 12, "debt_term_years": 15},
+                }
+            )
+
+        self.assertIn("debt_term_years", str(context.exception))
+
+    def test_rejects_analysis_years_that_end_before_a_booked_replacement(self):
+        # The PV inverter event (policy year 11) would fall off a 10-year
+        # horizon silently.
+        load_csv_path = _write_load_csv([500.0] * 8760)
+
+        with self.assertRaises(ValueError) as context:
+            build_vietnam_case(
+                {
+                    "site": {"latitude": 10.8231, "longitude": 106.6297},
+                    "load_profile": {"year": 2025, "path": str(load_csv_path)},
+                    "tariff": {"year": 2025, "voltage_level": "22-110kV"},
+                    "esco_contract": {"esco_energy_discount_fraction": 0.9},
+                    "financial": {"analysis_years": 10, "debt_term_years": 10},
+                }
+            )
+
+        self.assertIn("pv_inverter_replacement_year", str(context.exception))
+
     def test_rejects_load_csv_that_is_not_8760_rows(self):
         load_csv_path = _write_load_csv([500.0] * 24)
 
