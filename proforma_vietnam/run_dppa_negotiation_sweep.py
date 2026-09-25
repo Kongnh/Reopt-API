@@ -223,22 +223,22 @@ def reconcile_cash_flows(actual, reference, tolerance=RECONCILIATION_TOLERANCE):
 
 
 def reconcile_reference_workbook(cash_flow, workbook_path, tolerance=RECONCILIATION_TOLERANCE):
+    # Reads only engine-written value cells (Developer Returns KPI block and the
+    # Year 1 BAU vs DPPA sheet); formula cells have no cached value until Excel
+    # recalculates, so openpyxl data_only would return None for them.
     workbook = load_workbook(workbook_path, data_only=True, read_only=True)
-    summary = dict(workbook["Summary"].values)
-    year_one = {
-        label: value
-        for label, value, _ in workbook["Year 1 BAU vs DPPA"].values
-        if label and value is not None
-    }
-    cash_flow_rows = list(workbook["Cash Flow"].values)
-    headers = list(cash_flow_rows[0])
-    dscr_column = headers.index("DSCR")
-    debt_service_column = headers.index("Debt Service (USD)")
-    workbook_minimum_dscr = min(
-        row[dscr_column]
-        for row in cash_flow_rows[1:]
-        if row[debt_service_column] and row[dscr_column] is not None
-    )
+    try:
+        returns = {}
+        for row in workbook["Developer Returns"].iter_rows(min_col=2, max_col=3, values_only=True):
+            if isinstance(row[0], str):
+                returns.setdefault(row[0], row[1])
+        year_one = {
+            label: value
+            for label, value, _ in workbook["Year 1 BAU vs DPPA"].values
+            if label and value is not None
+        }
+    finally:
+        workbook.close()
     actual_year_one = cash_flow["annual_cash_flows"][0]
     actual_summary = cash_flow["summary"]
     workbook_values = {
@@ -247,12 +247,23 @@ def reconcile_reference_workbook(cash_flow, workbook_path, tolerance=RECONCILIAT
         "c_cl_usd": year_one["C_CL settlement adder"],
         "c_bl_usd": year_one["C_BL retail shortfall (P_evn × shortfall)"],
         "cfd_net_usd": year_one["CfD payment to ESCO (positive = pay)"],
-        "generator_revenue_usd": year_one["Total ESCO / generator revenue"],
-        "dppa_offtaker_cost_usd": year_one["Total buyer outflow"],
-        "equity_irr_fraction": summary["Equity IRR"],
-        "npv_usd": summary["NPV (USD)"],
-        "minimum_dscr": workbook_minimum_dscr,
-        "average_dscr": summary["Average DSCR"],
+        # The workbook totals also carry the demand-savings share, grid arbitrage
+        # and the optimized demand charge; the engine's generator revenue and
+        # DPPA offtaker cost are the settlement-only subtotals.
+        "generator_revenue_usd": (
+            year_one["Total ESCO / generator revenue"]
+            - year_one["Demand savings share (80%)"]
+            - year_one["ESCO grid arbitrage revenue"]
+        ),
+        "dppa_offtaker_cost_usd": (
+            year_one["Total buyer outflow"]
+            - year_one["Optimized demand charge (kept by EVN)"]
+            - year_one["ESCO demand savings share charged back"]
+        ),
+        "equity_irr_fraction": returns["Equity IRR"],
+        "npv_usd": returns["NPV (USD)"],
+        "minimum_dscr": returns["Minimum DSCR (debt years)"],
+        "average_dscr": returns["Average DSCR"],
     }
     actual_values = {
         **{key: actual_year_one[key] for key in (
