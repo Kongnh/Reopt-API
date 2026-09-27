@@ -1,4 +1,6 @@
+from copy import deepcopy
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 
 from proforma_vietnam.dppa_negotiation_sweep import (
@@ -10,12 +12,16 @@ from proforma_vietnam.dppa_negotiation_workbook import (
     build_dppa_negotiation_summary,
     build_dppa_negotiation_workbook,
 )
+from proforma_vietnam.esco_pro_forma import calculate_esco_pro_forma_from_reopt_results
 from proforma_vietnam.run_dppa_negotiation_sweep import (
     default_output_dir_name,
     inclusive_strikes,
     reconcile_cash_flows,
+    reconcile_reference_workbook,
     reference_case_paths,
 )
+from proforma_vietnam.tests.test_esco_pro_forma import _fake_reopt_results
+from proforma_vietnam.xlsx_builder import build_vietnam_esco_workbook
 
 
 class DppaNegotiationSweepTests(TestCase):
@@ -184,6 +190,56 @@ class DppaNegotiationSweepTests(TestCase):
                 "minimum_dscr",
                 "average_dscr",
             },
+        )
+
+    def test_workbook_reconciliation_ties_out_against_current_builder_layout(self):
+        # Engine-computed grid-CfD cash flow with debt and a demand-savings share,
+        # so the workbook's buyer/seller totals carry lines beyond the settlement.
+        dppa_inputs = {
+            "type": "grid_dppa_cfd",
+            "fmp_series_vnd_per_kwh": [1500.0, 1500.0],
+            "cfd_strike_per_kwh_vnd": 1700.0,
+            "cfd_contract_volume_kwh_per_hour": 1.0,
+            "transmission_loss_factor_k": 1.026,
+            "distribution_loss_factor_kpp": 1.027263,
+            "allocation_fraction_delta": 1.0,
+            "c_dppa_service_fee_vnd_per_kwh": 360.0,
+            "c_cl_settlement_adder_vnd_per_kwh": 163.0,
+            "cfd_strike_escalation_rate": 0.0,
+            "fee_escalation_rate": 0.0,
+        }
+        reopt_results = deepcopy(_fake_reopt_results(can_grid_charge=False))
+        reopt_results["outputs"]["ElectricLoad"] = {"load_series_kw": [10, 10]}
+        reopt_results["outputs"]["ElectricUtility"] = {
+            "electric_to_load_series_kw": [6, 6],
+            "electric_to_storage_series_kw": [0, 0],
+        }
+        cash_flow = calculate_esco_pro_forma_from_reopt_results(
+            reopt_results,
+            esco_energy_discount_fraction=0.9,
+            project_years=5,
+            dppa_inputs=dppa_inputs,
+            debt_fraction=0.5,
+            debt_term_years=3,
+        )
+        workbook = build_vietnam_esco_workbook(cash_flow, assumptions={"dppa": dppa_inputs})
+
+        with TemporaryDirectory() as tmp:
+            workbook_path = Path(tmp) / "vietnam_report.xlsx"
+            workbook.save(workbook_path)
+            reconciliation = reconcile_reference_workbook(
+                cash_flow, workbook_path, tolerance=1e-9
+            )
+
+        failed = {
+            key: metric for key, metric in reconciliation["metrics"].items()
+            if not metric["passed"]
+        }
+        self.assertEqual(failed, {})
+        self.assertTrue(reconciliation["passed"])
+        self.assertEqual(
+            set(reconciliation["metrics"]),
+            set(reconcile_cash_flows(cash_flow, cash_flow)["metrics"]),
         )
 
     def test_runner_selects_case_6_reference_artifacts_and_separate_output(self):
