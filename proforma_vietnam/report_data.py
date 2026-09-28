@@ -1,4 +1,4 @@
-from proforma_vietnam.esco_pro_forma import _levelization_factor
+from proforma_vietnam.esco_pro_forma import _year_one_dispatch
 
 
 def build_vietnam_report_data(reopt_results, cash_flow_result=None,
@@ -13,45 +13,26 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
 
     pv_outputs = _as_list(outputs.get("PV"))
     storage_outputs = outputs.get("ElectricStorage") or {}
-    utility_outputs = outputs.get("ElectricUtility") or {}
     load_inputs = inputs.get("ElectricLoad") or {}
     load_outputs = outputs.get("ElectricLoad") or {}
     tariff_outputs = outputs.get("ElectricTariff") or {}
 
-    # REopt levelizes PV production inside the optimisation, so the PV- and
-    # storage-derived dispatch series below carry that weighting despite
-    # their "year_one"-adjacent naming (see esco_pro_forma._levelization_factor).
-    # Dividing by the same factor the cash flow already uses puts these
-    # DISPLAYED series on the true first-year basis the cash flow is on.
-    # load_series, grid_to_load and grid_to_storage are grid/customer
-    # quantities, not PV production, and are left alone.
-    levelization_factor = _levelization_factor(pv_outputs)
+    # REopt levelizes PV production inside the optimisation, so its dispatch
+    # series are not a first year despite their naming. The DISPLAYED series
+    # use the same first-year dispatch the cash flow uses
+    # (esco_pro_forma._year_one_dispatch), so the energy table balances
+    # against the load and matches the cash flow.
+    year_one = _year_one_dispatch(reopt_results)
 
     load_series = _series(load_outputs.get("load_series_kw")) or _series(load_inputs.get("loads_kw"))
-    pv_to_load = _de_levelize(
-        _sum_series([pv.get("electric_to_load_series_kw", []) for pv in pv_outputs]),
-        levelization_factor,
-    )
-    pv_to_storage = _de_levelize(
-        _sum_series([pv.get("electric_to_storage_series_kw", []) for pv in pv_outputs]),
-        levelization_factor,
-    )
-    pv_curtailed = _de_levelize(
-        _sum_series([pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs]),
-        levelization_factor,
-    )
-    pv_to_grid = _de_levelize(
-        _sum_series([pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs]),
-        levelization_factor,
-    )
-    grid_to_load = _series(utility_outputs.get("electric_to_load_series_kw"))
-    grid_to_storage = _series(utility_outputs.get("electric_to_storage_series_kw"))
-    storage_to_load = _de_levelize(
-        _series(storage_outputs.get("storage_to_load_series_kw")),
-        levelization_factor,
-    )
+    pv_to_load = year_one["pv_to_load_kw"]
+    pv_to_storage = year_one["pv_to_storage_kw"]
+    pv_curtailed = year_one["pv_curtailed_kw"]
+    pv_to_grid = year_one["pv_to_grid_kw"]
+    grid_to_load = year_one["grid_to_load_kw"]
+    grid_to_storage = year_one["grid_to_storage_kw"]
+    storage_to_load = year_one["storage_to_load_kw"]
     # Original PV generation before any dispatch split (load/storage/grid/curtailment).
-    # Built from the already de-levelized series above, so it needs no separate division.
     pv_total = _sum_series([pv_to_load, pv_to_storage, pv_to_grid, pv_curtailed])
     # Hourly solar resource: PVWatts plane-of-array irradiance (W/m2), shown on
     # the Dispatch sheet. The per-kW production factor (kWh/kW) is kept for the
@@ -103,7 +84,9 @@ def build_vietnam_report_data(reopt_results, cash_flow_result=None,
             ) / time_steps_per_hour,
             "grid_to_storage_kwh": sum(grid_to_storage) / time_steps_per_hour,
         },
-        "results_comparison": _results_comparison(tariff_outputs, pv_outputs),
+        "results_comparison": _results_comparison(
+            tariff_outputs, year_one["avoided_energy_cost"]
+        ),
         "load_duration": _load_duration(load_series, grid_to_load),
         "developer_financial_performance": cash_flow_result.get("summary", {}),
         "dppa_hourly_breakout": cash_flow_result.get("dppa_hourly_breakout", []),
@@ -167,7 +150,7 @@ def _production_factor_series(pv_outputs, pv_inputs):
     return []
 
 
-def _results_comparison(tariff_outputs, pv_outputs=()):
+def _results_comparison(tariff_outputs, avoided_energy_cost=0.0):
     bau_bill = _value(tariff_outputs, "year_one_bill_before_tax_bau")
     optimized_bill = _value(tariff_outputs, "year_one_bill_before_tax")
     # A coincident-peak demand structure (PEA's on-peak kW charge, billed as the
@@ -188,15 +171,12 @@ def _results_comparison(tariff_outputs, pv_outputs=()):
     # contract rate before the optimizer runs), so these keys carry the _usd
     # suffix — they are not VND amounts.
     # REopt's tariff outputs are levelized, exactly like its dispatch series,
-    # so the raw difference here is a lifetime-weighted average and not a first
-    # year. The cash flow already corrects this in esco_pro_forma; without the
-    # same correction the Technical Results sheet reported 263279 where the
-    # Executive Summary reported 272717 for one quantity in one workbook.
-    # BAU carries no PV, so it is a true first year and is not scaled; it is
-    # the SAVINGS DELTA that is levelized.
-    levelization_factor = _levelization_factor(pv_outputs)
-    optimized_bill = bau_bill - (bau_bill - optimized_bill) / levelization_factor
-    optimized_demand = bau_demand - (bau_demand - optimized_demand) / levelization_factor
+    # so the optimized bill is not a first year. The cash flow restates it
+    # with the grid energy the first-year PV displaces
+    # (esco_pro_forma._year_one_dispatch); without the same correction here
+    # Technical Results and the Executive Summary report one quantity twice.
+    # BAU carries no PV, and the demand charge stays on the solved dispatch.
+    optimized_bill = optimized_bill - avoided_energy_cost
 
     return {
         "bau_utility_bill_usd": bau_bill,
@@ -239,19 +219,6 @@ def _sum_series(series_list):
 
 def _series(value):
     return value if isinstance(value, list) else []
-
-
-def _de_levelize(series, levelization_factor):
-    """Undo REopt's PV levelization on a displayed dispatch series.
-
-    Mirrors esco_pro_forma._apply_de_levelization_to_dispatch: dividing by
-    the same factor recovers the true first-year magnitude, so the
-    displayed series matches the already-corrected cash flow instead of
-    diverging from it.
-    """
-    if levelization_factor == 1.0 or not series:
-        return series
-    return [value / levelization_factor for value in series]
 
 
 def _upsample_series(series, factor):

@@ -862,8 +862,8 @@ def write_assumptions_sheet(worksheet, workbook, assumptions, derivation,
             # Was "levelized annual" because the basis carried REopt's
             # escalation/discount/degradation weighting while
             # lifetime_avoided_tco2e then applied degradation again, a double
-            # count worth about 3.6 percent. emissions.annual_avoided_tco2e now
-            # divides the levelization back out, so this is a true first year.
+            # count worth about 3.6 percent. The basis is now the first-year
+            # grid import (esco_pro_forma._year_one_dispatch), a true first year.
             # Only Thailand renders this block (Vietnam never sets
             # annual_avoided_tco2e), so no profile gate is needed here.
             "Avoided emissions, year 1",

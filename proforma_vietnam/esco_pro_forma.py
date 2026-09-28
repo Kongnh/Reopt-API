@@ -47,15 +47,16 @@ def calculate_esco_pro_forma_from_reopt_results(
     load_outputs = outputs.get("ElectricLoad") or {}
     load_inputs = inputs.get("ElectricLoad") or {}
 
-    project_served_pv_kwh = _sum_series([
-        pv.get("electric_to_load_series_kw", [])
-        for pv in pv_outputs
-    ])
+    # Every energy quantity below reads this first-year restatement of
+    # REopt's levelized dispatch, never the raw series (see
+    # _year_one_dispatch).
+    year_one = _year_one_dispatch(reopt_results)
+    project_served_pv_kwh = year_one["pv_to_load_kw"]
 
     if storage_inputs.get("can_grid_charge") is False:
         project_served_pv_kwh = _sum_series([
             project_served_pv_kwh,
-            storage_outputs.get("storage_to_load_series_kw", []),
+            year_one["storage_to_load_kw"],
         ])
 
     tou_rates = tariff_inputs.get("tou_energy_rates_per_kwh", [])
@@ -78,7 +79,8 @@ def calculate_esco_pro_forma_from_reopt_results(
             tariff_money_values_currency,
         ),
         "optimized_evn_bill_vnd": _money(
-            _value(tariff_outputs, "year_one_bill_before_tax"),
+            _value(tariff_outputs, "year_one_bill_before_tax")
+            - year_one["avoided_energy_cost"],
             exchange_rate_vnd_per_usd,
             tariff_money_values_currency,
         ),
@@ -105,14 +107,6 @@ def calculate_esco_pro_forma_from_reopt_results(
         "esco_energy_discount_fraction": esco_energy_discount_fraction,
         "owner_discount_rate_fraction": financial_inputs.get("owner_discount_rate_fraction", 0.10),
     }
-
-    # REopt returns levelized dispatch, so year_one_bill_before_tax and every
-    # dispatch series already carry degradation. The cash flow then applies
-    # (1 - deg)^y on its own axis, which counted degradation roughly twice
-    # and understated savings by 4.10 percent (Thailand) / 4.95 percent
-    # (Vietnam). Undo the levelization here so the cash flow's own degradation
-    # is the only one applied.
-    _apply_de_levelization(cash_flow_inputs, _levelization_factor(pv_outputs))
 
     pv_capacity_kw = sum(_value(pv, "size_kw") for pv in pv_outputs)
     if storage_inputs.get("can_grid_charge") is True and pv_capacity_kw == 0:
@@ -191,7 +185,7 @@ def calculate_esco_pro_forma_from_reopt_results(
                 "private-wire DPPA the surplus rides inside the physical_dppa block."
             )
         _apply_physical_dppa(
-            cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rate_vnd_per_usd
+            cash_flow_inputs, dppa_inputs, year_one, exchange_rate_vnd_per_usd
         )
     elif dppa_inputs is not None and dppa_inputs.get("type", DPPA_TYPE_NONE) == DPPA_TYPE_GRID_CFD:
         evn_rates_vnd = _money_series(
@@ -205,27 +199,15 @@ def calculate_esco_pro_forma_from_reopt_results(
         dispatch = {
             "load_kw": _series(load_outputs.get("load_series_kw"))
                 or _series(load_inputs.get("loads_kw")),
-            "pv_to_load_kw": _sum_series([
-                pv.get("electric_to_load_series_kw", []) for pv in pv_outputs
-            ]),
-            "pv_to_grid_kw": _sum_series([
-                pv.get("electric_to_grid_series_kw", []) for pv in pv_outputs
-            ]),
+            "pv_to_load_kw": year_one["pv_to_load_kw"],
+            "pv_to_grid_kw": year_one["pv_to_grid_kw"],
             # Curtailed PV is treated as DPPA grid export per the design clarified
             # in case_5: optimizer runs self-consumption, the generator dumps any
             # surplus to grid at FMP rather than curtailing.
-            "pv_curtailed_kw": _sum_series([
-                pv.get("electric_curtailed_series_kw", []) for pv in pv_outputs
-            ]),
-            "storage_to_load_kw": _series(storage_outputs.get("storage_to_load_series_kw")),
-            "storage_to_grid_kw": _series(storage_outputs.get("storage_to_grid_series_kw")),
+            "pv_curtailed_kw": year_one["pv_curtailed_kw"],
+            "storage_to_load_kw": year_one["storage_to_load_kw"],
+            "storage_to_grid_kw": year_one["storage_to_grid_kw"],
         }
-        # The settlement basis above is built straight from raw REopt dispatch
-        # series, bypassing cash_flow_inputs and therefore _apply_de_levelization
-        # above -- so it carries the same levelization as project_served_pv_kwh
-        # and needs the same correction. load_kw is the customer's actual load,
-        # not PV production, and is left alone.
-        _apply_de_levelization_to_dispatch(dispatch, _levelization_factor(pv_outputs))
         dppa_settlement = settle_dppa_year_one(
             dppa_inputs=dppa_inputs,
             dispatch=dispatch,
@@ -254,7 +236,7 @@ def calculate_esco_pro_forma_from_reopt_results(
 
     if surplus_export is not None and surplus_export.get("enabled"):
         _apply_surplus_export(
-            cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd
+            cash_flow_inputs, surplus_export, year_one, exchange_rate_vnd_per_usd
         )
 
     # The inputs above are normalized to USD; passing the FX rate through lets
@@ -293,61 +275,93 @@ def _levelization_factor(pv_outputs):
     return levelized / raw
 
 
-def _apply_de_levelization(cash_flow_inputs, levelization_factor):
-    """Undo REopt's levelization on the three quantities that carry it.
+def _year_one_dispatch(reopt_results):
+    """REopt's solved dispatch restated on a true first-year PV basis.
 
-    ``project_served_pv_kwh`` is PV production, so it scales directly. The
-    bills do not: BAU carries no PV and is a true first year, so it is the
-    SAVINGS DELTA that is levelized. Scaling the optimized bill by
-    1 / lambda would inflate the whole bill including the part PV never
-    touched. Capex, debt and O&M are absent here on purpose; none of them
-    depends on production.
+    REopt solves on PV production weighted by _levelization_factor (lambda),
+    so the first year produces 1 / lambda times what the dispatch shows. The
+    extra energy is placed interval by interval: it first displaces grid
+    import in the same interval and the rest is curtailed, while the battery
+    keeps its solved schedule. The load balance therefore still closes.
+
+    Until 2026-09-28 every PV and storage flow and the savings delta were
+    divided by lambda instead. Against a REopt re-solve at lambda = 1 that
+    overstated first-year savings by 2.8-3.9 percent (factory_a_v2, five
+    cases): most of the extra PV lands in hours that already curtail, the
+    battery is bounded by its own size, and the grid flow stayed levelized,
+    so the first-year energy table summed to 9.58 GWh against a 9.34 GWh
+    load. Holding the battery fixed lands 0-0.9 percent below the re-solve,
+    the conservative side.
+
+    Demand-side quantities (the demand charge, billed peaks) stay on the
+    solved dispatch: extra PV can only lower a peak, so that is conservative
+    too. Series are kW per interval; money is in REopt's own currency.
     """
+    inputs = reopt_results.get("inputs", {})
+    outputs = reopt_results.get("outputs", {})
+    pv_outputs = _as_list(outputs.get("PV"))
+    storage_outputs = outputs.get("ElectricStorage") or {}
+    utility_outputs = outputs.get("ElectricUtility") or {}
+
+    def pv_series(key):
+        return _sum_series([_series(pv.get(key)) for pv in pv_outputs])
+
+    dispatch = {
+        "pv_to_load_kw": pv_series("electric_to_load_series_kw"),
+        "pv_to_storage_kw": pv_series("electric_to_storage_series_kw"),
+        "pv_to_grid_kw": pv_series("electric_to_grid_series_kw"),
+        "pv_curtailed_kw": pv_series("electric_curtailed_series_kw"),
+        "storage_to_load_kw": _series(storage_outputs.get("storage_to_load_series_kw")),
+        "storage_to_grid_kw": _series(storage_outputs.get("storage_to_grid_series_kw")),
+        "grid_to_load_kw": _series(utility_outputs.get("electric_to_load_series_kw")),
+        "grid_to_storage_kw": _series(utility_outputs.get("electric_to_storage_series_kw")),
+        "avoided_grid_kwh": 0.0,
+        "avoided_energy_cost": 0.0,
+    }
+    levelization_factor = _levelization_factor(pv_outputs)
     if levelization_factor == 1.0:
-        return
+        return dispatch
 
-    served = cash_flow_inputs.get("project_served_pv_kwh")
-    if served:
-        cash_flow_inputs["project_served_pv_kwh"] = [
-            value / levelization_factor for value in served
-        ]
+    pv_total = _sum_series([
+        dispatch["pv_to_load_kw"],
+        dispatch["pv_to_storage_kw"],
+        dispatch["pv_to_grid_kw"],
+        dispatch["pv_curtailed_kw"],
+    ])
+    grid_to_load = dispatch["grid_to_load_kw"]
+    extra = [value * (1 / levelization_factor - 1) for value in pv_total]
+    absorbed = [
+        min(value, grid_to_load[index]) if index < len(grid_to_load) else 0.0
+        for index, value in enumerate(extra)
+    ]
+    rates = _series(
+        (inputs.get("ElectricTariff") or {}).get("tou_energy_rates_per_kwh")
+    )
+    if any(absorbed) and len(rates) != len(absorbed):
+        raise ValueError(
+            "Restating the dispatch on a first-year basis needs "
+            "tou_energy_rates_per_kwh at the dispatch resolution "
+            "({} rates for {} intervals).".format(len(rates), len(absorbed))
+        )
+    time_steps_per_hour = (inputs.get("Settings") or {}).get("time_steps_per_hour") or 1
 
-    for optimized_key, bau_key in (
-        ("optimized_evn_bill_vnd", "bau_evn_bill_vnd"),
-        ("optimized_demand_charge_vnd", "bau_demand_charge_vnd"),
-    ):
-        bau = cash_flow_inputs[bau_key]
-        savings = bau - cash_flow_inputs[optimized_key]
-        cash_flow_inputs[optimized_key] = bau - savings / levelization_factor
-
-
-def _apply_de_levelization_to_dispatch(dispatch, levelization_factor):
-    """Undo REopt's levelization on the grid-CfD DPPA settlement's raw dispatch.
-
-    Unlike project_served_pv_kwh, this dispatch dict never passes through
-    cash_flow_inputs, so _apply_de_levelization above never sees it. All five
-    series come from the same levelized REopt solve, so all five need the
-    same lambda division -- including the two storage series: the merged
-    project_served_pv_kwh already folds storage_to_load in when the battery
-    cannot grid-charge and de-levelizes the merge, so leaving storage out here
-    would be inconsistent with that.
-    """
-    if levelization_factor == 1.0:
-        return
-
-    for key in (
-        "pv_to_load_kw",
-        "pv_to_grid_kw",
-        "pv_curtailed_kw",
-        "storage_to_load_kw",
-        "storage_to_grid_kw",
-    ):
-        series = dispatch.get(key)
-        if series:
-            dispatch[key] = [value / levelization_factor for value in series]
+    dispatch["pv_to_load_kw"] = _sum_series([dispatch["pv_to_load_kw"], absorbed])
+    dispatch["pv_curtailed_kw"] = _sum_series([
+        dispatch["pv_curtailed_kw"],
+        [value - taken for value, taken in zip(extra, absorbed)],
+    ])
+    dispatch["grid_to_load_kw"] = [
+        value - (absorbed[index] if index < len(absorbed) else 0.0)
+        for index, value in enumerate(grid_to_load)
+    ]
+    dispatch["avoided_grid_kwh"] = sum(absorbed) / time_steps_per_hour
+    dispatch["avoided_energy_cost"] = sum(
+        taken * rate for taken, rate in zip(absorbed, rates)
+    ) / time_steps_per_hour
+    return dispatch
 
 
-def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rate_vnd_per_usd):
+def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, year_one, exchange_rate_vnd_per_usd):
     """Resolve ND57 Điều 25 private-wire DPPA primitives into the cash flow.
 
     Matched energy is the project-served series REopt already produced
@@ -379,7 +393,7 @@ def _apply_physical_dppa(cash_flow_inputs, dppa_inputs, pv_outputs, exchange_rat
     nested_surplus = dppa_inputs.get("surplus_export")
     if nested_surplus is not None and nested_surplus.get("enabled"):
         _apply_surplus_export(
-            cash_flow_inputs, nested_surplus, pv_outputs, exchange_rate_vnd_per_usd
+            cash_flow_inputs, nested_surplus, year_one, exchange_rate_vnd_per_usd
         )
 
 
@@ -404,7 +418,7 @@ def _apply_direct_ownership(cash_flow_inputs, direct_ownership):
         cash_flow_inputs["cit_regime"] = config["cit_regime"]
 
 
-def _apply_surplus_export(cash_flow_inputs, surplus_export, pv_outputs, exchange_rate_vnd_per_usd):
+def _apply_surplus_export(cash_flow_inputs, surplus_export, year_one, exchange_rate_vnd_per_usd):
     """Resolve Decree 243/2026 surplus-export primitives into the cash flow.
 
     Surplus = PV grid export + would-be-curtailed energy (the ESCO sells it to
@@ -421,26 +435,15 @@ def _apply_surplus_export(cash_flow_inputs, surplus_export, pv_outputs, exchange
             "(export energy is already monetized at FMP)."
         )
 
-    # Like the grid-CfD dispatch dict, these four series are read straight from
-    # the levelized REopt outputs and never pass through cash_flow_inputs, so
-    # _apply_de_levelization does not reach them. Both surplus_kwh and
-    # annual_pv_output_kwh below derive from them, so without this the export
-    # revenue would carry the same double count the rest of this module now
-    # corrects. No current case enables surplus export, so this is a latent
-    # path, but a latent read of a levelized series is how the other three
-    # instances of this defect survived.
-    levelization_factor = _levelization_factor(pv_outputs)
-
-    def _raw(key):
-        series = _sum_series([pv.get(key, []) for pv in pv_outputs])
-        if levelization_factor == 1.0:
-            return series
-        return [value / levelization_factor for value in series]
-
-    pv_to_load = _raw("electric_to_load_series_kw")
-    pv_to_grid = _raw("electric_to_grid_series_kw")
-    pv_to_storage = _raw("electric_to_storage_series_kw")
-    pv_curtailed = _raw("electric_curtailed_series_kw")
+    # The first-year dispatch (_year_one_dispatch), never the raw levelized
+    # series: both surplus_kwh and annual_pv_output_kwh derive from it. No
+    # current case enables surplus export, so this is a latent path, but a
+    # latent read of a levelized series is how earlier instances of this
+    # defect survived.
+    pv_to_load = year_one["pv_to_load_kw"]
+    pv_to_grid = year_one["pv_to_grid_kw"]
+    pv_to_storage = year_one["pv_to_storage_kw"]
+    pv_curtailed = year_one["pv_curtailed_kw"]
 
     surplus_kwh = sum(pv_to_grid) + sum(pv_curtailed)
     annual_pv_output_kwh = (

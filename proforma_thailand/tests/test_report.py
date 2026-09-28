@@ -117,6 +117,26 @@ class ThailandReportTests(TestCase):
         self.assertNotIn("Annual Energy Balance (Levelized Annual)", titles)
         self.assertNotIn("Levelized Annual Utility Bill Comparison", titles)
 
+    def test_avoided_emissions_use_the_year_one_grid_import(self):
+        """The emissions basis is avoided grid import. On a first-year basis
+        the grid import drops by exactly the PV the extra first-year output
+        serves, not by the whole levelized difference / lambda."""
+        results = _results()
+        pv = results["outputs"]["PV"]
+        # lambda = 1.5M / 1.6M = 0.9375, so each interval's extra PV is
+        # 100 * (1 / 0.9375 - 1) = 6.667 kW, all absorbed by a 50 kW import.
+        pv["year_one_energy_produced_kwh"] = 1_600_000.0
+        results["outputs"]["ElectricUtility"]["electric_to_load_series_kw"] = [50.0] * 8
+        _, extras = build_thailand_report(results, ASSUMPTIONS)
+
+        absorbed_kwh = 8 * 100.0 * (1 / 0.9375 - 1)
+        factor = extras["grid_emission_factor_kg_co2e_per_kwh"]
+        self.assertAlmostEqual(
+            extras["annual_avoided_tco2e"],
+            (6_500_000.0 - (5_000_000.0 - absorbed_kwh)) * factor / 1000.0,
+            places=6,
+        )
+
     def test_power_factor_compensation_is_computed_from_billed_demand(self):
         assumptions = dict(ASSUMPTIONS, billed_demand_kw=800.0)
 

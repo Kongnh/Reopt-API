@@ -123,20 +123,20 @@ class DispatchIrradianceResolutionTests(TestCase):
         )
 
 
-class DispatchDisplayDeLevelizationTests(TestCase):
-    """DISPLAYED dispatch and annual-production figures must divide by the
-    same levelization factor the corrected cash flow already divides by
-    (esco_pro_forma._levelization_factor). Before this, the workbook's
-    Dispatch Profile sheet stayed levelized after the cash-flow fix landed
-    (b7d7cf05, 72b6cdbe), so two sheets built from the same REopt solve
-    showed the same physical quantity ~4-5 percent apart.
+class DispatchDisplayYearOneTests(TestCase):
+    """DISPLAYED dispatch and annual-production figures must use the same
+    first-year dispatch the cash flow uses (esco_pro_forma._year_one_dispatch).
+    Two sheets built from the same REopt solve must not show the same
+    physical quantity on two bases, and the energy table must balance.
     """
 
     def _reopt_results(self, year_one_kwh=1000.0, annual_kwh=800.0):
-        # lambda = annual_kwh / year_one_kwh = 800 / 1000 = 0.8 by default.
+        # lambda = annual_kwh / year_one_kwh = 800 / 1000 = 0.8 by default,
+        # so the extra first-year PV is 25 percent of each interval's total.
         return {
             "inputs": {
                 "ElectricLoad": {"loads_kw": [10, 20]},
+                "ElectricTariff": {"tou_energy_rates_per_kwh": [0.1, 0.2]},
             },
             "outputs": {
                 "PV": {
@@ -167,29 +167,23 @@ class DispatchDisplayDeLevelizationTests(TestCase):
             },
         }
 
-    def test_pv_and_storage_dispatch_series_divide_by_lambda(self):
-        lam = 0.8
+    def test_extra_pv_moves_from_grid_to_pv_to_load(self):
         report = build_vietnam_report_data(
             self._reopt_results(), _cash_flow_result(),
             poa_irradiance_series=[100.0, 200.0],
         )
 
+        # Interval 0: PV total 6, extra 1.5, grid 7 absorbs all of it.
         row0 = report["dispatch_profile"][0]
-        self.assertAlmostEqual(row0["pv_to_load_kw"], 3 / lam)
-        self.assertAlmostEqual(row0["pv_to_storage_kw"], 1 / lam)
-        self.assertAlmostEqual(row0["pv_curtailed_kw"], 0 / lam)
-        self.assertAlmostEqual(row0["pv_to_grid_kw"], 2 / lam)
-        self.assertAlmostEqual(row0["storage_to_load_kw"], 0 / lam)
-        # pv_total is built from the already de-levelized components above.
-        self.assertAlmostEqual(row0["pv_total_kw"], (3 + 1 + 2 + 0) / lam)
-
+        self.assertAlmostEqual(row0["pv_to_load_kw"], 4.5)
+        self.assertAlmostEqual(row0["grid_to_load_kw"], 5.5)
+        self.assertAlmostEqual(row0["pv_total_kw"], 6 / 0.8)
+        # Interval 1: PV total 7, extra 1.75, grid 8 absorbs all of it.
         row1 = report["dispatch_profile"][1]
-        self.assertAlmostEqual(row1["pv_to_load_kw"], 4 / lam)
-        self.assertAlmostEqual(row1["pv_to_storage_kw"], 2 / lam)
-        self.assertAlmostEqual(row1["pv_curtailed_kw"], 1 / lam)
-        self.assertAlmostEqual(row1["storage_to_load_kw"], 1 / lam)
+        self.assertAlmostEqual(row1["pv_to_load_kw"], 5.75)
+        self.assertAlmostEqual(row1["grid_to_load_kw"], 6.25)
 
-    def test_grid_and_customer_load_series_are_not_divided(self):
+    def test_battery_export_curtailment_and_load_series_do_not_move(self):
         report = build_vietnam_report_data(
             self._reopt_results(), _cash_flow_result(),
             poa_irradiance_series=[100.0, 200.0],
@@ -199,29 +193,33 @@ class DispatchDisplayDeLevelizationTests(TestCase):
         row1 = report["dispatch_profile"][1]
         self.assertEqual(row0["load_kw"], 10)
         self.assertEqual(row1["load_kw"], 20)
-        self.assertEqual(row0["grid_to_load_kw"], 7)
-        self.assertEqual(row1["grid_to_load_kw"], 8)
+        self.assertEqual(row0["pv_to_storage_kw"], 1)
+        self.assertEqual(row0["pv_to_grid_kw"], 2)
+        self.assertEqual(row1["pv_curtailed_kw"], 1)
+        self.assertEqual(row1["storage_to_load_kw"], 1)
         self.assertEqual(row1["grid_to_storage_kw"], 1)
 
-    def test_annual_production_totals_divide_by_lambda(self):
-        lam = 0.8
+    def test_annual_production_totals_use_the_year_one_dispatch(self):
         report = build_vietnam_report_data(self._reopt_results(), _cash_flow_result())
 
         annual = report["annual_production"]
-        self.assertAlmostEqual(annual["pv_to_load_kwh"], (3 + 4) / lam)
-        self.assertAlmostEqual(annual["pv_to_storage_kwh"], (1 + 2) / lam)
-        self.assertAlmostEqual(annual["storage_to_load_kwh"], (0 + 1) / lam)
-        self.assertAlmostEqual(annual["pv_curtailed_kwh"], (0 + 1) / lam)
-        self.assertAlmostEqual(annual["pv_to_grid_kwh"], (2 + 0) / lam)
-        # Grid-sourced flows carry no PV levelization and must not move.
-        self.assertEqual(annual["grid_to_load_kwh"], 15)
+        self.assertAlmostEqual(annual["pv_to_load_kwh"], 4.5 + 5.75)
+        self.assertAlmostEqual(annual["grid_to_load_kwh"], 5.5 + 6.25)
+        self.assertAlmostEqual(annual["pv_to_storage_kwh"], 3)
+        self.assertAlmostEqual(annual["storage_to_load_kwh"], 1)
+        self.assertAlmostEqual(annual["pv_curtailed_kwh"], 1)
+        self.assertAlmostEqual(annual["pv_to_grid_kwh"], 2)
         self.assertEqual(annual["grid_to_storage_kwh"], 1)
+        # What leaves the grid is exactly what the extra PV now serves.
+        self.assertAlmostEqual(
+            annual["pv_to_load_kwh"] + annual["grid_to_load_kwh"], (3 + 4) + (7 + 8)
+        )
 
     def test_no_pv_energy_fields_is_a_no_op(self):
         # No year_one_energy_produced_kwh / annual_energy_produced_kwh means
-        # _levelization_factor returns 1.0, so dividing must be a no-op -
-        # this is what keeps every pre-existing fixture in this file (none
-        # of which set those two fields) byte-identical.
+        # _levelization_factor returns 1.0 and the solved dispatch is shown
+        # as is - this is what keeps every pre-existing fixture in this file
+        # (none of which set those two fields) byte-identical.
         report = build_vietnam_report_data(
             self._reopt_results(year_one_kwh=0.0, annual_kwh=0.0),
             _cash_flow_result(),
@@ -229,9 +227,9 @@ class DispatchDisplayDeLevelizationTests(TestCase):
 
         row0 = report["dispatch_profile"][0]
         self.assertEqual(row0["pv_to_load_kw"], 3)
-        self.assertEqual(row0["pv_to_storage_kw"], 1)
+        self.assertEqual(row0["grid_to_load_kw"], 7)
 
-    def test_performance_ratio_and_poa_irradiation_are_unchanged_by_de_levelization(self):
+    def test_performance_ratio_and_poa_irradiation_are_unchanged_by_the_year_one_restatement(self):
         """The regression most likely to slip through: production_factor_series
         is ALREADY a true first-year series (it equals
         year_one_energy_produced_kwh / size_kw for real REopt output), so

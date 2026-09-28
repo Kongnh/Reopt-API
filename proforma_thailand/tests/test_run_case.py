@@ -76,6 +76,35 @@ class SummarizeResultsTests(TestCase):
         self.assertNotAlmostEqual(summary["annual_pv_kwh"], 2424811.22, places=2)
 
 
+class GridOffsetOnAFirstYearBasisTests(TestCase):
+    """grid_offset_fraction feeds summary.json and the memo next to the
+    avoided emissions, so both must read the same first-year grid import."""
+
+    def test_grid_import_drops_by_the_absorbed_first_year_pv(self):
+        results = {
+            "outputs": {
+                "PV": {
+                    "size_kw": 1000.0,
+                    # lambda = 0.8, so the extra PV is 25 percent: 10 kW.
+                    "year_one_energy_produced_kwh": 1000.0,
+                    "annual_energy_produced_kwh": 800.0,
+                    "electric_to_load_series_kw": [40.0],
+                },
+                "ElectricStorage": {"size_kw": 0.0, "size_kwh": 0.0},
+                "ElectricLoad": {"annual_calculated_kwh": 100.0},
+                "ElectricUtility": {
+                    "annual_energy_supplied_kwh": 60.0,
+                    "electric_to_load_series_kw": [60.0],
+                },
+            },
+            "inputs": {"ElectricTariff": {"tou_energy_rates_per_kwh": [0.1]}},
+        }
+
+        summary = summarize_results(results, extras={})
+
+        self.assertAlmostEqual(summary["grid_offset_fraction"], 1 - 50.0 / 100.0)
+
+
 class PollCompletenessTests(TestCase):
     """status can read optimal while outputs are still being written."""
 

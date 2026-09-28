@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 
 from proforma_thailand.case_builder import build_thailand_case
 from proforma_thailand.report import build_thailand_report
+from proforma_vietnam.esco_pro_forma import _year_one_dispatch
 
 DEFAULT_API_URL = "http://localhost:8000/v3"
 HEADLINE_LABELS = ("IRR", "NPV", "Payback")
@@ -55,7 +56,12 @@ def summarize_results(results, extras):
     utility = outputs.get("ElectricUtility") or {}
 
     annual_load = float(load.get("annual_calculated_kwh") or 0.0)
-    annual_grid = float(utility.get("annual_energy_supplied_kwh") or 0.0)
+    # REopt's grid supply is levelized; the first-year import is lower by the
+    # grid energy the first-year PV displaces, the same basis as the avoided
+    # emissions in report.py.
+    annual_grid = float(utility.get("annual_energy_supplied_kwh") or 0.0) - (
+        _year_one_dispatch(results)["avoided_grid_kwh"]
+    )
     grid_offset = 0.0 if annual_load <= 0 else 1.0 - annual_grid / annual_load
 
     return {
