@@ -166,10 +166,11 @@ def _period_for(year, hour_index, schedule):
     day_of_year = hour_index // 24 + 1
     timestamp = datetime.strptime("{} {}".format(year, day_of_year), "%Y %j")
 
-    if timestamp.weekday() == 6 and not schedule["sunday_has_peak"]:
-        return "normal"
     if hour in schedule["off_peak_hours"]:
         return "off_peak"
+    # Sunday drops only the peak window; off-peak hours still apply.
+    if timestamp.weekday() == 6 and not schedule["sunday_has_peak"]:
+        return "normal"
     if hour in schedule["peak_hours"]:
         return "peak"
     return "normal"
