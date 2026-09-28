@@ -110,6 +110,26 @@ class VietnamEvnTariffTests(TestCase):
         self.assertEqual(current_tariff["tou_energy_rates_per_kwh"][jan_6_2025_23_index], 1190)
         self.assertEqual(decision_963_tariff["tou_energy_rates_per_kwh"][jan_6_2025_23_index], 1833)
 
+    def test_sunday_drops_peak_but_keeps_off_peak(self):
+        current_tariff = build_evn_tariff(year=2025, voltage_level="22-110kV", tou_schedule="current")
+        decision_963_tariff = build_evn_tariff(year=2025, voltage_level="22-110kV", tou_schedule="decision_963")
+
+        # 2025-01-05 is a Sunday.
+        jan_5_2025_2am_index = (datetime(2025, 1, 5, 2).timetuple().tm_yday - 1) * 24 + 2
+        jan_5_2025_5am_index = (datetime(2025, 1, 5, 5).timetuple().tm_yday - 1) * 24 + 5
+        jan_5_2025_10am_index = (datetime(2025, 1, 5, 10).timetuple().tm_yday - 1) * 24 + 10
+        jan_5_2025_19_index = (datetime(2025, 1, 5, 19).timetuple().tm_yday - 1) * 24 + 19
+        jan_5_2025_23_index = (datetime(2025, 1, 5, 23).timetuple().tm_yday - 1) * 24 + 23
+
+        self.assertEqual(current_tariff["tou_energy_rates_per_kwh"][jan_5_2025_2am_index], 1190)
+        self.assertEqual(current_tariff["tou_energy_rates_per_kwh"][jan_5_2025_10am_index], 1833)
+        self.assertEqual(current_tariff["tou_energy_rates_per_kwh"][jan_5_2025_19_index], 1833)
+        self.assertEqual(current_tariff["tou_energy_rates_per_kwh"][jan_5_2025_23_index], 1190)
+        self.assertEqual(decision_963_tariff["tou_energy_rates_per_kwh"][jan_5_2025_2am_index], 1190)
+        self.assertEqual(decision_963_tariff["tou_energy_rates_per_kwh"][jan_5_2025_5am_index], 1190)
+        self.assertEqual(decision_963_tariff["tou_energy_rates_per_kwh"][jan_5_2025_19_index], 1833)
+        self.assertEqual(decision_963_tariff["tou_energy_rates_per_kwh"][jan_5_2025_23_index], 1833)
+
     def test_example_payload_maps_builder_output_to_electric_tariff_inputs(self):
         payload = build_example_payload()
 
